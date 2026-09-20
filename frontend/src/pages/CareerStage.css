@@ -1,0 +1,42 @@
+.career-stage__card {
+  width: min(65vw, 940px);
+  min-height: 0;
+  height: auto;
+  justify-content: flex-start;
+}
+
+.career-stage__form {
+  gap: 0;
+}
+
+.career-stage__form .your-field__group {
+  margin-bottom: 0;
+}
+
+.career-stage__form .your-field__error {
+  margin-top: 0.85rem;
+}
+
+.career-stage__actions {
+  margin-top: 2.5rem;
+  padding-top: 0;
+  gap: 19px;
+}
+
+@media (max-width: 960px) {
+  .career-stage__card {
+    width: min(82vw, 720px);
+  }
+}
+
+@media (max-width: 640px) {
+  .career-stage__card {
+    width: 94%;
+  }
+
+  .career-stage__actions {
+    margin-top: 2.15rem;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+}
