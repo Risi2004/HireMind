@@ -149,7 +149,7 @@ export default function Login() {
                   className="auth-forgot-link"
                   onClick={() => navigate('/forgot-password')}
                 >
-                  Forgot?
+                  Forgot Password?
                 </span>
               </div>
 

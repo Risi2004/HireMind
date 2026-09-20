@@ -1,0 +1,949 @@
+/* ==========================================================================
+   HireMind Candidate Dashboard Styles (Dashboard.css)
+   ========================================================================== */
+
+.dash-page {
+  --dash-navy: #071833;
+  --dash-navy-surface: #0b2247;
+  --dash-border: #1e4b8a;
+  --dash-border-subtle: rgba(56, 189, 248, 0.3);
+  --dash-blue-accent: #2563eb;
+  --dash-cyan-accent: #38bdf8;
+  --dash-text-white: #ffffff;
+  --dash-text-muted: #94a3b8;
+  --dash-text-dark: #1e293b;
+  --dash-card-bg: #ffffff;
+
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  background-color: var(--dash-navy);
+  background-image: url('../assets/images/profile setup 1.png');
+  background-size: cover;
+  background-position: center top;
+  background-repeat: repeat;
+  color: var(--dash-text-white);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  font-family: 'Plus Jakarta Sans', 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ==========================================================================
+   1. TOP APPLICATION HEADER
+   ========================================================================== */
+.dash-header {
+  width: 100%;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.75rem;
+  background-color: #071833;
+  background-image: url('../assets/images/profile setup 1.png');
+  background-size: cover;
+  background-position: center top;
+  border-bottom: none;
+  border: none;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.dash-header__left {
+  display: flex;
+  align-items: center;
+}
+
+.dash-brand {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: transform 0.2s ease;
+}
+
+.dash-brand:hover {
+  transform: scale(1.04);
+}
+
+.dash-logo {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+}
+
+.dash-header__right {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.dash-header__icon-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.dash-header__icon-btn:hover,
+.dash-header__icon-btn.is-active {
+  background: rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+}
+
+.dash-header__bot-icon {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.dash-header__avatar {
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid rgba(147, 197, 253, 0.5);
+}
+
+.dash-header__avatar:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.5);
+}
+
+.dash-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ==========================================================================
+   2. MAIN 3-COLUMN WORKSPACE
+   ========================================================================== */
+.dash-workspace {
+  flex: 1;
+  width: 100%;
+  max-width: 1540px;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem 2rem;
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr) 330px;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+/* Common Panel Border Framing matching user design */
+.dash-sidebar,
+.dash-main-col,
+.dash-insights-col {
+  position: relative;
+}
+
+/* ==========================================================================
+   COLUMN 1: LEFT HISTORY SIDEBAR
+   ========================================================================== */
+.dash-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 18px;
+  padding: 1.25rem 1.1rem;
+  background: rgba(7, 24, 51, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.dash-search-box {
+  width: 100%;
+  background: #ffffff;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 1.15rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.dash-search-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+}
+
+.dash-search-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #0f172a;
+  width: 100%;
+}
+
+.dash-search-input::placeholder {
+  color: #94a3b8;
+}
+
+.dash-history-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.dash-history-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.dash-history-scroll::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.25);
+  border-radius: 4px;
+}
+
+.dash-section-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin-bottom: 0.75rem;
+  padding-left: 0.25rem;
+}
+
+.dash-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.dash-history-card {
+  background: var(--dash-card-bg);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+  border: 1px solid transparent;
+}
+
+.dash-history-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3), 0 0 12px rgba(56, 189, 248, 0.3);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.dash-history-card__icon-box {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dash-company-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.dash-history-card__info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dash-history-card__title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-history-card__subtitle {
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-history-empty {
+  font-size: 0.82rem;
+  color: #64748b;
+  font-style: italic;
+  padding: 0.5rem 0.25rem;
+}
+
+/* ==========================================================================
+   COLUMN 2: CENTER MAIN CONTENT
+   ========================================================================== */
+.dash-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 18px;
+  padding: 1.25rem 1.35rem 1.75rem;
+  background: rgba(7, 24, 51, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Welcome Header */
+.dash-welcome {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dash-welcome__title {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(1.85rem, 2.5vw, 2.4rem);
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.5px;
+}
+
+.dash-welcome__desc {
+  font-size: 0.88rem;
+  color: #cbd5e1;
+  line-height: 1.5;
+  max-width: 680px;
+}
+
+/* Hero Simulation Card */
+.dash-hero-card {
+  width: 100%;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(14, 39, 82, 0.92) 0%, rgba(8, 22, 49, 0.95) 100%);
+  border: 1px solid rgba(80, 140, 220, 0.4);
+  box-shadow:
+    0 20px 40px -10px rgba(0, 0, 0, 0.6),
+    0 0 30px rgba(56, 189, 248, 0.12);
+  padding: 2.25rem 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.dash-hero-card__glow {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 240px;
+  height: 240px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.dash-hero-card__content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.dash-hero-card__headline {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(1.75rem, 2.2vw, 2.15rem);
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1.18;
+  letter-spacing: -0.4px;
+}
+
+.dash-hero-card__subtext {
+  font-size: 0.86rem;
+  color: #cbd5e1;
+  max-width: 520px;
+  line-height: 1.5;
+}
+
+.dash-hero-card__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin-top: 1rem;
+}
+
+.dash-hero-btn {
+  background: #ffffff;
+  color: #002045;
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.6px;
+  border-radius: 9999px;
+  border: none;
+  padding: 0.75rem 1.4rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+
+.dash-hero-btn:hover {
+  background: #e2e8f0;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(56, 189, 248, 0.4);
+}
+
+.dash-btn-arrow {
+  width: 10px;
+  height: 10px;
+  transition: transform 0.2s ease;
+}
+
+.dash-hero-btn:hover .dash-btn-arrow {
+  transform: translateX(3px);
+}
+
+.dash-hero-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.dash-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #dbe1ff;
+  border: 1px solid rgba(150, 180, 240, 0.35);
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  background: rgba(15, 30, 60, 0.45);
+}
+
+.dash-tick-icon {
+  width: 11px;
+  height: 11px;
+}
+
+/* Recent Interviews Section */
+.dash-recent-panel {
+  width: 100%;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.dash-recent-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.dash-recent-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.dash-view-all-link {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--dash-blue-accent);
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: color 0.2s ease;
+}
+
+.dash-view-all-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.dash-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.dash-interview-row {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 0.95rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+}
+
+.dash-interview-row:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.dash-interview-row__left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.dash-interview-row__icon-box {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dash-interview-row__details {
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-interview-row__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.dash-interview-row__subtitle {
+  font-size: 0.78rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.dash-interview-row__right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.dash-score-pill {
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.35rem 0.85rem;
+  border-radius: 9999px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  white-space: nowrap;
+}
+
+.dash-action-circle-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dash-action-circle-btn:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.dash-action-circle-btn:hover .dash-arrow-diag {
+  filter: brightness(0) invert(1);
+}
+
+.dash-arrow-diag {
+  width: 10px;
+  height: 10px;
+}
+
+/* ==========================================================================
+   COLUMN 3: RIGHT INSIGHTS & AI CHATBOT SIDEBAR
+   ========================================================================== */
+.dash-insights-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 18px;
+  padding: 1.25rem 1.15rem;
+  background: rgba(7, 24, 51, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Continue Improving Section */
+.dash-improving-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.dash-improving-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ffffff;
+  padding-left: 0.25rem;
+}
+
+.dash-improving-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dash-improving-card {
+  border-radius: 14px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: transform 0.2s ease;
+}
+
+.dash-improving-card:hover {
+  transform: translateY(-2px);
+}
+
+/* Card Themes */
+.dash-improving-card--red {
+  background: rgba(50, 45, 65, 0.85);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+.dash-improving-card--blue {
+  background: rgba(22, 38, 70, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.dash-improving-card--light {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+}
+
+.dash-improving-card__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dash-card-icon-img {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+
+.dash-improving-card__tag {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.dash-improving-card__tag--red {
+  color: #f87171;
+}
+
+.dash-improving-card__tag--blue {
+  color: #ffffff;
+}
+
+.dash-improving-card__tag--dark {
+  color: #1e293b;
+}
+
+.dash-improving-card__body {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.dash-improving-card__body--dark {
+  color: #334155;
+}
+
+.dash-practice-now-btn {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+  background: #ffffff;
+  color: #1e293b;
+  border: 1px solid #cbd5e1;
+  border-radius: 9999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.dash-practice-now-btn:hover {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+/* AI Chatbot Docked Widget */
+.dash-chat-widget {
+  background: rgba(10, 25, 55, 0.95);
+  border: 1px solid rgba(80, 140, 220, 0.45);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-chat-widget__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: rgba(8, 20, 46, 0.98);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.dash-chat-widget__header-bot {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.dash-chat-bot-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+.dash-chat-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.dash-chat-close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.95rem;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.dash-chat-close-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dash-chat-widget__body {
+  padding: 1rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 200px;
+  overflow-y: auto;
+  background-image: radial-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 0);
+  background-size: 16px 16px;
+}
+
+.dash-chat-bubble {
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  max-width: 90%;
+  animation: fadeInMsg 0.25s ease;
+}
+
+@keyframes fadeInMsg {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dash-chat-bubble--bot {
+  background: #ffffff;
+  color: #0f172a;
+  border-bottom-left-radius: 2px;
+  align-self: flex-start;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.dash-chat-bubble--user {
+  background: #2563eb;
+  color: #ffffff;
+  border-bottom-right-radius: 2px;
+  align-self: flex-end;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+.dash-chat-bubble__text {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.dash-chat-widget__footer {
+  padding: 0.65rem 0.85rem;
+  background: rgba(6, 17, 39, 0.98);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dash-chat-input {
+  flex: 1;
+  background: #ffffff;
+  border: none;
+  outline: none;
+  border-radius: 9999px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: #0f172a;
+  font-family: inherit;
+}
+
+.dash-chat-input::placeholder {
+  color: #94a3b8;
+}
+
+.dash-chat-send-btn {
+  background: #2563eb;
+  border: none;
+  color: #ffffff;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.dash-chat-send-btn:hover {
+  background: #38bdf8;
+  transform: scale(1.05);
+}
+
+/* ==========================================================================
+   RESPONSIVE BREAKPOINTS
+   ========================================================================== */
+@media (max-width: 1200px) {
+  .dash-workspace {
+    grid-template-columns: 260px 1fr;
+    gap: 1.15rem;
+  }
+
+  .dash-insights-col {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .dash-workspace {
+    grid-template-columns: 1fr;
+    padding: 1rem 1rem 2rem;
+  }
+
+  .dash-sidebar {
+    max-height: 380px;
+  }
+
+  .dash-history-scroll {
+    max-height: 240px;
+  }
+
+  .dash-insights-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dash-header {
+    padding: 0 1rem;
+  }
+
+  .dash-hero-card {
+    padding: 1.75rem 1.25rem;
+  }
+
+  .dash-hero-card__actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dash-hero-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .dash-hero-badges {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .dash-recent-panel {
+    padding: 1.25rem 1rem;
+  }
+
+  .dash-interview-row {
+    padding: 0.85rem 0.95rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .dash-interview-row__right {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 480px) {
+  .dash-welcome__title {
+    font-size: 1.65rem;
+  }
+
+  .dash-hero-card__headline {
+    font-size: 1.55rem;
+  }
+
+  .dash-pill-badge {
+    font-size: 0.68rem;
+    padding: 0.25rem 0.55rem;
+  }
+}
