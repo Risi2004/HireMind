@@ -1,0 +1,123 @@
+/* ==========================================================================
+   HIREMIND REUSABLE NAVBAR (Navbar.css)
+   ========================================================================== */
+
+.app-navbar {
+  width: 100%;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.75rem;
+  background-color: #071833;
+  background-image: url('../assets/images/profile setup 1.png');
+  background-size: cover;
+  background-position: center top;
+  border: none;
+  border-bottom: none;
+  outline: none;
+  box-shadow: none;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+/* Left Section */
+.app-navbar__left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.app-navbar__brand {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: transform 0.2s ease;
+  outline: none;
+}
+
+.app-navbar__brand:hover {
+  transform: scale(1.04);
+}
+
+.app-navbar__logo {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+}
+
+/* Left Badge (e.g. Evaluation Report, Live Session) */
+.app-navbar__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.85rem;
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 9999px;
+  color: #38bdf8;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.app-navbar__badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+  display: inline-block;
+}
+
+.app-navbar__badge-text {
+  line-height: 1;
+}
+
+/* Right Section */
+.app-navbar__right {
+  display: flex;
+  align-items: center;
+  gap: 1.15rem;
+}
+
+/* AI Coach Icon Button */
+.app-navbar__icon-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.app-navbar__icon-btn:hover,
+.app-navbar__icon-btn.is-active {
+  background: rgba(56, 189, 248, 0.15);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+}
+
+.app-navbar__bot-icon {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+@media (max-width: 640px) {
+  .app-navbar {
+    padding: 0 1rem;
+    height: 56px;
+  }
+  .app-navbar__logo {
+    height: 32px;
+  }
+  .app-navbar__badge {
+    display: none;
+  }
+}

@@ -1,0 +1,999 @@
+/* ==========================================================================
+   HIREMIND - MY PROFILE STYLESHEET
+   ========================================================================== */
+
+.prof-page {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  width: 100%;
+  background-color: #071833;
+  background-image: url('../assets/images/profile setup 1.png');
+  background-size: cover;
+  background-position: center top;
+  background-repeat: repeat;
+  color: #f8fafc;
+  font-family: 'Plus Jakarta Sans', 'Manrope', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Background Ambience */
+.prof-bg-dots {
+  display: none;
+}
+
+/* Ambient Glowing Background Orbs */
+.prof-glow-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(140px);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.5;
+}
+
+.prof-glow-orb--top {
+  top: -80px;
+  right: 15%;
+  width: 460px;
+  height: 380px;
+  background: radial-gradient(circle, rgba(30, 58, 138, 0.35) 0%, transparent 70%);
+}
+
+.prof-glow-orb--bottom {
+  bottom: -60px;
+  left: 10%;
+  width: 520px;
+  height: 420px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.12) 0%, transparent 70%);
+}
+
+/* ==========================================================================
+   TOP APPLICATION BAR
+   ========================================================================== */
+.prof-top-nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.75rem;
+  height: 64px;
+  background-color: #071833;
+  background-image: url('../assets/images/profile setup 1.png');
+  background-size: cover;
+  background-position: center top;
+  border-bottom: none;
+  border: none;
+}
+
+.prof-top-nav__left {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: opacity 0.2s;
+}
+
+.prof-top-nav__left:hover {
+  opacity: 0.85;
+}
+
+.prof-top-nav__logo {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
+}
+
+.prof-top-nav__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.4);
+  cursor: default;
+}
+
+/* ==========================================================================
+   MAIN CONTENT CONTAINER
+   ========================================================================== */
+.prof-container {
+  position: relative;
+  z-index: 10;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 24px 28px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ==========================================================================
+   PAGE TITLE & LOGOUT ROW
+   ========================================================================== */
+.prof-title-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.prof-title-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.prof-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: #8c90a1;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.2s ease;
+}
+
+.prof-back-btn:hover {
+  color: #38bdf8;
+  transform: translateX(-2px);
+}
+
+.prof-back-icon {
+  width: 11px;
+  height: 11px;
+}
+
+.prof-heading {
+  font-size: 32px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+/* Log Out Button */
+.prof-logout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 8px 16px;
+  color: #f1f5f9;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.prof-logout-btn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+  transform: translateY(-1px);
+}
+
+.prof-logout-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+/* ==========================================================================
+   1. HERO / PROFILE SUMMARY CARD
+   ========================================================================== */
+.prof-hero-card {
+  background: #091732;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 24px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.5);
+}
+
+.prof-hero-user {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.prof-avatar-wrap {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+}
+
+.prof-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+}
+
+.prof-avatar-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2.5px solid #091732;
+}
+
+.prof-hero-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.prof-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prof-user-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.prof-tier-pill {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.prof-user-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.prof-email-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 5px 12px;
+  width: fit-content;
+  margin-top: 4px;
+}
+
+.prof-email-icon {
+  width: 13px;
+  height: 10px;
+  opacity: 0.8;
+}
+
+.prof-email-pill span {
+  font-size: 12px;
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+/* Right Side: Upload Resume Card */
+.prof-resume-card {
+  width: 320px;
+  max-width: 100%;
+  background: rgba(6, 14, 31, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.prof-resume-card:hover {
+  background: rgba(8, 18, 40, 0.95);
+  border-color: rgba(56, 189, 248, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.4);
+}
+
+.prof-resume-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prof-resume-file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.prof-resume-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.prof-resume-filename {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prof-resume-replace-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.prof-resume-replace-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.prof-resume-cta-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: center;
+  padding: 4px 0 2px;
+}
+
+.prof-resume-cta-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.prof-resume-cta-desc {
+  margin: 0;
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+/* ==========================================================================
+   2. MIDDLE ROW (3 COLUMNS: Career Info, Career Interests, Connected Profiles)
+   ========================================================================== */
+.prof-middle-grid {
+  display: grid;
+  grid-template-columns: 1fr 0.9fr 1fr;
+  gap: 20px;
+}
+
+.prof-card {
+  background: #091732;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  box-shadow: 0 10px 24px -6px rgba(0, 0, 0, 0.4);
+}
+
+.prof-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.prof-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.prof-card-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prof-card-icon-wrap.is-purple {
+  filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.4));
+}
+
+.prof-card-icon-wrap.is-purple img {
+  filter: invert(50%) sepia(85%) saturate(1400%) hue-rotate(245deg) brightness(1.2);
+}
+
+.prof-card-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.prof-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.prof-card-action-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.75;
+  transition: all 0.2s ease;
+}
+
+.prof-card-action-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.prof-action-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Career Information Fields */
+.prof-career-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prof-career-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.prof-field-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #8c90a1;
+  text-transform: uppercase;
+}
+
+.prof-field-val {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+/* Inline Career Edit Form */
+.prof-career-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prof-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prof-edit-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #8c90a1;
+}
+
+.prof-edit-input {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #ffffff;
+  outline: none;
+}
+
+.prof-edit-input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
+}
+
+.prof-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.prof-btn-save {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.prof-btn-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   CARD 2: CAREER INTERESTS (Cyan Accent Dashed Frame Matching Screenshot)
+   ========================================================================== */
+.prof-card--interests {
+  position: relative;
+  border: 1.5px dashed #0284c7;
+  box-shadow: 0 0 18px rgba(2, 132, 199, 0.25);
+  background: #091732;
+}
+
+.prof-interests-header {
+  justify-content: center;
+}
+
+.prof-interests-title-wrap {
+  border: 1px dashed rgba(56, 189, 248, 0.5);
+  padding: 3px 12px;
+  border-radius: 4px;
+}
+
+.prof-interests-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #7dd3fc;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.prof-interests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.prof-interest-pill {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+}
+
+.prof-interest-pill:hover {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.prof-interest-remove {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 0.2s;
+}
+
+.prof-interest-remove:hover {
+  color: #f87171;
+}
+
+.prof-interest-pill--add {
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  background: rgba(14, 165, 233, 0.05);
+  color: #38bdf8;
+  cursor: pointer;
+}
+
+.prof-interest-pill--add:hover {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+}
+
+.prof-add-icon {
+  width: 9px;
+  height: 9px;
+  filter: brightness(0) invert(1);
+}
+
+.prof-interest-add-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prof-interest-input {
+  flex: 1;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 16px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #ffffff;
+  outline: none;
+}
+
+.prof-interest-add-btn {
+  background: #0284c7;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.prof-interest-cancel-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* ==========================================================================
+   CARD 3: CONNECTED PROFILES
+   ========================================================================== */
+.prof-card--connected {
+  background: #091732;
+}
+
+.prof-connected-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prof-connected-item {
+  background: rgba(10, 20, 44, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transition: all 0.2s ease;
+}
+
+.prof-connected-item:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(13, 25, 54, 0.95);
+}
+
+.prof-connected-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.prof-soc-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.prof-soc-icon-wrap.linkedin {
+  background: #0a66c2;
+}
+
+.prof-soc-icon-wrap.github {
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.prof-soc-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.prof-soc-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.prof-soc-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.prof-soc-status {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.prof-soc-status.is-connected {
+  color: #94a3b8;
+}
+
+.prof-soc-action {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.65;
+  transition: opacity 0.2s;
+}
+
+.prof-soc-action:hover {
+  opacity: 1;
+}
+
+.prof-unlink-icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* ==========================================================================
+   3. BOTTOM CARD: SKILLS & EXPERTISE
+   ========================================================================== */
+.prof-card--skills {
+  margin-top: 4px;
+}
+
+.prof-add-skill-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.prof-add-skill-trigger:hover {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.prof-btn-add-icon {
+  width: 9px;
+  height: 9px;
+}
+
+.prof-add-skill-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.prof-add-skill-input {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  color: #ffffff;
+  outline: none;
+  width: 260px;
+}
+
+.prof-skill-submit-btn {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.prof-skill-close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.prof-skills-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.prof-skill-chip {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.prof-skill-chip:hover {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(15, 23, 42, 0.95);
+  transform: translateY(-1px);
+}
+
+.prof-skill-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+}
+
+.prof-skill-del-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.65;
+  transition: opacity 0.2s;
+}
+
+.prof-skill-del-btn:hover {
+  opacity: 1;
+}
+
+.prof-skill-del-icon {
+  width: 9px;
+  height: 9px;
+}
+
+/* ==========================================================================
+   RESPONSIVE DESIGN (Tablets & Mobile Devices)
+   ========================================================================== */
+
+/* Tablets (<= 1024px) */
+@media (max-width: 1024px) {
+  .prof-middle-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .prof-card--connected {
+    grid-column: span 2;
+  }
+
+  .prof-hero-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .prof-resume-card {
+    width: 100%;
+  }
+}
+
+/* Mobile Devices (<= 768px) */
+@media (max-width: 768px) {
+  .prof-container {
+    padding: 16px 16px 40px;
+    gap: 16px;
+  }
+
+  .prof-top-nav {
+    padding: 12px 16px;
+  }
+
+  .prof-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .prof-heading {
+    font-size: 26px;
+  }
+
+  .prof-hero-card {
+    padding: 18px 16px;
+    gap: 18px;
+  }
+
+  .prof-hero-user {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .prof-middle-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .prof-card--connected {
+    grid-column: span 1;
+  }
+
+  .prof-card {
+    padding: 18px 16px;
+  }
+
+  .prof-add-skill-input {
+    width: 100%;
+  }
+
+  .prof-add-skill-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

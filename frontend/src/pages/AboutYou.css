@@ -1,0 +1,174 @@
+.about-you__card {
+  width: min(65vw, 940px);
+}
+
+.about-you__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.about-you__user-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.about-you__title {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.5vw, 1.2rem);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+
+.about-you__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.about-you__dropzone {
+  margin-top: clamp(1.35rem, 3vh, 1.85rem);
+  width: min(75%, 640px);
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 1.25rem 1rem;
+  border: 1px solid rgba(120, 155, 200, 0.18);
+  border-radius: 11px;
+  background: rgba(6, 16, 36, 0.72);
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.about-you__dropzone:hover,
+.about-you__dropzone.is-dragging {
+  background: rgba(12, 28, 58, 0.82);
+  border-color: rgba(150, 190, 255, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(140, 180, 255, 0.12);
+}
+
+.about-you__dropzone:focus-visible {
+  outline: 2px solid #7eb6ff;
+  outline-offset: 2px;
+}
+
+.about-you__upload-icon-wrap {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(208, 188, 255, 0.14);
+}
+
+.about-you__upload-icon {
+  width: 18px;
+  height: auto;
+}
+
+.about-you__upload-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-you__upload-hint {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.about-you__clear {
+  margin-top: 0.15rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #9fc0ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.about-you__error {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #ffb4b4;
+  text-align: center;
+}
+
+.about-you__actions {
+  margin-top: clamp(1.75rem, 3.5vh, 2.35rem);
+}
+
+.profile-btn--previous {
+  border: 1px solid rgba(120, 170, 255, 0.35);
+  background: linear-gradient(180deg, #1c4f9c 0%, #153a78 48%, #102c5c 100%);
+  box-shadow:
+    0 0 6px rgba(50, 120, 230, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.profile-btn--previous:hover {
+  background: linear-gradient(180deg, #245db3 0%, #1a458c 48%, #14356d 100%);
+  box-shadow:
+    0 0 8px rgba(70, 140, 245, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+@media (max-width: 960px) {
+  .about-you__card {
+    width: min(82vw, 720px);
+  }
+
+  .about-you__dropzone {
+    width: min(82%, 560px);
+  }
+}
+
+@media (max-width: 640px) {
+  .about-you__card {
+    width: 100%;
+    margin-top: 3.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .about-you__dropzone {
+    width: 100%;
+    height: 180px;
+    padding: 1rem;
+  }
+
+  .about-you__actions {
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+    align-items: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .about-you__dropzone {
+    height: 160px;
+  }
+
+  .about-you__dropzone-text {
+    font-size: 0.8rem;
+  }
+}
