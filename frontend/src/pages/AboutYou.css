@@ -144,16 +144,31 @@
 
 @media (max-width: 640px) {
   .about-you__card {
-    width: 94%;
+    width: 100%;
+    margin-top: 3.5rem;
+    margin-bottom: 1.5rem;
   }
 
   .about-you__dropzone {
     width: 100%;
     height: 180px;
+    padding: 1rem;
   }
 
   .about-you__actions {
     flex-direction: column;
     gap: 0.75rem;
+    width: 100%;
+    align-items: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .about-you__dropzone {
+    height: 160px;
+  }
+
+  .about-you__dropzone-text {
+    font-size: 0.8rem;
   }
 }

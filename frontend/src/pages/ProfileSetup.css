@@ -10,7 +10,8 @@
   justify-content: center;
   align-items: center;
   padding: clamp(1rem, 3vh, 1.5rem) clamp(1rem, 4vw, 2rem);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background-color: #071833;
   background-image: url('../assets/images/profile setup 1.png');
   background-size: cover;
@@ -222,27 +223,29 @@
 @media (max-width: 640px) {
   .profile-setup {
     padding: 1rem 0.75rem;
-    overflow: auto;
+    align-items: flex-start;
   }
 
   .profile-setup__card {
-    width: 94%;
+    width: 100%;
     min-height: 0;
-    padding: 1.75rem 1.1rem 1.5rem;
+    margin-top: 3.5rem;
+    margin-bottom: 1.5rem;
+    padding: 1.75rem 1.15rem 1.5rem;
     border-radius: 22px;
   }
 
   .profile-setup__title {
     max-width: none;
-    font-size: 1.4rem;
+    font-size: 1.35rem;
   }
 
   .profile-setup__desc {
-    font-size: 0.84rem;
+    font-size: 0.85rem;
   }
 
   .github-card {
-    width: min(100%, 260px);
+    width: min(100%, 280px);
   }
 
   .profile-setup__actions {
@@ -250,10 +253,34 @@
     gap: 0.75rem;
     margin-top: 1.75rem;
     padding-top: 0;
+    width: 100%;
+    align-items: center;
   }
 
   .profile-btn {
-    width: min(100%, 220px);
+    width: min(100%, 280px);
+  }
+}
+
+@media (max-width: 480px) {
+  .profile-setup {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .profile-setup__card {
+    padding: 1.5rem 0.85rem 1.25rem;
+    border-radius: 18px;
+    margin-top: 3.25rem;
+  }
+
+  .profile-setup__title {
+    font-size: 1.2rem;
+  }
+
+  .profile-btn {
+    width: 100%;
+    font-size: 0.84rem;
+    padding: 0.75rem 1rem;
   }
 }
 

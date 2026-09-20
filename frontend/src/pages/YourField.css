@@ -153,8 +153,10 @@
 
 @media (max-width: 640px) {
   .your-field__card {
-    width: 94%;
+    width: 100%;
     min-height: 0;
+    margin-top: 3.5rem;
+    margin-bottom: 1.5rem;
   }
 
   .your-field__form {
@@ -162,12 +164,32 @@
   }
 
   .your-field__option {
-    font-size: 0.74rem;
-    padding: 0 0.25rem;
+    font-size: 0.78rem;
+    padding: 0 0.35rem;
   }
 
   .your-field__actions {
     flex-direction: column;
     gap: 0.75rem;
+    width: 100%;
+    align-items: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .your-field__segment {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .your-field__option {
+    padding: 0.65rem 0.75rem;
+    font-size: 0.85rem;
+    border-right: 0;
+    border-bottom: 1px solid rgba(190, 200, 215, 0.7);
+  }
+
+  .your-field__option:last-child {
+    border-bottom: 0;
   }
 }
