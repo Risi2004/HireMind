@@ -157,6 +157,17 @@
   color: #ffffff;
 }
 
+.prof-dropdown-item:active {
+  transform: translateY(0);
+}
+
+.prof-dropdown-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 .prof-dropdown-item:hover svg {
   transform: translateX(2px);
   color: #38bdf8;

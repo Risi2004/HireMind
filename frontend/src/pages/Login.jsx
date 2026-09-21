@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import logoImg from '../assets/images/logo.png'
 import logoDarkImg from '../assets/images/logo-dark.png'
 import './Auth.css'
 
 export default function Login() {
   const navigate = useNavigate()
+  const { login, loading } = useAuth()
 
   const [formData, setFormData] = useState({
     email: '',
@@ -14,9 +16,13 @@ export default function Login() {
   })
 
   const [error, setError] = useState('')
+  const [needsVerificationEmail, setNeedsVerificationEmail] = useState(null)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
+    setError('')
+    setNeedsVerificationEmail(null)
+
     if (!formData.email.trim()) {
       setError('Please enter your email address.')
       return
@@ -26,13 +32,17 @@ export default function Login() {
       return
     }
 
-    setError('')
-    // Onboarding / App entry redirection
-    navigate('/profile-setup')
-  }
-
-  const handleGoogleAuth = () => {
-    navigate('/profile-setup')
+    try {
+      await login(formData.email.trim(), formData.password, formData.rememberMe)
+      navigate('/dashboard')
+    } catch (err) {
+      if (err.needsVerification) {
+        setNeedsVerificationEmail(err.email || formData.email.trim())
+        setError(err.message || 'Please verify your email before logging in.')
+      } else {
+        setError(err.message || 'Invalid email or password.')
+      }
+    }
   }
 
   return (
@@ -67,7 +77,7 @@ export default function Login() {
             <button
               type="button"
               className="auth-google-btn"
-              onClick={handleGoogleAuth}
+              onClick={() => navigate('/profile-setup')}
             >
               <svg width="18" height="18" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z" />
@@ -103,9 +113,17 @@ export default function Login() {
             </div>
 
             <form className="auth-form" onSubmit={handleSubmit}>
-              {error && (
-                <div style={{ color: '#f87171', fontSize: '0.84rem', textAlign: 'center' }}>
-                  {error}
+              {error && <div className="auth-alert-error">{error}</div>}
+
+              {needsVerificationEmail && (
+                <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                  <button
+                    type="button"
+                    className="otp-resend-btn"
+                    onClick={() => navigate('/signup')}
+                  >
+                    Go to Verification &rarr;
+                  </button>
                 </div>
               )}
 
@@ -153,8 +171,10 @@ export default function Login() {
                 </span>
               </div>
 
-              <button type="submit" className="auth-submit-btn">
-                Login Account <span className="auth-btn-arrow">→</span>
+              <button type="submit" className="auth-submit-btn" disabled={loading}>
+                {loading ? 'Signing In...' : (
+                  <>Login Account <span className="auth-btn-arrow">→</span></>
+                )}
               </button>
             </form>
           </div>

@@ -1,6 +1,8 @@
 import { createContext, useContext, useMemo, useState } from 'react'
+import { useAuth } from './AuthContext'
 
 const ProfileSetupContext = createContext(null)
+
 
 const EXPERIENCE_LEVELS = ['Beginner', 'Intermediate', 'Experienced']
 
@@ -47,8 +49,14 @@ export function ProfileSetupProvider({ children }) {
   const [careerStage, setCareerStage] = useState('')
   const [customCareerStage, setCustomCareerStage] = useState('')
 
-  // No auth system yet — fallback keeps the avatar initial consistent with the design.
-  const user = useMemo(() => ({ name: 'Jordan' }), [])
+  const { user: authUser } = useAuth()
+
+  // Use authenticated user's name if logged in, fallback to Jordan
+  const user = useMemo(
+    () => ({ name: authUser?.firstName || 'Jordan' }),
+    [authUser?.firstName]
+  )
+
 
   const value = useMemo(
     () => ({
