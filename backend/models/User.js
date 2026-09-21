@@ -48,6 +48,47 @@ const userSchema = new mongoose.Schema(
       enum: ['Beginner', 'Intermediate', 'Experienced'],
       default: 'Beginner',
     },
+    isProfileSetupCompleted: {
+      type: Boolean,
+      default: false,
+    },
+    resumeUrl: {
+      type: String,
+      default: '',
+    },
+    resumeFileName: {
+      type: String,
+      default: '',
+    },
+    github: {
+      connected: {
+        type: Boolean,
+        default: false,
+      },
+      username: {
+        type: String,
+        default: '',
+      },
+      profileUrl: {
+        type: String,
+        default: '',
+      },
+      avatarUrl: {
+        type: String,
+        default: '',
+      },
+      name: {
+        type: String,
+        default: '',
+      },
+      publicRepos: {
+        type: Number,
+        default: 0,
+      },
+      connectedAt: {
+        type: Date,
+      },
+    },
   },
   {
     timestamps: true,

@@ -1,22 +1,50 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import logoImg from '../assets/images/logo.png'
 import logoDarkImg from '../assets/images/logo-dark.png'
 import './Auth.css'
 
 export default function ForgotPassword() {
   const navigate = useNavigate()
+  const { forgotPassword, resetPassword, loading } = useAuth()
+
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [verificationCode, setVerificationCode] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false)
   const [isResetComplete, setIsResetComplete] = useState(false)
   const [error, setError] = useState('')
   const [resendNotice, setResendNotice] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(60)
+  const [canResend, setCanResend] = useState(false)
 
-  const handleSendCode = (e) => {
+  // Resend cooldown timer
+  useEffect(() => {
+    let timer
+    if (submitted && !isResetComplete && resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => {
+          if (prev <= 1) {
+            setCanResend(true)
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+    }
+    return () => {
+      if (timer) clearInterval(timer)
+    }
+  }, [submitted, isResetComplete, resendCooldown])
+
+  const handleSendCode = async (e) => {
     e.preventDefault()
+    setError('')
+
     if (!email.trim()) {
       setError('Please enter your email address.')
       return
@@ -26,12 +54,20 @@ export default function ForgotPassword() {
       return
     }
 
-    setError('')
-    setSubmitted(true)
+    try {
+      await forgotPassword(email.trim())
+      setSubmitted(true)
+      setResendCooldown(60)
+      setCanResend(false)
+    } catch (err) {
+      setError(err.message || 'Failed to send verification code.')
+    }
   }
 
-  const handleResetPassword = (e) => {
+  const handleResetPassword = async (e) => {
     e.preventDefault()
+    setError('')
+
     if (!verificationCode.trim()) {
       setError('Please enter the 6-digit verification code.')
       return
@@ -40,22 +76,35 @@ export default function ForgotPassword() {
       setError('Please enter a new password.')
       return
     }
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long.')
+      return
+    }
     if (newPassword !== confirmNewPassword) {
       setError('Passwords do not match.')
       return
     }
 
+    try {
+      await resetPassword(email.trim(), verificationCode.trim(), newPassword)
+      setIsResetComplete(true)
+    } catch (err) {
+      setError(err.message || 'Failed to reset password.')
+    }
+  }
+
+  const handleResend = async () => {
+    if (!canResend) return
     setError('')
-    setIsResetComplete(true)
-  }
-
-  const handleResend = () => {
-    setResendNotice(true)
-    setTimeout(() => setResendNotice(false), 3000)
-  }
-
-  const handleGoogleAuth = () => {
-    navigate('/profile-setup')
+    try {
+      await forgotPassword(email.trim())
+      setResendCooldown(60)
+      setCanResend(false)
+      setResendNotice(true)
+      setTimeout(() => setResendNotice(false), 4000)
+    } catch (err) {
+      setError(err.message || 'Failed to resend code.')
+    }
   }
 
   return (
@@ -90,7 +139,7 @@ export default function ForgotPassword() {
             <button
               type="button"
               className="auth-google-btn"
-              onClick={handleGoogleAuth}
+              onClick={() => navigate('/profile-setup')}
             >
               <svg width="18" height="18" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z" />
@@ -122,16 +171,12 @@ export default function ForgotPassword() {
                 <div className="auth-card-header">
                   <h2 className="auth-card-title">Forgot Password?</h2>
                   <p className="auth-card-desc">
-                    Enter the email linked to your HireMind account and we'll send you a verification code.
+                    Enter the email linked to your HireMind account and we&apos;ll send you a 6-digit verification code.
                   </p>
                 </div>
 
                 <form className="auth-form" onSubmit={handleSendCode}>
-                  {error && (
-                    <div style={{ color: '#f87171', fontSize: '0.84rem', textAlign: 'center' }}>
-                      {error}
-                    </div>
-                  )}
+                  {error && <div className="auth-alert-error">{error}</div>}
 
                   <div className="auth-form-group">
                     <label className="auth-label" htmlFor="reset-email">Email Address</label>
@@ -149,8 +194,10 @@ export default function ForgotPassword() {
                     />
                   </div>
 
-                  <button type="submit" className="auth-submit-btn">
-                    Send Verification Code <span className="auth-btn-arrow">→</span>
+                  <button type="submit" className="auth-submit-btn" disabled={loading}>
+                    {loading ? 'Sending Code...' : (
+                      <>Send Verification Code <span className="auth-btn-arrow">→</span></>
+                    )}
                   </button>
 
                   <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
@@ -174,14 +221,10 @@ export default function ForgotPassword() {
                 </div>
 
                 <form className="auth-form" onSubmit={handleResetPassword}>
-                  {error && (
-                    <div style={{ color: '#f87171', fontSize: '0.84rem', textAlign: 'center' }}>
-                      {error}
-                    </div>
-                  )}
+                  {error && <div className="auth-alert-error">{error}</div>}
 
                   {resendNotice && (
-                    <div style={{ color: '#38bdf8', fontSize: '0.84rem', textAlign: 'center' }}>
+                    <div className="auth-alert-success">
                       A new verification code has been dispatched to your email.
                     </div>
                   )}
@@ -191,70 +234,118 @@ export default function ForgotPassword() {
                     <input
                       id="verificationCode"
                       type="text"
-                      className="auth-input"
+                      inputMode="numeric"
+                      className="auth-input auth-code-input"
                       placeholder="Enter 6-digit code"
                       maxLength={6}
                       value={verificationCode}
                       onChange={(e) => {
-                        setVerificationCode(e.target.value)
+                        setVerificationCode(e.target.value.replace(/\D/g, ''))
                         if (error) setError('')
                       }}
                       required
-                      style={{ letterSpacing: '2px', textAlign: 'center', fontWeight: '700' }}
                     />
                   </div>
 
+
                   <div className="auth-form-group">
                     <label className="auth-label" htmlFor="newPassword">New Password</label>
-                    <input
-                      id="newPassword"
-                      type="password"
-                      className="auth-input"
-                      placeholder="Enter new password"
-                      value={newPassword}
-                      onChange={(e) => {
-                        setNewPassword(e.target.value)
-                        if (error) setError('')
-                      }}
-                      required
-                    />
+                    <div className="auth-input-password-wrap">
+                      <input
+                        id="newPassword"
+                        type={showNewPassword ? 'text' : 'password'}
+                        className="auth-input"
+                        placeholder="Enter new password (6+ chars)"
+                        value={newPassword}
+                        onChange={(e) => {
+                          setNewPassword(e.target.value)
+                          if (error) setError('')
+                        }}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="auth-password-toggle-btn"
+                        onClick={() => setShowNewPassword((prev) => !prev)}
+                        aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                        title={showNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showNewPassword ? (
+                          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+                          </svg>
+                        ) : (
+                          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                            <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="auth-form-group">
                     <label className="auth-label" htmlFor="confirmNewPassword">Confirm New Password</label>
-                    <input
-                      id="confirmNewPassword"
-                      type="password"
-                      className="auth-input"
-                      placeholder="Confirm new password"
-                      value={confirmNewPassword}
-                      onChange={(e) => {
-                        setConfirmNewPassword(e.target.value)
-                        if (error) setError('')
-                      }}
-                      required
-                    />
+                    <div className="auth-input-password-wrap">
+                      <input
+                        id="confirmNewPassword"
+                        type={showConfirmNewPassword ? 'text' : 'password'}
+                        className="auth-input"
+                        placeholder="Confirm new password"
+                        value={confirmNewPassword}
+                        onChange={(e) => {
+                          setConfirmNewPassword(e.target.value)
+                          if (error) setError('')
+                        }}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="auth-password-toggle-btn"
+                        onClick={() => setShowConfirmNewPassword((prev) => !prev)}
+                        aria-label={showConfirmNewPassword ? 'Hide password' : 'Show password'}
+                        title={showConfirmNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmNewPassword ? (
+                          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+                          </svg>
+                        ) : (
+                          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                            <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
 
-                  <button type="submit" className="auth-submit-btn">
-                    Update Password <span className="auth-btn-arrow">→</span>
+
+                  <button type="submit" className="auth-submit-btn" disabled={loading}>
+                    {loading ? 'Updating Password...' : (
+                      <>Update Password <span className="auth-btn-arrow">→</span></>
+                    )}
                   </button>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-                    <span
-                      className="auth-forgot-link"
+                    <button
+                      type="button"
+                      className="otp-resend-btn"
                       onClick={handleResend}
-                      style={{ fontSize: '0.82rem' }}
+                      disabled={!canResend || loading}
                     >
-                      Resend Code
-                    </span>
-                    <span
-                      className="auth-forgot-link"
-                      onClick={() => setSubmitted(false)}
-                      style={{ fontSize: '0.82rem' }}
+                      {canResend ? 'Resend Code' : `Resend in ${resendCooldown}s`}
+                    </button>
+                    <button
+                      type="button"
+                      className="otp-back-btn"
+                      onClick={() => {
+                        setSubmitted(false)
+                        setError('')
+                      }}
                     >
                       Change Email
-                    </span>
+                    </button>
                   </div>
                 </form>
               </>

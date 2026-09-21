@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
+const profileRoutes = require('./routes/profileRoutes');
 const { checkR2Connection } = require('./services/cloudflareR2');
 
 dotenv.config();
@@ -36,8 +37,9 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Authentication Routes
+// Authentication & Profile Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);
 
 app.listen(PORT, async () => {
   console.log(`[HireMind API] Server running on http://localhost:${PORT}`);

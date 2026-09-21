@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import brandMarkImg from '../assets/images/3.png'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import ProfileDropdown from './ProfileDropdown'
@@ -12,12 +13,21 @@ export default function Navbar({
   isChatOpen = false,
   onChatToggle,
   rightContent,
-  initial = 'J',
-  userName = 'Jazeel Jaufer',
-  userEmail = 'jazeel.jaufer@example.com',
+  initial: propInitial,
+  userName: propUserName,
+  userEmail: propUserEmail,
   className = '',
 }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+
+  const displayName = user
+    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+    : propUserName || 'Candidate'
+  const displayEmail = user?.email || propUserEmail || 'candidate@hiremind.com'
+  const displayInitial = user?.firstName?.trim()
+    ? user.firstName.trim().charAt(0).toUpperCase()
+    : propInitial || displayName?.trim().charAt(0).toUpperCase() || 'U'
 
   return (
     <header className={`app-navbar ${className}`}>
@@ -58,7 +68,7 @@ export default function Navbar({
           </button>
         )}
 
-        <ProfileDropdown initial={initial} name={userName} email={userEmail} />
+        <ProfileDropdown initial={displayInitial} name={displayName} email={displayEmail} />
       </div>
     </header>
   )

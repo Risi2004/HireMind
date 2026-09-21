@@ -1,13 +1,58 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import OnboardingHeader from '../components/OnboardingHeader'
 import githubLogo from '../assets/icons/Vector.svg'
+import { useProfileSetup } from '../context/ProfileSetupContext'
 import './ProfileSetup.css'
 
 export default function ProfileSetup() {
   const navigate = useNavigate()
+  const { githubData, connectGithub, disconnectGithub } = useProfileSetup()
+
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [usernameInput, setUsernameInput] = useState('')
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [error, setError] = useState('')
 
   function goToAboutYou() {
     navigate('/profile-setup/about-you')
+  }
+
+  const handleOpenModal = () => {
+    setUsernameInput('')
+    setError('')
+    setIsModalOpen(true)
+  }
+
+  const handleConnectSubmit = async (e) => {
+    e.preventDefault()
+    if (!usernameInput.trim()) {
+      setError('Please enter a GitHub username or URL.')
+      return
+    }
+
+    setIsConnecting(true)
+    setError('')
+
+    try {
+      await connectGithub(usernameInput.trim())
+      setIsModalOpen(false)
+    } catch (err) {
+      setError(err.message || 'Failed to connect GitHub account. Please check the username.')
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
+  const handleDisconnect = async (e) => {
+    e.stopPropagation()
+    if (window.confirm('Disconnect GitHub account?')) {
+      try {
+        await disconnectGithub()
+      } catch (err) {
+        alert(err.message || 'Failed to disconnect GitHub')
+      }
+    }
   }
 
   return (
@@ -22,23 +67,58 @@ export default function ProfileSetup() {
             gets.
           </p>
 
-          <div className="github-card">
+          {/* GitHub Connection Card */}
+          <div className={`github-card ${githubData?.connected ? 'is-connected' : ''}`}>
             <div className="github-card__left">
-              <img
-                className="github-card__logo"
-                src={githubLogo}
-                alt=""
-                width={20}
-                height={20}
-              />
+              {githubData?.connected && githubData.avatarUrl ? (
+                <img
+                  className="github-card__avatar"
+                  src={githubData.avatarUrl}
+                  alt={githubData.username}
+                />
+              ) : (
+                <img
+                  className="github-card__logo"
+                  src={githubLogo}
+                  alt=""
+                  width={20}
+                  height={20}
+                />
+              )}
+
               <div className="github-card__text">
-                <span className="github-card__name">GitHub</span>
-                <span className="github-card__sub">Showcase projects &amp; code</span>
+                <span className="github-card__name">
+                  {githubData?.connected ? `@${githubData.username}` : 'GitHub'}
+                </span>
+                <span className="github-card__sub">
+                  {githubData?.connected
+                    ? `${githubData.publicRepos || 0} Repositories linked`
+                    : 'Showcase projects & code'}
+                </span>
               </div>
             </div>
-            <button type="button" className="github-card__login">
-              LOGIN
-            </button>
+
+            {githubData?.connected ? (
+              <div className="github-card__actions-wrap">
+                <span className="github-card__badge">&#10003; Connected</span>
+                <button
+                  type="button"
+                  className="github-card__unlink-btn"
+                  onClick={handleDisconnect}
+                  title="Disconnect GitHub account"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="github-card__login"
+                onClick={handleOpenModal}
+              >
+                LOGIN
+              </button>
+            )}
           </div>
         </div>
 
@@ -59,6 +139,71 @@ export default function ProfileSetup() {
           </button>
         </div>
       </main>
+
+      {/* GitHub Connect Modal */}
+      {isModalOpen && (
+        <div className="gh-modal-overlay" onClick={() => !isConnecting && setIsModalOpen(false)}>
+          <div className="gh-modal-card" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="gh-modal-close"
+              onClick={() => setIsModalOpen(false)}
+              disabled={isConnecting}
+            >
+              ✕
+            </button>
+
+            <div className="gh-modal-header">
+              <div className="gh-modal-icon">
+                <img src={githubLogo} alt="" width={24} height={24} />
+              </div>
+              <h3 className="gh-modal-title">Connect Your GitHub</h3>
+              <p className="gh-modal-desc">
+                Enter your GitHub username or profile link to showcase your repositories and code activity to AI interviewers.
+              </p>
+            </div>
+
+            {error && (
+              <div className="gh-modal-error" role="alert">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleConnectSubmit} className="gh-modal-form">
+              <div className="gh-input-wrap">
+                <span className="gh-input-prefix">github.com/</span>
+                <input
+                  type="text"
+                  className="gh-input"
+                  placeholder="username"
+                  autoFocus
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                  disabled={isConnecting}
+                />
+              </div>
+
+              <div className="gh-modal-buttons">
+                <button
+                  type="button"
+                  className="gh-btn gh-btn--cancel"
+                  onClick={() => setIsModalOpen(false)}
+                  disabled={isConnecting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="gh-btn gh-btn--primary"
+                  disabled={isConnecting || !usernameInput.trim()}
+                >
+                  {isConnecting ? 'Verifying...' : 'Connect Profile'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

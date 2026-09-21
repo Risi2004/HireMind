@@ -231,6 +231,22 @@
   box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
 }
 
+.prof-avatar-initial {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00b4d8 0%, #0077b6 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  border: 2px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+  user-select: none;
+}
+
 .prof-avatar-badge {
   position: absolute;
   bottom: 2px;
@@ -996,4 +1012,44 @@
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+/* Danger Zone Card */
+.prof-card--danger {
+  border-color: rgba(239, 68, 68, 0.25) !important;
+  background: rgba(15, 23, 42, 0.6) !important;
+  margin-top: 1.5rem;
+}
+
+.prof-danger-icon-box {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.prof-danger-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.6rem 1.25rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.prof-danger-btn:hover {
+  background: #ef4444;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);
+  transform: translateY(-1px);
 }

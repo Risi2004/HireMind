@@ -311,11 +311,64 @@
   box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.35);
 }
 
+.auth-code-input {
+  text-align: center;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 5px;
+}
+
+.auth-code-input::placeholder {
+  letter-spacing: normal;
+  font-size: 0.88rem;
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.auth-input-password-wrap {
+
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.auth-input-password-wrap .auth-input {
+  padding-right: 2.75rem;
+}
+
+.auth-password-toggle-btn {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: color 0.2s ease, transform 0.15s ease;
+  z-index: 2;
+}
+
+.auth-password-toggle-btn:hover {
+  color: #0f172a;
+}
+
+.auth-password-toggle-btn:active {
+  transform: translateY(-50%) scale(0.92);
+}
+
 .auth-form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.85rem;
 }
+
 
 /* Checkbox & Options */
 .auth-checkbox-wrap {

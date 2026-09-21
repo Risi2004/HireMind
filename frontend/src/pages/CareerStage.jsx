@@ -14,14 +14,16 @@ export default function CareerStage() {
     customCareerStage,
     setCustomCareerStage,
     careerStageOptions,
+    submitProfileSetup,
   } = useProfileSetup()
   const [error, setError] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   function handlePrevious() {
     navigate('/profile-setup/your-field')
   }
 
-  function handleFinish() {
+  async function handleFinish() {
     if (!careerStage) {
       setError('Please select your career stage.')
       return
@@ -37,7 +39,16 @@ export default function CareerStage() {
     }
 
     setError('')
-    // Onboarding complete. Wire API submission / post-onboarding destination when available.
+    setIsSubmitting(true)
+
+    try {
+      await submitProfileSetup()
+      navigate('/dashboard')
+    } catch (err) {
+      setError(err.message || 'Failed to complete profile setup. Please try again.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -105,8 +116,9 @@ export default function CareerStage() {
               type="button"
               className="profile-btn profile-btn--next"
               onClick={handleFinish}
+              disabled={isSubmitting}
             >
-              FINISH
+              {isSubmitting ? 'SAVING PROFILE...' : 'FINISH'}
             </button>
           </div>
         </div>

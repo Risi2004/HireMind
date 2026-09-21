@@ -49,14 +49,128 @@ export function ProfileSetupProvider({ children }) {
   const [careerStage, setCareerStage] = useState('')
   const [customCareerStage, setCustomCareerStage] = useState('')
 
-  const { user: authUser } = useAuth()
+  const { user: authUser, token, setUser: setAuthUser } = useAuth()
 
-  // Use authenticated user's name if logged in, fallback to Jordan
+  // Track GitHub connection state
+  const [githubData, setGithubData] = useState(() => authUser?.github || {
+    connected: false,
+    username: '',
+    profileUrl: '',
+    avatarUrl: '',
+    name: '',
+    publicRepos: 0,
+  })
+
+  // Sync with authUser when user updates
+  useMemo(() => {
+    if (authUser?.github) {
+      setGithubData(authUser.github)
+    }
+    if (authUser?.field && !field) {
+      setField(authUser.field)
+    }
+    if (authUser?.careerStage && !careerStage) {
+      setCareerStage(authUser.careerStage)
+    }
+    if (authUser?.experienceLevel) {
+      setExperienceLevel(authUser.experienceLevel)
+    }
+  }, [authUser])
+
   const user = useMemo(
-    () => ({ name: authUser?.firstName || 'Jordan' }),
+    () => ({ name: authUser?.firstName || 'Candidate' }),
     [authUser?.firstName]
   )
 
+  // Connect GitHub account
+  const connectGithub = async (username) => {
+    if (!token) throw new Error('You must be logged in to connect GitHub.')
+    const res = await fetch('/api/profile/github/connect', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ username }),
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to connect GitHub account')
+    }
+
+    setGithubData(data.github)
+    if (data.user && setAuthUser) {
+      setAuthUser(data.user)
+    }
+    return data
+  }
+
+  // Disconnect GitHub account
+  const disconnectGithub = async () => {
+    if (!token) return
+    const res = await fetch('/api/profile/github/disconnect', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to disconnect GitHub account')
+    }
+
+    setGithubData({
+      connected: false,
+      username: '',
+      profileUrl: '',
+      avatarUrl: '',
+      name: '',
+      publicRepos: 0,
+    })
+    if (data.user && setAuthUser) {
+      setAuthUser(data.user)
+    }
+    return data
+  }
+
+  // Submit complete profile setup (uploads resume to Cloudflare R2 and persists details)
+  const submitProfileSetup = async () => {
+    if (!token) throw new Error('You must be logged in to complete profile setup.')
+
+    const formData = new FormData()
+    if (resumeFile) {
+      formData.append('resume', resumeFile)
+    }
+    formData.append('field', field)
+    formData.append('customField', customField)
+    formData.append('experienceLevel', experienceLevel)
+    formData.append('careerStage', careerStage)
+    formData.append('customCareerStage', customCareerStage)
+    if (githubData?.username) {
+      formData.append('githubUsername', githubData.username)
+    }
+
+    const res = await fetch('/api/profile/setup', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to save profile setup')
+    }
+
+    if (data.user && setAuthUser) {
+      setAuthUser(data.user)
+    }
+
+    return data
+  }
 
   const value = useMemo(
     () => ({
@@ -77,6 +191,10 @@ export function ProfileSetupProvider({ children }) {
       customCareerStage,
       setCustomCareerStage,
       careerStageOptions: CAREER_STAGE_OPTIONS,
+      githubData,
+      connectGithub,
+      disconnectGithub,
+      submitProfileSetup,
     }),
     [
       user,
@@ -86,6 +204,8 @@ export function ProfileSetupProvider({ children }) {
       experienceLevel,
       careerStage,
       customCareerStage,
+      githubData,
+      token,
     ]
   )
 

@@ -15,31 +15,41 @@ import closeIcon from '../assets/icons/close.svg'
 import githubIcon from '../assets/icons/Vector.svg'
 import linkedinIcon from '../assets/icons/linkedin.svg'
 import Navbar from '../components/Navbar'
+import DeleteAccountModal from '../components/DeleteAccountModal'
+import { useAuth } from '../context/AuthContext'
 import './Profile.css'
 
 export default function Profile() {
   const navigate = useNavigate()
   const fileInputRef = useRef(null)
+  const { user, logout } = useAuth()
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
 
-  // Profile data states
+  // Profile data states dynamically synced with authenticated candidate
+  const candidateName = user
+    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+    : 'Jazeel Jaufer'
+  const candidateAvatar = user?.avatarUrl || ''
+  const candidateInitial = user?.firstName?.trim() ? user.firstName.trim().charAt(0).toUpperCase() : 'U'
+
   const [profileData, setProfileData] = useState({
-    name: 'Jazeel Jaufer',
+    name: candidateName,
     tier: 'FREE',
     title: 'Software Engineering Student',
-    email: 'jazeel.jaufer@example.com',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-    resumeFileName: 'Johndoe_resume_2024.Pdf',
-    careerStage: 'University Student',
-    field: 'Software Engineering',
-    experienceLevel: 'Intermediate',
+    email: candidateEmail,
+    avatar: candidateAvatar,
+    resumeFileName: user?.resumeFileName || 'Johndoe_resume_2024.Pdf',
+    careerStage: user?.careerStage || 'University Student',
+    field: user?.field || 'Software Engineering',
+    experienceLevel: user?.experienceLevel || 'Intermediate',
   })
 
   // Edit Career Info Modal/Inline state
   const [isEditingCareer, setIsEditingCareer] = useState(false)
   const [editFields, setEditFields] = useState({
-    careerStage: 'University Student',
-    field: 'Software Engineering',
-    experienceLevel: 'Intermediate',
+    careerStage: user?.careerStage || 'University Student',
+    field: user?.field || 'Software Engineering',
+    experienceLevel: user?.experienceLevel || 'Intermediate',
   })
 
   // Career Interests list state
@@ -55,13 +65,15 @@ export default function Profile() {
   const [profiles, setProfiles] = useState({
     linkedin: {
       connected: true,
-      name: 'Jazeel Jaufer',
+      name: candidateName,
       status: 'Connected',
     },
     github: {
-      connected: true,
-      username: 'jazeeljaufer',
-      repoCount: '12 Repositories',
+      connected: user?.github?.connected ?? true,
+      username: user?.github?.username || 'jazeeljaufer',
+      repoCount: user?.github?.connected
+        ? `${user.github.publicRepos || 0} Repositories`
+        : '12 Repositories',
     },
   })
 
@@ -137,6 +149,7 @@ export default function Profile() {
   const handleLogout = () => {
     const confirmLogout = window.confirm('Are you sure you want to log out of HireMind?')
     if (confirmLogout) {
+      logout()
       navigate('/login')
     }
   }
@@ -153,7 +166,7 @@ export default function Profile() {
           ===================================================================== */}
       <Navbar
         logoRedirect="/dashboard"
-        initial="J"
+        initial={candidateInitial}
         userName={profileData.name}
         userEmail={profileData.email}
       />
@@ -191,11 +204,16 @@ export default function Profile() {
           {/* Left: User Identity Info */}
           <div className="prof-hero-user">
             <div className="prof-avatar-wrap">
-              <img
-                src={profileData.avatar}
-                alt={profileData.name}
-                className="prof-avatar-img"
-              />
+              {profileData.avatar ? (
+                <img
+                  src={profileData.avatar}
+                  alt={profileData.name}
+                  className="prof-avatar-img"
+                  onError={() => setProfileData((prev) => ({ ...prev, avatar: '' }))}
+                />
+              ) : (
+                <div className="prof-avatar-initial">{candidateInitial}</div>
+              )}
               <div className="prof-avatar-badge" title="Online & Active" />
             </div>
 
@@ -515,7 +533,45 @@ export default function Profile() {
             ))}
           </div>
         </section>
+
+        {/* =====================================================================
+            4. DANGER ZONE: PERMANENT ACCOUNT DELETION
+            ===================================================================== */}
+        <section className="prof-card prof-card--danger">
+          <div className="prof-card-header">
+            <div className="prof-card-title-group">
+              <div className="prof-danger-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="prof-card-title" style={{ color: '#f87171' }}>Danger Zone</h3>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8' }}>
+                  Permanently delete your candidate profile, interview histories, and all stored data.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="prof-danger-btn"
+              onClick={() => setIsDeleteModalOpen(true)}
+              title="Permanently delete account"
+            >
+              DELETE ACCOUNT
+            </button>
+          </div>
+        </section>
       </div>
+
+      {/* High-Fidelity Delete Account Modal */}
+      <DeleteAccountModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+      />
     </div>
   )
 }

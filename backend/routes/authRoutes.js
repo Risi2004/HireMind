@@ -7,6 +7,9 @@ const {
   login,
   getMe,
   getAvatar,
+  forgotPassword,
+  resetPassword,
+  deleteAccount,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -32,9 +35,14 @@ router.post('/register', upload.single('avatar'), register);
 router.post('/verify-otp', verifyOtp);
 router.post('/resend-otp', resendOtp);
 router.post('/login', login);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
 router.get('/me', protect, getMe);
+router.delete('/account', protect, deleteAccount);
 // Secure streaming route from private Cloudflare R2 bucket
 router.get('/avatar/:filename', getAvatar);
 
 module.exports = router;
+
+
 

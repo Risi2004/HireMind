@@ -137,7 +137,7 @@ Score: 78% Readiness Score
           </button>
 
           {/* User Profile Dropdown */}
-          <ProfileDropdown initial="J" name="Jazeel Jaufer" email="jazeel.jaufer@example.com" />
+          <ProfileDropdown />
         </div>
       </header>
 

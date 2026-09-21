@@ -124,6 +124,71 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // Forgot Password: send OTP code to email
+  const forgotPassword = async (email) => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to send password reset code')
+      }
+      return data
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Reset Password: verify OTP and update password
+  const resetPassword = async (email, otp, newPassword) => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp, newPassword }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || 'Password reset failed')
+      }
+      return data
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Delete account: permanently deletes from MongoDB and Cloudflare R2, clears session
+  const deleteAccount = async (password = null) => {
+    setLoading(true)
+    try {
+      if (token) {
+        const res = await fetch('/api/auth/account', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(password ? { password } : {}),
+        })
+
+        const data = await res.json()
+        if (!res.ok) {
+          throw new Error(data.message || 'Failed to delete account')
+        }
+      }
+      logout()
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const value = useMemo(
     () => ({
       user,
@@ -134,11 +199,16 @@ export function AuthProvider({ children }) {
       register,
       verifyOtp,
       resendOtp,
+      forgotPassword,
+      resetPassword,
+      deleteAccount,
       logout,
       setUser,
     }),
     [user, token, loading]
   )
+
+
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

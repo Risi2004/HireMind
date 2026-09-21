@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import brandMarkImg from '../assets/images/3.png'
 import userAvatarImg from '../assets/images/Frame 230.png'
@@ -14,10 +14,27 @@ import communicationIcon from '../assets/icons/communication.svg'
 import languageIcon from '../assets/icons/language.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import Navbar from '../components/Navbar'
+import { useAuth } from '../context/AuthContext'
 import './Dashboard.css'
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+
+  // If authenticated user hasn't completed profile setup, navigate to profile setup
+  useEffect(() => {
+    if (user && !user.isProfileSetupCompleted) {
+      navigate('/profile-setup')
+    }
+  }, [user, navigate])
+
+  const candidateName = user
+    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+    : 'Jazeel Jaufer'
+  const candidateFirstName = user?.firstName || 'Jazeel'
+  const candidateInitial = user?.firstName ? user.firstName[0].toUpperCase() : 'J'
+  const candidateEmail = user?.email || 'jazeel.jaufer@example.com'
+
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState('all')
   const [isChatOpen, setIsChatOpen] = useState(true)
@@ -26,7 +43,7 @@ export default function Dashboard() {
     {
       id: 1,
       sender: 'bot',
-      text: "Hi Rishikesan! I've analyzed your recent 84% score at WSO2. Want to discuss how to improve your Communication score?",
+      text: `Hi ${candidateFirstName}! I've analyzed your recent 84% score at WSO2. Want to discuss how to improve your Communication score?`,
       time: 'Just now',
     },
   ])
@@ -135,9 +152,9 @@ export default function Dashboard() {
         showChatBot={true}
         isChatOpen={isChatOpen}
         onChatToggle={() => setIsChatOpen((prev) => !prev)}
-        initial="J"
-        userName="Jazeel Jaufer"
-        userEmail="jazeel.jaufer@example.com"
+        initial={candidateInitial}
+        userName={candidateName}
+        userEmail={candidateEmail}
       />
 
       {/* Main Dashboard Workspace (3-Column Grid Frame) */}
@@ -222,7 +239,7 @@ export default function Dashboard() {
         <section className="dash-main-col">
           {/* Welcome Headline */}
           <div className="dash-welcome">
-            <h1 className="dash-welcome__title">Welcome Back, Jazeel</h1>
+            <h1 className="dash-welcome__title">Welcome Back, {candidateFirstName}</h1>
             <p className="dash-welcome__desc">
               Ready to take another step toward your next opportunity? Your personalized dashboard is updated with your latest progress.
             </p>

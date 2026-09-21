@@ -3,8 +3,10 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Otp = require('../models/Otp');
-const { uploadProfilePicture, getPrivateAvatarStream } = require('../services/cloudflareR2');
-const { sendOtpEmail, sendOnboardingEmail } = require('../services/emailService');
+const { uploadProfilePicture, getPrivateAvatarStream, deleteAvatar, deleteResume } = require('../services/cloudflareR2');
+const { sendOtpEmail, sendOnboardingEmail, sendPasswordResetOtpEmail, sendAccountDeletionEmail } = require('../services/emailService');
+
+
 
 
 // Helper to generate signed JWT
@@ -54,7 +56,12 @@ const register = async (req, res) => {
       user.firstName = firstName.trim();
       user.lastName = lastName.trim();
       user.password = password; // Will be hashed by pre('save')
-      if (avatarUrl) user.avatarUrl = avatarUrl;
+      if (avatarUrl) {
+        if (user.avatarUrl && user.avatarUrl !== avatarUrl) {
+          await deleteAvatar(user.avatarUrl);
+        }
+        user.avatarUrl = avatarUrl;
+      }
       await user.save();
     } else {
       user = new User({
@@ -285,6 +292,151 @@ const getAvatar = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Initiate forgot password flow by dispatching a 6-digit OTP
+ * @route   POST /api/auth/forgot-password
+ * @access  Public
+ */
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Email address is required' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(404).json({ message: 'No account found with this email address' });
+    }
+
+    const otpCode = generateNumericOtp();
+    await Otp.deleteMany({ email: normalizedEmail });
+    await Otp.create({
+      email: normalizedEmail,
+      otp: otpCode,
+    });
+
+    await sendPasswordResetOtpEmail(normalizedEmail, otpCode, user.firstName);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password reset code has been sent to your email.',
+      email: normalizedEmail,
+    });
+  } catch (error) {
+    console.error('[Forgot Password Error]:', error);
+    return res.status(500).json({ message: error.message || 'Server error initiating password reset' });
+  }
+};
+
+/**
+ * @desc    Verify OTP and reset user password
+ * @route   POST /api/auth/reset-password
+ * @access  Public
+ */
+const resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ message: 'Email, verification code, and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const otpRecord = await Otp.findOne({ email: normalizedEmail }).sort({ createdAt: -1 });
+    if (!otpRecord || otpRecord.otp !== otp.toString().trim()) {
+      return res.status(400).json({ message: 'Invalid or expired verification code' });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    await Otp.deleteMany({ email: normalizedEmail });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password has been reset successfully. You can now log in.',
+    });
+  } catch (error) {
+    console.error('[Reset Password Error]:', error);
+    return res.status(500).json({ message: error.message || 'Server error resetting password' });
+  }
+};
+
+/**
+ * @desc    Delete candidate account, avatar from Cloudflare R2, and all associated data
+ * @route   DELETE /api/auth/account
+ * @access  Private
+ */
+const deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { password } = req.body || {};
+
+    // Retrieve user with password for verification
+    const user = await User.findById(userId).select('+password');
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Verify password if provided
+    if (password) {
+      const isMatch = await user.comparePassword(password);
+      if (!isMatch) {
+        return res.status(400).json({ message: 'Incorrect password. Account deletion aborted.' });
+      }
+    }
+
+    // Delete candidate profile picture from storage if present
+    if (user.avatarUrl) {
+      try {
+        await deleteAvatar(user.avatarUrl);
+      } catch (avatarErr) {
+        console.warn('[Delete Account] Warning: Failed to purge avatar:', avatarErr.message);
+      }
+    }
+
+    // Delete candidate resume from storage if present
+    if (user.resumeUrl) {
+      try {
+        await deleteResume(user.resumeUrl);
+      } catch (resumeErr) {
+        console.warn('[Delete Account] Warning: Failed to purge resume:', resumeErr.message);
+      }
+    }
+
+    // Send account deletion confirmation email
+    await sendAccountDeletionEmail(user.email, user.firstName);
+
+    // Delete any pending OTPs for the user's email
+    await Otp.deleteMany({ email: user.email });
+
+    // Permanently remove the user from MongoDB
+    await User.findByIdAndDelete(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Account and associated data deleted successfully.',
+    });
+  } catch (error) {
+    console.error('[Delete Account Error]:', error);
+    return res.status(500).json({ message: error.message || 'Server error deleting account' });
+  }
+};
+
 module.exports = {
   register,
   verifyOtp,
@@ -292,5 +444,10 @@ module.exports = {
   login,
   getMe,
   getAvatar,
+  forgotPassword,
+  resetPassword,
+  deleteAccount,
 };
+
+
 

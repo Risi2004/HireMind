@@ -10,11 +10,17 @@ import tick2Icon from '../assets/icons/tick2.svg'
 import company1Icon from '../assets/icons/company1.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
+import { useAuth } from '../context/AuthContext'
 import './InterviewRoom.css'
 
 export default function InterviewRoom() {
   const navigate = useNavigate()
   const { token } = useParams()
+  const { user } = useAuth()
+
+  const candidateInitial = user?.firstName?.trim()
+    ? user.firstName.trim().charAt(0).toUpperCase()
+    : 'U'
 
   // Live Timer state (starting around 12:35 = 755 seconds for realism, or live counting)
   const [secondsElapsed, setSecondsElapsed] = useState(755)
@@ -453,7 +459,7 @@ export default function InterviewRoom() {
           </button>
 
           {/* User Profile Dropdown */}
-          <ProfileDropdown initial="J" name="Jazeel Jaufer" email="jazeel.jaufer@example.com" />
+          <ProfileDropdown />
         </div>
       </header>
 
@@ -670,7 +676,13 @@ export default function InterviewRoom() {
 
               {!isVideoOn && (
                 <div className="int-room-video-placeholder">
-                  <div className="int-room-video-avatar">J</div>
+                  <div className="int-room-video-avatar">
+                    {user?.avatarUrl ? (
+                      <img src={user.avatarUrl} alt="" className="int-room-video-avatar-img" />
+                    ) : (
+                      candidateInitial
+                    )}
+                  </div>
                   <span>Camera is turned off</span>
                   <button
                     type="button"
