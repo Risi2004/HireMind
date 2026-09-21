@@ -1,4 +1,4 @@
-const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, GetObjectCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const path = require('path');
 const crypto = require('crypto');
@@ -22,6 +22,32 @@ const getR2Client = () => {
     },
   });
 };
+
+/**
+ * Verifies connection and access to the private Cloudflare R2 bucket at startup.
+ */
+const checkR2Connection = async () => {
+  const accountId = process.env.CLOUDFLARE_R2_ACCOUNT_ID;
+  const accessKeyId = process.env.CLOUDFLARE_R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY;
+  const bucketName = process.env.CLOUDFLARE_R2_BUCKET_NAME;
+
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+    console.log('[Cloudflare R2] Credentials not configured in .env (Mock/Data-URI fallback enabled)');
+    return false;
+  }
+
+  try {
+    const client = getR2Client();
+    await client.send(new HeadBucketCommand({ Bucket: bucketName }));
+    console.log(`[Cloudflare R2] Connected: Private bucket "${bucketName}" verified successfully`);
+    return true;
+  } catch (error) {
+    console.warn(`[Cloudflare R2] Connection notice: ${error.message || 'Unable to access bucket'}`);
+    return false;
+  }
+};
+
 
 /**
  * Uploads a profile picture buffer to a PRIVATE Cloudflare R2 bucket.
@@ -113,4 +139,6 @@ module.exports = {
   uploadProfilePicture,
   getPrivateAvatarStream,
   getPresignedAvatarUrl,
+  checkR2Connection,
 };
+

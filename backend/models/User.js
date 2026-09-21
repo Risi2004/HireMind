@@ -54,17 +54,13 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving if modified
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (err) {
-    next(err);
-  }
+// Hash password before saving if modified (async hook in Mongoose 8+)
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
 });
+
 
 // Instance method to compare password
 userSchema.methods.comparePassword = async function (candidatePassword) {
