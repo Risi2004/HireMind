@@ -6,6 +6,7 @@ const connectDB = require('./config/db');
 const seedAdmin = require('./config/seedAdmin');
 const authRoutes = require('./routes/authRoutes');
 const profileRoutes = require('./routes/profileRoutes');
+const interviewRoutes = require('./routes/interviewRoutes');
 const { checkR2Connection } = require('./services/cloudflareR2');
 
 dotenv.config();
@@ -98,9 +99,10 @@ app.get(['/health', '/api/health'], (req, res) => {
   });
 });
 
-// Authentication & Profile Routes
+// Authentication & Profile & Interview Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/interview', interviewRoutes);
 
 // Start server on 0.0.0.0 for containerized Render runtime
 const server = app.listen(PORT, HOST, async () => {

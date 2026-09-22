@@ -15,6 +15,7 @@ import languageIcon from '../assets/icons/language.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
+import { getAllInterviewSessions, createInterviewSession } from '../utils/interviewUtils'
 import './Dashboard.css'
 
 export default function Dashboard() {
@@ -48,62 +49,40 @@ export default function Dashboard() {
     },
   ])
 
-  // Interview History items
-  const recentHistory = [
-    { id: 'r1', title: 'Software Engineer Intern', company: 'WSO2', track: 'Technical + HR', icon: company1Icon },
-    { id: 'r2', title: 'Backend Developer', company: 'Sysco LABS', track: 'Technical Only', icon: company2Icon },
-    { id: 'r3', title: 'Software Engineer Intern', company: 'WSO2', track: 'Technical + HR', icon: company1Icon },
-    { id: 'r4', title: 'Backend Developer', company: 'Sysco LABS', track: 'Technical Only', icon: company2Icon },
-  ]
+  // Dynamic Interview History sessions from persistent storage
+  const [interviews, setInterviews] = useState(() => getAllInterviewSessions())
 
-  const last30DaysHistory = [
-    { id: 'm1', title: 'Software Engineer Intern', company: 'WSO2', track: 'Technical + HR', icon: company1Icon },
-    { id: 'm2', title: 'Backend Developer', company: 'Sysco LABS', track: 'Technical Only', icon: company2Icon },
-    { id: 'm3', title: 'Software Engineer Intern', company: 'WSO2', track: 'Technical + HR', icon: company1Icon },
-  ]
+  useEffect(() => {
+    const handleUpdate = () => {
+      setInterviews(getAllInterviewSessions())
+    }
+    window.addEventListener('hiremind_interviews_updated', handleUpdate)
+    window.addEventListener('storage', handleUpdate)
+    return () => {
+      window.removeEventListener('hiremind_interviews_updated', handleUpdate)
+      window.removeEventListener('storage', handleUpdate)
+    }
+  }, [])
 
-  // Recent Interview performance cards
-  const performanceInterviews = [
-    {
-      id: 'p1',
-      title: 'Software Engineer Intern',
-      company: 'WSO2',
-      track: 'Technical + HR',
-      score: '84%',
-      icon: company1Icon,
-    },
-    {
-      id: 'p2',
-      title: 'Backend Developer',
-      company: 'Sysco LABS',
-      track: 'Technical Only',
-      score: '79%',
-      icon: company2Icon,
-    },
-    {
-      id: 'p3',
-      title: 'Full Stack Engineer Intern',
-      company: 'IFS',
-      track: 'Technical',
-      score: '94%',
-      icon: company1Icon,
-    },
-  ]
+  // Recent Interview performance cards derived from persistent sessions
+  const performanceInterviews = interviews.slice(0, 3).map((item, idx) => ({
+    ...item,
+    score: item.score || (idx === 0 ? '84%' : idx === 1 ? '79%' : '94%'),
+  }))
 
   // Filter history based on search query
-  const filteredRecent = recentHistory.filter(
-    (item) =>
-      item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.track.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredInterviews = interviews.filter((item) => {
+    const q = searchQuery.toLowerCase()
+    return (
+      (item.title && item.title.toLowerCase().includes(q)) ||
+      (item.targetRole && item.targetRole.toLowerCase().includes(q)) ||
+      (item.company && item.company.toLowerCase().includes(q)) ||
+      (item.track && item.track.toLowerCase().includes(q))
+    )
+  })
 
-  const filteredLast30 = last30DaysHistory.filter(
-    (item) =>
-      item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.track.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredRecent = filteredInterviews.slice(0, 4)
+  const filteredLast30 = filteredInterviews.slice(4)
 
   const handleSendMessage = (e) => {
     e.preventDefault()
@@ -184,15 +163,16 @@ export default function Dashboard() {
                     <div
                       key={item.id}
                       className="dash-history-card"
-                      onClick={() => navigate('/profile-setup')}
+                      onClick={() => navigate(item.lastVisitedPath || `/new-interview/${item.id}`)}
+                      title={`Resume: ${item.title || item.targetRole} (${item.company || 'HireMind'})`}
                     >
                       <div className="dash-history-card__icon-box">
-                        <img src={item.icon} alt="" className="dash-company-icon" />
+                        <img src={item.icon || company1Icon} alt="" className="dash-company-icon" />
                       </div>
                       <div className="dash-history-card__info">
-                        <span className="dash-history-card__title">{item.title}</span>
+                        <span className="dash-history-card__title">{item.title || item.targetRole}</span>
                         <span className="dash-history-card__subtitle">
-                          {item.company} • {item.track}
+                          {item.company} • {item.track || item.interviewType || 'Technical'}
                         </span>
                       </div>
                     </div>
@@ -212,15 +192,16 @@ export default function Dashboard() {
                     <div
                       key={item.id}
                       className="dash-history-card"
-                      onClick={() => navigate('/profile-setup')}
+                      onClick={() => navigate(item.lastVisitedPath || `/new-interview/${item.id}`)}
+                      title={`Resume: ${item.title || item.targetRole} (${item.company || 'HireMind'})`}
                     >
                       <div className="dash-history-card__icon-box">
-                        <img src={item.icon} alt="" className="dash-company-icon" />
+                        <img src={item.icon || company1Icon} alt="" className="dash-company-icon" />
                       </div>
                       <div className="dash-history-card__info">
-                        <span className="dash-history-card__title">{item.title}</span>
+                        <span className="dash-history-card__title">{item.title || item.targetRole}</span>
                         <span className="dash-history-card__subtitle">
-                          {item.company} • {item.track}
+                          {item.company} • {item.track || item.interviewType || 'Technical'}
                         </span>
                       </div>
                     </div>
@@ -262,7 +243,10 @@ export default function Dashboard() {
                 <button
                   type="button"
                   className="dash-hero-btn"
-                  onClick={() => navigate('/new-interview')}
+                  onClick={() => {
+                    const newSession = createInterviewSession()
+                    navigate(newSession.lastVisitedPath)
+                  }}
                 >
                   START NEW INTERVIEW
                   <img src={arrowIcon} alt="" className="dash-btn-arrow" aria-hidden="true" />
@@ -296,34 +280,52 @@ export default function Dashboard() {
             </div>
 
             <div className="dash-recent-list">
-              {performanceInterviews.map((item) => (
-                <div key={item.id} className="dash-interview-row">
-                  <div className="dash-interview-row__left">
-                    <div className="dash-interview-row__icon-box">
-                      <img src={item.icon} alt="" className="dash-company-icon" />
+              {performanceInterviews.length > 0 ? (
+                performanceInterviews.map((item) => (
+                  <div
+                    key={item.id}
+                    className="dash-interview-row"
+                    onClick={() => navigate(item.lastVisitedPath || `/new-interview/${item.id}`)}
+                    style={{ cursor: 'pointer' }}
+                    title={`Resume: ${item.title || item.targetRole}`}
+                  >
+                    <div className="dash-interview-row__left">
+                      <div className="dash-interview-row__icon-box">
+                        <img src={item.icon || company1Icon} alt="" className="dash-company-icon" />
+                      </div>
+                      <div className="dash-interview-row__details">
+                        <span className="dash-interview-row__title">{item.title || item.targetRole}</span>
+                        <span className="dash-interview-row__subtitle">
+                          {item.company} • {item.track || item.interviewType || 'Technical'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="dash-interview-row__details">
-                      <span className="dash-interview-row__title">{item.title}</span>
-                      <span className="dash-interview-row__subtitle">
-                        {item.company} • {item.track}
-                      </span>
-                    </div>
-                  </div>
 
-                  <div className="dash-interview-row__right">
-                    <span className="dash-score-pill">Score: {item.score}</span>
-                    <button
-                      type="button"
-                      className="dash-action-circle-btn"
-                      onClick={() => navigate('/profile-setup')}
-                      title="Review Session"
-                      aria-label="Review Session Details"
-                    >
-                      <img src={arrow2Icon} alt="" className="dash-arrow-diag" />
-                    </button>
+                    <div className="dash-interview-row__right">
+                      <span className="dash-score-pill">Score: {item.score}</span>
+                      <button
+                        type="button"
+                        className="dash-action-circle-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          navigate(item.lastVisitedPath || `/new-interview/${item.id}`)
+                        }}
+                        title="Review / Resume Session"
+                        aria-label="Review Session Details"
+                      >
+                        <img src={arrow2Icon} alt="" className="dash-arrow-diag" />
+                      </button>
+                    </div>
                   </div>
+                ))
+              ) : (
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: '#64748B' }}>
+                  <p style={{ margin: 0, fontSize: '0.9rem' }}>No recent interviews created yet.</p>
+                  <p style={{ margin: '6px 0 0', fontSize: '0.8rem', color: '#475569' }}>
+                    Click <strong>START NEW INTERVIEW</strong> above to begin your first session.
+                  </p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </section>

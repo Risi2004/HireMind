@@ -53,8 +53,12 @@ export default function App() {
               <Route path="/profile-setup/career-stage" element={<CareerStage />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/new-interview" element={<NewInterview />} />
+              <Route path="/new-interview/:id" element={<NewInterview />} />
+              <Route path="/new-interview/:id/room" element={<InterviewRoom />} />
               <Route path="/new-interview/token" element={<InterviewRoom />} />
-              <Route path="/new-interview/:token" element={<InterviewRoom />} />
+              <Route path="/new-interview/room" element={<InterviewRoom />} />
+              <Route path="/interview-room/:id" element={<InterviewRoom />} />
+              <Route path="/interview-room" element={<InterviewRoom />} />
               <Route path="/interview-report" element={<InterviewReport />} />
               <Route path="/report" element={<InterviewReport />} />
               <Route path="/new-interview/report" element={<InterviewReport />} />

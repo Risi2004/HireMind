@@ -11,12 +11,31 @@ import company1Icon from '../assets/icons/company1.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
 import { useAuth } from '../context/AuthContext'
+import { getInterviewSession, saveInterviewSession } from '../utils/interviewUtils'
 import './InterviewRoom.css'
 
 export default function InterviewRoom() {
   const navigate = useNavigate()
-  const { token } = useParams()
+  const { token, id } = useParams()
+  const interviewId = id || token || 'default'
   const { user } = useAuth()
+
+  // Track session details
+  const [session, setSession] = useState(() => getInterviewSession(interviewId))
+
+  useEffect(() => {
+    if (!interviewId || interviewId === 'default') return
+    const current = getInterviewSession(interviewId)
+    if (current) {
+      setSession(current)
+    }
+    // Update last visited path in storage so clicking from dashboard returns here
+    saveInterviewSession({
+      id: interviewId,
+      status: 'in_progress',
+      lastVisitedPath: `/new-interview/${interviewId}/room`,
+    })
+  }, [interviewId])
 
   const candidateInitial = user?.firstName?.trim()
     ? user.firstName.trim().charAt(0).toUpperCase()
@@ -383,7 +402,14 @@ export default function InterviewRoom() {
       'Are you sure you want to conclude this interview session? Your progress will be saved and you will be directed to your Interview Report.'
     )
     if (confirmEnd) {
-      navigate('/interview-report')
+      if (interviewId && interviewId !== 'default') {
+        saveInterviewSession({
+          id: interviewId,
+          status: 'completed',
+          lastVisitedPath: `/interview-report?id=${interviewId}`,
+        })
+      }
+      navigate(`/interview-report${interviewId && interviewId !== 'default' ? `?id=${interviewId}` : ''}`)
     }
   }
 
@@ -410,7 +436,7 @@ export default function InterviewRoom() {
               <path d="M1 1.5H19M1 7.5H19M1 13.5H19" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
-          <h1 className="int-room-nav__title">Software Engineer Intern</h1>
+          <h1 className="int-room-nav__title">{session?.targetRole || session?.title || 'Software Engineer Intern'}</h1>
         </div>
 
         <div className="int-room-nav__right">

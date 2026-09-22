@@ -64,6 +64,26 @@ export default function AboutYou() {
     applyFile(event.dataTransfer.files?.[0])
   }
 
+  function handleViewResume(event) {
+    if (event) event.stopPropagation()
+    if (resumeFile) {
+      const blobUrl = URL.createObjectURL(resumeFile)
+      window.open(blobUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+    if (authUser?.resumeFileName || authUser?.resumeUrl) {
+      const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      let targetUrl = authUser?.resumeUrl
+      if (!targetUrl) {
+        const cleanFilename = (authUser?.resumeFileName || '').replace(/^resumes\//, '')
+        targetUrl = `/api/profile/resume/${encodeURIComponent(cleanFilename || 'view')}`
+      }
+      const separator = targetUrl.includes('?') ? '&' : '?'
+      const fullUrl = `http://localhost:5000${targetUrl}${separator}token=${encodeURIComponent(token || '')}`
+      window.open(fullUrl, '_blank', 'noopener,noreferrer')
+    }
+  }
+
   function handlePrevious() {
     navigate('/profile-setup')
   }
@@ -121,17 +141,31 @@ export default function AboutYou() {
                 {resumeFile ? resumeFile.name : authUser.resumeFileName}
               </span>
               <span className="about-you__upload-hint">Click to replace · PDF, DOC, DOCX</span>
-              <button
-                type="button"
-                className="about-you__clear"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  clearResume()
-                  setError('')
-                }}
-              >
-                {resumeFile ? 'Remove' : 'Replace File'}
-              </button>
+              <div className="about-you__btn-group" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="about-you__view-btn"
+                  onClick={handleViewResume}
+                  title="View uploaded resume document"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <span>View Resume</span>
+                </button>
+                <button
+                  type="button"
+                  className="about-you__clear"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    clearResume()
+                    setError('')
+                  }}
+                >
+                  {resumeFile ? 'Remove' : 'Replace File'}
+                </button>
+              </div>
             </>
           ) : (
             <>

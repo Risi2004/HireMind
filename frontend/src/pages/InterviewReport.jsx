@@ -6,6 +6,7 @@ import restartIcon from '../assets/icons/restart.svg'
 import company1Icon from '../assets/icons/company1.svg'
 import bulbIcon from '../assets/icons/bulb.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
+import { generateInterviewId } from '../utils/interviewUtils'
 import './InterviewReport.css'
 
 export default function InterviewReport() {
@@ -171,7 +172,7 @@ Score: 78% Readiness Score
                 <button
                   type="button"
                   className="rep-btn rep-btn--restart"
-                  onClick={() => navigate('/new-interview')}
+                  onClick={() => navigate(`/new-interview/${generateInterviewId()}`)}
                 >
                   <img src={restartIcon} alt="" className="rep-btn-icon" />
                   <span>Start Re-Interview</span>
