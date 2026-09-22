@@ -90,6 +90,203 @@
   box-shadow: 0 0 0 2px rgba(100, 150, 220, 0.18);
 }
 
+/* Skills Input & Multi-Select Dropdown */
+.your-field__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.your-field__label-hint {
+  font-size: 0.72rem;
+  color: #8da2c0;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.your-field__skill-input-wrap {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.your-field__skill-input {
+  padding-right: 4.8rem !important;
+}
+
+.your-field__skill-add-btn {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  bottom: 5px;
+  padding: 0 0.85rem;
+  background: linear-gradient(180deg, #1c4f9c 0%, #153a78 100%);
+  color: #ffffff;
+  border: 1px solid rgba(120, 170, 255, 0.45);
+  border-radius: 4px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.18s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+
+.your-field__skill-add-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #245db3 0%, #1a458c 100%);
+  border-color: rgba(160, 200, 255, 0.7);
+  box-shadow: 0 2px 6px rgba(40, 100, 210, 0.3);
+}
+
+.your-field__skill-add-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.your-field__skill-dropdown {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid rgba(140, 180, 230, 0.6);
+  border-radius: 6px;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.28),
+    0 2px 6px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.your-field__skill-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.your-field__skill-dropdown::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.your-field__skill-dropdown-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #1e293b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.your-field__skill-dropdown-item:hover,
+.your-field__skill-dropdown-item:focus-visible {
+  background: #eff6ff;
+  color: #1d4ed8;
+  outline: none;
+}
+
+.your-field__skill-dropdown-item--custom {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  color: #0284c7;
+  font-weight: 600;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.your-field__skill-dropdown-item--custom:hover {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.your-field__skill-add-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.your-field__skill-dropdown-empty {
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  color: #64748b;
+  text-align: center;
+}
+
+.your-field__skills-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 0.45rem;
+}
+
+.your-field__skill-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 12px;
+  background: linear-gradient(180deg, rgba(28, 79, 156, 0.6) 0%, rgba(21, 58, 120, 0.65) 100%);
+  border: 1px solid rgba(130, 185, 255, 0.45);
+  border-radius: 999px;
+  color: #f1f5f9;
+  font-size: 0.78rem;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  animation: fadeInSkill 0.18s ease-in-out;
+}
+
+@keyframes fadeInSkill {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.your-field__skill-remove {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.your-field__skill-remove:hover {
+  color: #f87171;
+  transform: scale(1.2);
+}
+
 .your-field__segment {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

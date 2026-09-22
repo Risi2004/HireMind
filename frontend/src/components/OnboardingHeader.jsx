@@ -1,10 +1,21 @@
+import { useState, useEffect } from 'react'
 import logo from '../assets/images/3.png'
-import { useProfileSetup } from '../context/ProfileSetupContext'
+import { useAuth } from '../context/AuthContext'
 import './OnboardingHeader.css'
 
 export default function OnboardingHeader() {
-  const { user } = useProfileSetup()
-  const initial = user?.name?.charAt(0).toUpperCase() || 'J'
+  const { user } = useAuth()
+  const [imageError, setImageError] = useState(false)
+
+  const initial = user?.firstName?.trim()
+    ? user.firstName.trim().charAt(0).toUpperCase()
+    : 'U'
+
+  const avatarUrl = user?.avatarUrl
+
+  useEffect(() => {
+    setImageError(false)
+  }, [avatarUrl])
 
   return (
     <header className="onboarding-header">
@@ -15,7 +26,16 @@ export default function OnboardingHeader() {
         draggable="false"
       />
       <div className="onboarding-header__avatar" aria-label={`User ${initial}`}>
-        <span className="onboarding-header__initial">{initial}</span>
+        {avatarUrl && !imageError ? (
+          <img
+            className="onboarding-header__avatar-img"
+            src={avatarUrl}
+            alt={user?.firstName || 'User'}
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <span className="onboarding-header__initial">{initial}</span>
+        )}
       </div>
     </header>
   )

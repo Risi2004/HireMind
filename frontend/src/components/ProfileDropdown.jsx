@@ -1,17 +1,36 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import logoutIcon from '../assets/icons/logout.svg'
+import DeleteAccountModal from './DeleteAccountModal'
 import './ProfileDropdown.css'
 
 export default function ProfileDropdown({
-  initial = 'J',
-  name = 'Jazeel Jaufer',
-  email = 'jazeel.jaufer@example.com',
+  initial: propInitial,
+  name: propName,
+  email: propEmail,
   className = '',
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [imageError, setImageError] = useState(false)
   const dropdownRef = useRef(null)
   const navigate = useNavigate()
+  const { user, logout } = useAuth()
+
+  // Dynamic user data from AuthContext with fallbacks
+  const displayName = user
+    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+    : propName || 'Candidate'
+  const displayEmail = user?.email || propEmail || 'candidate@hiremind.com'
+  const displayInitial = user?.firstName?.trim()
+    ? user.firstName.trim().charAt(0).toUpperCase()
+    : propInitial || displayName?.trim().charAt(0).toUpperCase() || 'U'
+  const avatarUrl = user?.avatarUrl
+
+  useEffect(() => {
+    setImageError(false)
+  }, [avatarUrl])
 
   // Close dropdown on outside click or Escape
   useEffect(() => {
@@ -41,21 +60,14 @@ export default function ProfileDropdown({
 
   const handleDeleteAccount = () => {
     setIsOpen(false)
-    const confirmed = window.confirm(
-      'Warning: Are you sure you want to permanently delete your HireMind account? All interview history, scores, and profile data will be permanently removed. This action cannot be undone.'
-    )
-    if (confirmed) {
-      localStorage.clear()
-      sessionStorage.clear()
-      alert('Your account has been deleted successfully.')
-      navigate('/signup')
-    }
+    setIsDeleteModalOpen(true)
   }
 
   const handleLogout = () => {
     setIsOpen(false)
     const confirmed = window.confirm('Are you sure you want to log out?')
     if (confirmed) {
+      logout()
       navigate('/login')
     }
   }
@@ -71,7 +83,16 @@ export default function ProfileDropdown({
         aria-haspopup="true"
         aria-label="User Account Menu"
       >
-        <span className="prof-dropdown-initial">{initial}</span>
+        {avatarUrl && !imageError ? (
+          <img
+            src={avatarUrl}
+            alt={displayName}
+            className="prof-dropdown-avatar-img"
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <span className="prof-dropdown-initial">{displayInitial}</span>
+        )}
       </button>
 
       {isOpen && (
@@ -79,11 +100,20 @@ export default function ProfileDropdown({
           {/* User Profile Summary */}
           <div className="prof-dropdown-user-header">
             <div className="prof-dropdown-user-avatar">
-              <span>{initial}</span>
+              {avatarUrl && !imageError ? (
+                <img
+                  src={avatarUrl}
+                  alt={displayName}
+                  className="prof-dropdown-avatar-img"
+                  onError={() => setImageError(true)}
+                />
+              ) : (
+                <span>{displayInitial}</span>
+              )}
             </div>
             <div className="prof-dropdown-user-details">
-              <span className="prof-dropdown-user-name">{name}</span>
-              <span className="prof-dropdown-user-email">{email}</span>
+              <span className="prof-dropdown-user-name">{displayName}</span>
+              <span className="prof-dropdown-user-email">{displayEmail}</span>
             </div>
           </div>
 
@@ -133,6 +163,12 @@ export default function ProfileDropdown({
           </button>
         </div>
       )}
+
+      {/* High-Fidelity Delete Account Confirmation Modal */}
+      <DeleteAccountModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+      />
     </div>
   )
 }

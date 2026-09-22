@@ -2,7 +2,7 @@
   "watch": [
     "."
   ],
-  "ext": "js,json",
+  "ext": "js,json,env",
   "ignore": [
     "node_modules/",
     "*.test.js"

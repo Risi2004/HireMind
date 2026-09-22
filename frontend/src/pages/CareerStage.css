@@ -23,6 +23,197 @@
   gap: 19px;
 }
 
+/* ==========================================================================
+   CAREER INTERESTS CARD (Matching Screenshot with Cyan Dashed Frame)
+   ========================================================================== */
+.career-stage__interests-container {
+  margin-top: 2rem;
+  width: 100%;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+  border: 1.5px dashed #0284c7;
+  border-radius: 16px;
+  padding: 22px 20px 20px 20px;
+  position: relative;
+  background: #091732;
+  box-shadow: 0 0 20px rgba(2, 132, 199, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.career-stage__interests-badge-wrap {
+  margin-bottom: 16px;
+}
+
+.career-stage__interests-badge {
+  display: inline-block;
+  border: 1px dashed rgba(56, 189, 248, 0.6);
+  border-radius: 6px;
+  padding: 4px 14px;
+  color: #7dd3fc;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(2, 132, 199, 0.08);
+}
+
+.career-stage__interests-box {
+  width: 100%;
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.career-stage__interest-pill {
+  width: 100%;
+  height: 44px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9999px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #f1f5f9;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+}
+
+.career-stage__interest-pill:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.career-stage__interest-name {
+  color: #f8fafc;
+}
+
+.career-stage__interest-remove-btn {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.career-stage__interest-remove-btn:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.career-stage__interest-add-btn {
+  width: 100%;
+  height: 44px;
+  background: rgba(14, 165, 233, 0.05);
+  border: 1px dashed rgba(56, 189, 248, 0.5);
+  border-radius: 9999px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #38bdf8;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.career-stage__interest-add-btn:hover {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: #38bdf8;
+  color: #7dd3fc;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+}
+
+.career-stage__interest-plus-icon {
+  font-size: 18px;
+  font-weight: 500;
+  color: #38bdf8;
+}
+
+.career-stage__interest-add-form {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.career-stage__interest-input {
+  flex: 1;
+  height: 44px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.5);
+  border-radius: 9999px;
+  padding: 0 16px;
+  font-size: 13.5px;
+  color: #ffffff;
+  outline: none;
+  box-shadow: 0 0 12px rgba(2, 132, 199, 0.25);
+}
+
+.career-stage__interest-input::placeholder {
+  color: #64748b;
+}
+
+.career-stage__interest-add-confirm-btn {
+  height: 40px;
+  padding: 0 14px;
+  background: #0284c7;
+  color: #ffffff;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.career-stage__interest-add-confirm-btn:hover:not(:disabled) {
+  background: #0369a1;
+}
+
+.career-stage__interest-add-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.career-stage__interest-add-cancel-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+
+.career-stage__interest-add-cancel-btn:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+}
+
 @media (max-width: 960px) {
   .career-stage__card {
     width: min(82vw, 720px);

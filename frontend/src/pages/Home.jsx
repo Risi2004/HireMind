@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import logoDarkImg from '../assets/images/logo-dark.png'
 import brain3DImg from '../assets/images/Group 4.png'
 import './Home.css'
 
 export default function Home() {
   const navigate = useNavigate()
+  const { isAuthenticated } = useAuth()
 
   // State for interactive hero role selector
   const roles = [
@@ -322,22 +324,35 @@ export default function Home() {
           </nav>
 
           <div className="hm-navbar__actions">
-            <button
-              type="button"
-              className="hm-btn hm-btn--ghost hm-navbar__signin-btn"
-              onClick={() => navigate('/login')}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              className="hm-btn hm-btn--primary hm-navbar__cta-btn"
-              onClick={() => navigate('/signup')}
-            >
-              <span className="hm-cta-full">Start Free Practice</span>
-              <span className="hm-cta-compact">Practice</span>
-              <span className="hm-btn__arrow">→</span>
-            </button>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                className="hm-btn hm-btn--primary hm-navbar__cta-btn"
+                onClick={() => navigate('/dashboard')}
+              >
+                <span>Dashboard</span>
+                <span className="hm-btn__arrow">→</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="hm-btn hm-btn--ghost hm-navbar__signin-btn"
+                  onClick={() => navigate('/login')}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  className="hm-btn hm-btn--primary hm-navbar__cta-btn"
+                  onClick={() => navigate('/signup')}
+                >
+                  <span className="hm-cta-full">Start Free Practice</span>
+                  <span className="hm-cta-compact">Practice</span>
+                  <span className="hm-btn__arrow">→</span>
+                </button>
+              </>
+            )}
             <button
               type="button"
               className={`hm-navbar__toggle ${isMobileMenuOpen ? 'is-active' : ''}`}
@@ -413,27 +428,43 @@ export default function Home() {
           </nav>
 
           <div className="hm-mobile-menu__actions">
-            <button
-              type="button"
-              className="hm-btn hm-btn--ghost hm-mobile-menu__btn"
-              onClick={() => {
-                setIsMobileMenuOpen(false)
-                navigate('/login')
-              }}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              className="hm-btn hm-btn--primary hm-mobile-menu__btn"
-              onClick={() => {
-                setIsMobileMenuOpen(false)
-                navigate('/signup')
-              }}
-            >
-              Start Free Practice
-              <span className="hm-btn__arrow">→</span>
-            </button>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                className="hm-btn hm-btn--primary hm-mobile-menu__btn"
+                onClick={() => {
+                  setIsMobileMenuOpen(false)
+                  navigate('/dashboard')
+                }}
+              >
+                Dashboard
+                <span className="hm-btn__arrow">→</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="hm-btn hm-btn--ghost hm-mobile-menu__btn"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false)
+                    navigate('/login')
+                  }}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  className="hm-btn hm-btn--primary hm-mobile-menu__btn"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false)
+                    navigate('/signup')
+                  }}
+                >
+                  Start Free Practice
+                  <span className="hm-btn__arrow">→</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -444,10 +475,10 @@ export default function Home() {
       <section className="hm-hero">
         <div className="hm-hero__container">
           {/* Top Announcement Chip */}
-          <div className="hm-hero__badge" onClick={() => navigate('/profile-setup')}>
+          <div className="hm-hero__badge" onClick={() => navigate(isAuthenticated ? '/dashboard' : '/profile-setup')}>
             <span className="hm-badge-dot" />
             <span className="hm-badge-text">Next-Gen Voice AI Interview Coach v2.4</span>
-            <span className="hm-badge-arrow">Explore Live Demo →</span>
+            <span className="hm-badge-arrow">{isAuthenticated ? 'Go to Dashboard →' : 'Explore Live Demo →'}</span>
           </div>
 
           {/* Hero Main Headline */}
@@ -484,10 +515,10 @@ export default function Home() {
             <button
               type="button"
               className="hm-btn hm-btn--hero-primary"
-              onClick={() => navigate('/signup')}
+              onClick={() => navigate(isAuthenticated ? '/dashboard' : '/signup')}
             >
               <span className="hm-btn-icon-sparkle">✦</span>
-              Start Mock Interview Free
+              {isAuthenticated ? 'Go to Dashboard' : 'Start Mock Interview Free'}
               <span className="hm-btn__arrow">→</span>
             </button>
 
@@ -808,9 +839,9 @@ export default function Home() {
               <button
                 type="button"
                 className="hm-btn hm-btn--plan-outline"
-                onClick={() => navigate('/profile-setup')}
+                onClick={() => navigate(isAuthenticated ? '/dashboard' : '/profile-setup')}
               >
-                Get Started Free
+                {isAuthenticated ? 'Go to Dashboard' : 'Get Started Free'}
               </button>
             </div>
 
@@ -841,9 +872,9 @@ export default function Home() {
               <button
                 type="button"
                 className="hm-btn hm-btn--plan-pro"
-                onClick={() => navigate('/profile-setup')}
+                onClick={() => navigate(isAuthenticated ? '/dashboard' : '/profile-setup')}
               >
-                Upgrade to Pro
+                {isAuthenticated ? 'Go to Dashboard' : 'Upgrade to Pro'}
                 <span className="hm-btn__arrow">→</span>
               </button>
             </div>
@@ -1048,17 +1079,17 @@ export default function Home() {
                 <button
                   type="button"
                   className="hm-btn hm-btn--banner-primary"
-                  onClick={() => navigate('/profile-setup')}
+                  onClick={() => navigate(isAuthenticated ? '/dashboard' : '/profile-setup')}
                 >
-                  Build Your Candidate Profile
+                  {isAuthenticated ? 'Go to Dashboard' : 'Build Your Candidate Profile'}
                   <span className="hm-btn__arrow">→</span>
                 </button>
                 <button
                   type="button"
                   className="hm-btn hm-btn--banner-secondary"
-                  onClick={() => navigate('/profile-setup/about-you')}
+                  onClick={() => navigate(isAuthenticated ? '/dashboard' : '/profile-setup/about-you')}
                 >
-                  Upload Resume Directly
+                  {isAuthenticated ? 'Start Interview' : 'Upload Resume Directly'}
                 </button>
               </div>
             </div>

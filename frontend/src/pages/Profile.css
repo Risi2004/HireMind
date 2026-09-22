@@ -231,6 +231,22 @@
   box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
 }
 
+.prof-avatar-initial {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00b4d8 0%, #0077b6 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  border: 2px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+  user-select: none;
+}
+
 .prof-avatar-badge {
   position: absolute;
   bottom: 2px;
@@ -307,94 +323,200 @@
 
 /* Right Side: Upload Resume Card */
 .prof-resume-card {
-  width: 320px;
+  width: 390px;
   max-width: 100%;
-  background: rgba(6, 14, 31, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 14px 16px;
+  background: linear-gradient(145deg, rgba(14, 28, 60, 0.9) 0%, rgba(6, 16, 38, 0.96) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: 14px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-}
-
-.prof-resume-card:hover {
-  background: rgba(8, 18, 40, 0.95);
-  border-color: rgba(56, 189, 248, 0.35);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.4);
-}
-
-.prof-resume-top-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.prof-resume-file-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.55), 0 0 20px rgba(56, 189, 248, 0.04);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
   overflow: hidden;
 }
 
-.prof-resume-check {
-  width: 14px;
-  height: 14px;
+.prof-resume-card:hover {
+  background: linear-gradient(145deg, rgba(16, 32, 70, 0.95) 0%, rgba(8, 20, 46, 0.98) 100%);
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.65), 0 0 25px rgba(56, 189, 248, 0.1);
+  transform: translateY(-2px);
+}
+
+.prof-resume-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prof-resume-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(2, 6, 23, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.prof-resume-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.prof-resume-status-dot.is-active {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.prof-resume-status-text {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+.prof-resume-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prof-resume-action-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.prof-resume-action-pill--view {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+}
+
+.prof-resume-action-pill--view:hover {
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+  color: #030712;
+  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.45);
+  transform: translateY(-1px);
+}
+
+.prof-resume-action-pill--replace {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #cbd5e1;
+}
+
+.prof-resume-action-pill--replace:hover {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  transform: translateY(-1px);
+}
+
+/* Middle File Row */
+.prof-resume-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(2, 6, 23, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.prof-resume-doc-row:hover {
+  background: rgba(2, 6, 23, 0.8);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.prof-resume-doc-icon-box {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #f87171;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
-.prof-resume-filename {
-  font-size: 11.5px;
+.prof-resume-doc-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.prof-resume-doc-name {
+  font-size: 13px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: #f8fafc;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.prof-resume-replace-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  padding: 2px 7px;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  color: #94a3b8;
+.prof-resume-doc-meta {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Bottom Dropzone CTA */
+.prof-resume-dropzone-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px dashed rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.04);
+  color: #7dd3fc;
+  font-size: 11.5px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  flex-shrink: 0;
+  user-select: none;
 }
 
-.prof-resume-replace-btn:hover {
-  background: rgba(56, 189, 248, 0.15);
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.4);
+.prof-resume-dropzone-cta:hover {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: #38bdf8;
+  color: #ffffff;
 }
 
-.prof-resume-cta-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  text-align: center;
-  padding: 4px 0 2px;
+.prof-resume-dropzone-cta.is-uploading {
+  background: rgba(2, 132, 199, 0.15);
+  border-color: #38bdf8;
+  animation: profPulseGlow 1.5s infinite;
 }
 
-.prof-resume-cta-title {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: #f8fafc;
-}
-
-.prof-resume-cta-desc {
-  margin: 0;
-  font-size: 10.5px;
-  color: #64748b;
+@keyframes profPulseGlow {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
 }
 
 /* ==========================================================================
@@ -654,6 +776,13 @@
   width: 9px;
   height: 9px;
   filter: brightness(0) invert(1);
+}
+
+.prof-interest-plus {
+  font-size: 16px;
+  font-weight: 500;
+  color: #38bdf8;
+  line-height: 1;
 }
 
 .prof-interest-add-form {
@@ -996,4 +1125,539 @@
     flex-direction: column;
     align-items: stretch;
   }
+}
+
+/* Danger Zone Card */
+.prof-card--danger {
+  border-color: rgba(239, 68, 68, 0.25) !important;
+  background: rgba(15, 23, 42, 0.6) !important;
+  margin-top: 1.5rem;
+}
+
+.prof-danger-icon-box {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.prof-danger-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.6rem 1.25rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.prof-danger-btn:hover {
+  background: #ef4444;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   TOAST NOTIFICATION BANNER
+   ========================================================================== */
+.prof-toast {
+  position: fixed;
+  top: 76px;
+  right: 28px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  animation: profToastSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes profToastSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.prof-toast--success {
+  background: rgba(6, 78, 59, 0.92);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: #a7f3d0;
+}
+
+.prof-toast--error {
+  background: rgba(127, 29, 29, 0.92);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: #fecaca;
+}
+
+.prof-toast-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0.75;
+  transition: opacity 0.2s;
+}
+
+.prof-toast-close:hover {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   AVATAR UPLOAD OVERLAY & SPINNER
+   ========================================================================== */
+.prof-avatar-wrap {
+  cursor: pointer;
+}
+
+.prof-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #38bdf8;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.prof-avatar-wrap:hover .prof-avatar-overlay {
+  opacity: 1;
+}
+
+.prof-avatar-loading {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(7, 24, 51, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+}
+
+.prof-mini-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2.5px solid rgba(56, 189, 248, 0.25);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: profSpin 0.7s linear infinite;
+}
+
+@keyframes profSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ==========================================================================
+   HERO IDENTITY INLINE EDITOR
+   ========================================================================== */
+.prof-hero-edit-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+}
+
+.prof-hero-edit-btn:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.prof-hero-edit-icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.8;
+}
+
+.prof-hero-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 440px;
+}
+
+.prof-hero-inputs-row {
+  display: flex;
+  gap: 8px;
+}
+
+.prof-hero-input {
+  flex: 1;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 8px;
+  padding: 6px 12px;
+  color: #ffffff;
+  font-size: 13.5px;
+  font-weight: 500;
+  outline: none;
+  font-family: inherit;
+}
+
+.prof-hero-input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+.prof-hero-input--full {
+  width: 100%;
+}
+
+.prof-hero-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.prof-btn-save--sm,
+.prof-btn-cancel--sm {
+  padding: 4px 14px !important;
+  font-size: 12px !important;
+}
+
+/* ==========================================================================
+   RESUME CARD BUTTONS & PROGRESS
+   ========================================================================== */
+.prof-resume-btns-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.prof-resume-view-btn {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.prof-resume-view-btn:hover {
+  background: #38bdf8;
+  color: #030712;
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.35);
+}
+
+/* ==========================================================================
+   CAREER INFORMATION SELECT DROPDOWNS
+   ========================================================================== */
+.prof-edit-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  padding-right: 32px !important;
+  cursor: pointer;
+}
+
+.prof-edit-select option {
+  background-color: #0c1c38;
+  color: #f8fafc;
+}
+
+/* ==========================================================================
+   CONNECTED PROFILES ACTIONS & INLINE CONNECT
+   ========================================================================== */
+.prof-soc-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.prof-soc-connect-btn {
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.prof-soc-connect-btn:hover {
+  background: #38bdf8;
+  color: #030712;
+}
+
+.prof-soc-unlink-text-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: color 0.2s;
+}
+
+.prof-soc-unlink-text-btn:hover {
+  color: #f87171;
+  text-decoration: underline;
+}
+
+.prof-soc-status.is-disconnected {
+  color: #64748b;
+}
+
+.prof-connect-inline-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 8px;
+  margin-top: 4px;
+  animation: profToastSlide 0.2s ease;
+}
+
+.prof-connect-inline-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 12.5px;
+  outline: none;
+  font-family: inherit;
+}
+
+.prof-connect-inline-submit {
+  background: #0284c7;
+  border: none;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.prof-connect-inline-submit:hover {
+  background: #38bdf8;
+  color: #030712;
+}
+
+.prof-connect-inline-cancel {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 5px;
+}
+
+.prof-connect-inline-cancel:hover {
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   SKILLS AUTOCOMPLETE & SUGGESTIONS
+   ========================================================================== */
+.prof-add-skill-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.prof-skill-suggestions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+.prof-suggestion-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+
+.prof-suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prof-suggestion-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: #7dd3fc;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.prof-suggestion-chip:hover {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   MULTI-FACTOR AUTHENTICATION (MFA) CARD
+   ========================================================================== */
+.prof-card--mfa {
+  background: rgba(15, 23, 42, 0.65) !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+  margin-top: 0.5rem;
+}
+
+.prof-mfa-icon-box {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.prof-mfa-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.prof-mfa-status-pill {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 5px;
+  text-transform: uppercase;
+}
+
+.prof-mfa-status-pill.is-enabled {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #4ade80;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
+}
+
+.prof-mfa-status-pill.is-disabled {
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: #94a3b8;
+}
+
+.prof-mfa-desc {
+  margin: 3px 0 0;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.prof-mfa-actions-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.prof-mfa-action-btn {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.55rem 1.15rem;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.prof-mfa-action-btn--enable {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
+}
+
+.prof-mfa-action-btn--enable:hover {
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+  color: #030712;
+  box-shadow: 0 6px 20px rgba(56, 189, 248, 0.45);
+  transform: translateY(-1px);
+}
+
+.prof-mfa-action-btn--reconfig {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+}
+
+.prof-mfa-action-btn--reconfig:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.prof-mfa-action-btn--disable {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.prof-mfa-action-btn--disable:hover {
+  background: #ef4444;
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.3);
+  transform: translateY(-1px);
 }

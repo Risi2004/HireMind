@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { AuthProvider } from './context/AuthContext'
 import { ProfileSetupProvider } from './context/ProfileSetupContext'
 import AboutYou from './pages/AboutYou'
 import CareerStage from './pages/CareerStage'
@@ -17,8 +18,10 @@ import './App.css'
 
 export default function App() {
   return (
-    <ProfileSetupProvider>
-      <BrowserRouter>
+    <AuthProvider>
+      <ProfileSetupProvider>
+        <BrowserRouter>
+
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/signup" element={<Signup />} />
@@ -42,5 +45,7 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </ProfileSetupProvider>
+  </AuthProvider>
   )
 }
+

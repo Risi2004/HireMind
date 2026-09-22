@@ -4,6 +4,7 @@ import OnboardingHeader from '../components/OnboardingHeader'
 import aboutIcon from '../assets/icons/Background+Shadow.svg'
 import uploadIcon from '../assets/icons/Container.svg'
 import { useProfileSetup } from '../context/ProfileSetupContext'
+import { useAuth } from '../context/AuthContext'
 import './ProfileSetup.css'
 import './AboutYou.css'
 
@@ -18,6 +19,7 @@ export default function AboutYou() {
   const navigate = useNavigate()
   const inputRef = useRef(null)
   const { resumeFile, setResumeFile, clearResume } = useProfileSetup()
+  const { user: authUser } = useAuth()
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState('')
 
@@ -67,7 +69,7 @@ export default function AboutYou() {
   }
 
   function handleNext() {
-    if (!resumeFile) {
+    if (!resumeFile && !authUser?.resumeFileName) {
       setError('Please upload your resume before continuing.')
       return
     }
@@ -113,9 +115,11 @@ export default function AboutYou() {
             <img className="about-you__upload-icon" src={uploadIcon} alt="" />
           </span>
 
-          {resumeFile ? (
+          {resumeFile || authUser?.resumeFileName ? (
             <>
-              <span className="about-you__upload-label">{resumeFile.name}</span>
+              <span className="about-you__upload-label">
+                {resumeFile ? resumeFile.name : authUser.resumeFileName}
+              </span>
               <span className="about-you__upload-hint">Click to replace · PDF, DOC, DOCX</span>
               <button
                 type="button"
@@ -126,7 +130,7 @@ export default function AboutYou() {
                   setError('')
                 }}
               >
-                Remove
+                {resumeFile ? 'Remove' : 'Replace File'}
               </button>
             </>
           ) : (
