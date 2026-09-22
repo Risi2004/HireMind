@@ -102,10 +102,7 @@ export function ProfileSetupProvider({ children }) {
   const [careerStage, setCareerStage] = useState('')
   const [customCareerStage, setCustomCareerStage] = useState('')
   const [skills, setSkills] = useState([])
-  const [careerInterests, setCareerInterests] = useState([
-    'Full Stack Development',
-    'AI Engineering',
-  ])
+  const [careerInterests, setCareerInterests] = useState([])
 
   const { user: authUser, token, setUser: setAuthUser } = useAuth()
 
