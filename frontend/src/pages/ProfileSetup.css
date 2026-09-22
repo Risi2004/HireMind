@@ -439,6 +439,55 @@
   text-align: center;
 }
 
+.gh-oauth-action {
+  margin-bottom: 1rem;
+}
+
+.gh-oauth-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #24292e;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.gh-oauth-btn:hover {
+  background: #2f363d;
+  border-color: #38bdf8;
+  box-shadow: 0 4px 15px rgba(56, 189, 248, 0.2);
+}
+
+.gh-modal-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 1rem;
+  color: #64748b;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.gh-modal-divider::before,
+.gh-modal-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.gh-modal-divider span {
+  padding: 0 10px;
+}
+
 .gh-modal-form {
   display: flex;
   flex-direction: column;

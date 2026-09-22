@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext'
 const ProfileSetupContext = createContext(null)
 
 
-const EXPERIENCE_LEVELS = ['Beginner', 'Intermediate', 'Experienced']
+export const EXPERIENCE_LEVELS = ['Beginner', 'Intermediate', 'Experienced']
 
 export const FIELD_OPTIONS = [
   'Software Engineering',
@@ -32,13 +32,62 @@ export const FIELD_OPTIONS = [
 export const CAREER_STAGE_OPTIONS = [
   'Student / Undergraduate',
   'Recent Graduate',
-  'Intern / Trainee',
-  'Entry-Level Professional',
-  'Mid-Level Professional',
-  'Senior Professional',
-  'Career Changer',
-  'Returning to Work',
-  'Other',
+]
+
+export const POPULAR_SKILLS = [
+  'React',
+  'JavaScript',
+  'TypeScript',
+  'Node.js',
+  'Python',
+  'Java',
+  'C++',
+  'C#',
+  'HTML5',
+  'CSS3',
+  'Next.js',
+  'Vue.js',
+  'Angular',
+  'Express',
+  'Django',
+  'Flask',
+  'FastAPI',
+  'Spring Boot',
+  'SQL',
+  'PostgreSQL',
+  'MySQL',
+  'MongoDB',
+  'Redis',
+  'Docker',
+  'Kubernetes',
+  'AWS',
+  'Google Cloud',
+  'Azure',
+  'Git',
+  'Linux',
+  'REST APIs',
+  'GraphQL',
+  'Microservices',
+  'Machine Learning',
+  'Deep Learning',
+  'PyTorch',
+  'TensorFlow',
+  'Data Science',
+  'Pandas',
+  'NumPy',
+  'UI/UX Design',
+  'Figma',
+  'CI/CD',
+  'Cyber Security',
+  'Network Engineering',
+  'Agile / Scrum',
+  'System Design',
+  'Testing & QA',
+  'Go',
+  'Rust',
+  'Swift',
+  'Kotlin',
+  'Flutter',
 ]
 
 export function ProfileSetupProvider({ children }) {
@@ -48,8 +97,47 @@ export function ProfileSetupProvider({ children }) {
   const [experienceLevel, setExperienceLevel] = useState('Beginner')
   const [careerStage, setCareerStage] = useState('')
   const [customCareerStage, setCustomCareerStage] = useState('')
+  const [skills, setSkills] = useState([])
+  const [careerInterests, setCareerInterests] = useState([
+    'Full Stack Development',
+    'AI Engineering',
+  ])
 
   const { user: authUser, token, setUser: setAuthUser } = useAuth()
+
+  // Helper to add a skill (avoids duplicates, trims whitespace)
+  const addSkill = (skill) => {
+    if (!skill) return
+    const trimmed = typeof skill === 'string' ? skill.trim() : ''
+    if (!trimmed) return
+    setSkills((prev) => {
+      const exists = prev.some((s) => s.toLowerCase() === trimmed.toLowerCase())
+      if (exists) return prev
+      return [...prev, trimmed]
+    })
+  }
+
+  // Helper to remove a skill
+  const removeSkill = (skillToRemove) => {
+    setSkills((prev) => prev.filter((s) => s !== skillToRemove))
+  }
+
+  // Helper to add a career interest
+  const addCareerInterest = (interest) => {
+    if (!interest) return
+    const trimmed = typeof interest === 'string' ? interest.trim() : ''
+    if (!trimmed) return
+    setCareerInterests((prev) => {
+      const exists = prev.some((i) => i.toLowerCase() === trimmed.toLowerCase())
+      if (exists) return prev
+      return [...prev, trimmed]
+    })
+  }
+
+  // Helper to remove a career interest
+  const removeCareerInterest = (interestToRemove) => {
+    setCareerInterests((prev) => prev.filter((i) => i !== interestToRemove))
+  }
 
   // Track GitHub connection state
   const [githubData, setGithubData] = useState(() => authUser?.github || {
@@ -59,6 +147,7 @@ export function ProfileSetupProvider({ children }) {
     avatarUrl: '',
     name: '',
     publicRepos: 0,
+    repos: [],
   })
 
   // Sync with authUser when user updates
@@ -74,6 +163,12 @@ export function ProfileSetupProvider({ children }) {
     }
     if (authUser?.experienceLevel) {
       setExperienceLevel(authUser.experienceLevel)
+    }
+    if (authUser?.skills && Array.isArray(authUser.skills) && skills.length === 0) {
+      setSkills(authUser.skills)
+    }
+    if (authUser?.careerInterests && Array.isArray(authUser.careerInterests) && authUser.careerInterests.length > 0) {
+      setCareerInterests(authUser.careerInterests)
     }
   }, [authUser])
 
@@ -128,11 +223,23 @@ export function ProfileSetupProvider({ children }) {
       avatarUrl: '',
       name: '',
       publicRepos: 0,
+      repos: [],
     })
     if (data.user && setAuthUser) {
       setAuthUser(data.user)
     }
     return data
+  }
+
+  // Initiate full GitHub OAuth 2.0 redirect
+  const startGithubOAuth = (redirectPath = '/profile-setup') => {
+    const activeToken = token || localStorage.getItem('hiremind_token')
+    if (!activeToken) {
+      alert('Please log in first to connect GitHub.')
+      return
+    }
+    const backendUrl = window.location.port === '5173' ? 'http://localhost:5000' : ''
+    window.location.href = `${backendUrl}/api/profile/github/auth?token=${encodeURIComponent(activeToken)}&redirect=${encodeURIComponent(redirectPath)}`
   }
 
   // Submit complete profile setup (uploads resume to Cloudflare R2 and persists details)
@@ -148,6 +255,12 @@ export function ProfileSetupProvider({ children }) {
     formData.append('experienceLevel', experienceLevel)
     formData.append('careerStage', careerStage)
     formData.append('customCareerStage', customCareerStage)
+    if (skills && skills.length > 0) {
+      formData.append('skills', JSON.stringify(skills))
+    }
+    if (careerInterests && careerInterests.length > 0) {
+      formData.append('careerInterests', JSON.stringify(careerInterests))
+    }
     if (githubData?.username) {
       formData.append('githubUsername', githubData.username)
     }
@@ -191,9 +304,19 @@ export function ProfileSetupProvider({ children }) {
       customCareerStage,
       setCustomCareerStage,
       careerStageOptions: CAREER_STAGE_OPTIONS,
+      skills,
+      setSkills,
+      addSkill,
+      removeSkill,
+      popularSkills: POPULAR_SKILLS,
+      careerInterests,
+      setCareerInterests,
+      addCareerInterest,
+      removeCareerInterest,
       githubData,
       connectGithub,
       disconnectGithub,
+      startGithubOAuth,
       submitProfileSetup,
     }),
     [
@@ -204,6 +327,8 @@ export function ProfileSetupProvider({ children }) {
       experienceLevel,
       careerStage,
       customCareerStage,
+      skills,
+      careerInterests,
       githubData,
       token,
     ]

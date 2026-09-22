@@ -1,18 +1,47 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import OnboardingHeader from '../components/OnboardingHeader'
 import githubLogo from '../assets/icons/Vector.svg'
 import { useProfileSetup } from '../context/ProfileSetupContext'
+import { useAuth } from '../context/AuthContext'
 import './ProfileSetup.css'
 
 export default function ProfileSetup() {
   const navigate = useNavigate()
-  const { githubData, connectGithub, disconnectGithub } = useProfileSetup()
+  const [searchParams] = useSearchParams()
+  const { refreshUser } = useAuth()
+  const { githubData, connectGithub, disconnectGithub, startGithubOAuth } = useProfileSetup()
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [usernameInput, setUsernameInput] = useState('')
   const [isConnecting, setIsConnecting] = useState(false)
   const [error, setError] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
+
+  // Check for redirect return from GitHub OAuth flow
+  useEffect(() => {
+    const isConnected = searchParams.get('github_connected')
+    const ghError = searchParams.get('github_error')
+
+    if (isConnected === 'true') {
+      if (refreshUser) refreshUser()
+      setStatusMessage('GitHub account connected successfully!')
+      setTimeout(() => setStatusMessage(''), 4000)
+      navigate('/profile-setup', { replace: true })
+    } else if (ghError) {
+      if (ghError === 'oauth_not_configured') {
+        setError('GitHub OAuth credentials not yet configured in backend .env. You can enter your username below.')
+        setIsModalOpen(true)
+      } else if (ghError === 'access_denied') {
+        setError('GitHub authorization was canceled or access was denied.')
+        setIsModalOpen(true)
+      } else {
+        setError('GitHub connection failed. Please try again.')
+        setIsModalOpen(true)
+      }
+      navigate('/profile-setup', { replace: true })
+    }
+  }, [searchParams, refreshUser, navigate])
 
   function goToAboutYou() {
     navigate('/profile-setup/about-you')
@@ -59,6 +88,12 @@ export default function ProfileSetup() {
     <div className="profile-setup">
       <OnboardingHeader />
       <main className="profile-setup__card">
+        {statusMessage && (
+          <div className="profile-setup-banner" style={{ background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#4ade80', padding: '10px 16px', borderRadius: '10px', marginBottom: '16px', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>✓</span>
+            <span>{statusMessage}</span>
+          </div>
+        )}
         <div className="profile-setup__content">
           <h1 className="profile-setup__title">Build Your Professional Profile</h1>
           <p className="profile-setup__desc">
@@ -168,6 +203,22 @@ export default function ProfileSetup() {
                 {error}
               </div>
             )}
+
+            <div className="gh-oauth-action">
+              <button
+                type="button"
+                className="gh-oauth-btn"
+                onClick={() => startGithubOAuth('/profile-setup')}
+                disabled={isConnecting}
+              >
+                <img src={githubLogo} alt="" width={20} height={20} />
+                <span>Authorize with GitHub (1-Click OAuth)</span>
+              </button>
+            </div>
+
+            <div className="gh-modal-divider">
+              <span>or connect by username</span>
+            </div>
 
             <form onSubmit={handleConnectSubmit} className="gh-modal-form">
               <div className="gh-input-wrap">

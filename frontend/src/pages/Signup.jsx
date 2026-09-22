@@ -1,15 +1,37 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import logoImg from '../assets/images/logo.png'
 import logoDarkImg from '../assets/images/logo-dark.png'
+import logoIconBlack from '../assets/images/logo-icon.png'
 import './Auth.css'
+
+// Comprehensive Regex Patterns for Validation
+export const REGEX_PATTERNS = {
+  nameHasNumbers: /\d/,
+  nameValid: /^[a-zA-Z\s'-]{2,50}$/,
+  email: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/,
+  imageExt: /\.(jpe?g|png)$/i,
+  imageMime: /^image\/(jpeg|png)$/i,
+  password: {
+    minLength: /.{8,}/,
+    hasUpper: /[A-Z]/,
+    hasLower: /[a-z]/,
+    hasNumber: /\d/,
+    hasSymbol: /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/,
+    noSpaces: /^\S+$/,
+    noRepeatedChars: /(.)\1{2,}/,
+    // Horizontal, vertical, numerical, and alphabetical keyboard sequences (4+ length)
+    keyboardWalks:
+      /(?:qwer|wert|erty|rtyu|tyui|yuio|uiop|asdf|sdfg|dfgh|fghj|ghjk|hjkl|zxcv|xcvb|cvbn|vbnm|1234|2345|3456|4567|5678|6789|7890|abcd|bcde|cdef|defg|efgh|fghi|ghij|hijk|ijkl|jklm|klmn|lmno|mnop|nopq|opqr|pqrs|qrst|rstu|stuv|tuvw|uvwx|vwxy|wxyz|rewq|trew|ytre|iuyt|oiuy|poiu|lkjh|kjhg|jhgf|hgfd|gfed|fdsa|mnbv|nbvc|bvcx|vcxz|4321|5432|6543|7654|8765|9876|0987|dcba|edcb|fedc|gfed|hgfe|ihgf|jihg|kjih|lkji|mlkj|nmlk|onml|ponm|qpon|rqpo|srqp|tsrq|utsr|vuts|wvut|xwvu|yxwv|zyxw)/i,
+  },
+}
 
 export default function Signup() {
   const navigate = useNavigate()
-  const { register, verifyOtp, resendOtp, loading } = useAuth()
+  const { register, verifyOtp, resendOtp, setup2FA, enable2FA, loading } = useAuth()
 
-  // Steps: 'form' | 'otp'
+  // Steps: 'form' | 'otp' | 'mfa-prompt' | 'mfa-setup'
   const [step, setStep] = useState('form')
 
   // Form State
@@ -26,7 +48,6 @@ export default function Signup() {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
-
   // Avatar Upload State
   const [avatarFile, setAvatarFile] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
@@ -38,22 +59,69 @@ export default function Signup() {
   const [canResend, setCanResend] = useState(false)
   const otpInputRefs = useRef([])
 
+  // MFA Setup State
+  const [mfaData, setMfaData] = useState(null) // { secret, qrCodeUrl, manualEntryKey, otpauthUrl }
+  const [mfaFrequency, setMfaFrequency] = useState('every_two_weeks') // 'always' | 'every_two_weeks'
+  const [mfaCodeDigits, setMfaCodeDigits] = useState(['', '', '', '', '', ''])
+  const [mfaLoading, setMfaLoading] = useState(false)
+  const [copiedSecret, setCopiedSecret] = useState(false)
+  const mfaInputRefs = useRef([])
+
   // Feedback State
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
 
-  // Handle avatar selection
+  // Live password validation checks
+  const passwordChecks = useMemo(() => {
+    const pwd = formData.password || ''
+    return {
+      length: REGEX_PATTERNS.password.minLength.test(pwd),
+      upper: REGEX_PATTERNS.password.hasUpper.test(pwd),
+      lower: REGEX_PATTERNS.password.hasLower.test(pwd),
+      number: REGEX_PATTERNS.password.hasNumber.test(pwd),
+      symbol: REGEX_PATTERNS.password.hasSymbol.test(pwd),
+      noSpaces: REGEX_PATTERNS.password.noSpaces.test(pwd) && pwd.length > 0,
+      noRepeats: !REGEX_PATTERNS.password.noRepeatedChars.test(pwd),
+      noWalks: !REGEX_PATTERNS.password.keyboardWalks.test(pwd),
+    }
+  }, [formData.password])
+
+  // Password Strength Score (0 to 4)
+  const passwordStrength = useMemo(() => {
+    if (!formData.password) return { score: 0, label: 'None', class: '' }
+    let metCount = 0
+    if (passwordChecks.length) metCount++
+    if (passwordChecks.upper && passwordChecks.lower) metCount++
+    if (passwordChecks.number) metCount++
+    if (passwordChecks.symbol) metCount++
+    if (passwordChecks.noRepeats && passwordChecks.noWalks && passwordChecks.noSpaces) metCount++
+
+    if (metCount <= 2) return { score: 1, label: 'Weak', class: 'is-weak' }
+    if (metCount === 3) return { score: 2, label: 'Fair', class: 'is-fair' }
+    if (metCount === 4) return { score: 3, label: 'Good', class: 'is-good' }
+    return { score: 4, label: 'Strong', class: 'is-strong' }
+  }, [formData.password, passwordChecks])
+
+  // Handle avatar selection with strict regex & size limits
   const handleAvatarChange = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    if (!file.type.startsWith('image/')) {
-      setError('Please select an image file (JPEG, PNG, WEBP).')
+    // Validate file extension and MIME type using regex (JPG, JPEG, PNG only)
+    const isJpgPng =
+      REGEX_PATTERNS.imageExt.test(file.name) &&
+      REGEX_PATTERNS.imageMime.test(file.type)
+
+    if (!isJpgPng) {
+      setError('Profile picture must be a JPG, JPEG, or PNG image under 5MB.')
+      if (fileInputRef.current) fileInputRef.current.value = ''
       return
     }
 
+    // Size limit: strictly less than 5MB
     if (file.size > 5 * 1024 * 1024) {
-      setError('Profile picture must be under 5MB.')
+      setError('Profile picture must be less than 5MB.')
+      if (fileInputRef.current) fileInputRef.current.value = ''
       return
     }
 
@@ -92,46 +160,124 @@ export default function Signup() {
     }
   }, [step, resendCooldown])
 
-  // Step 1: Handle registration submit
+  // Step 1: Handle registration submit with regex validations
   const handleRegisterSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setSuccessMsg('')
 
-    if (!formData.firstName.trim()) {
+    const cleanFirst = formData.firstName.trim()
+    const cleanLast = formData.lastName.trim()
+    const cleanEmail = formData.email.trim()
+
+    // 1. First Name Validation
+    if (!cleanFirst) {
       setError('Please enter your first name.')
       return
     }
-    if (!formData.lastName.trim()) {
+    if (REGEX_PATTERNS.nameHasNumbers.test(cleanFirst)) {
+      setError('First name cannot contain numbers.')
+      return
+    }
+    if (!REGEX_PATTERNS.nameValid.test(cleanFirst)) {
+      setError('First name must contain only letters (at least 2 characters).')
+      return
+    }
+
+    // 2. Last Name Validation
+    if (!cleanLast) {
       setError('Please enter your last name.')
       return
     }
-    if (!formData.email.trim()) {
+    if (REGEX_PATTERNS.nameHasNumbers.test(cleanLast)) {
+      setError('Last name cannot contain numbers.')
+      return
+    }
+    if (!REGEX_PATTERNS.nameValid.test(cleanLast)) {
+      setError('Last name must contain only letters (at least 2 characters).')
+      return
+    }
+
+    // 3. Email Format Validation
+    if (!cleanEmail) {
       setError('Please enter your email address.')
       return
     }
+    if (!REGEX_PATTERNS.email.test(cleanEmail)) {
+      setError('Please enter a valid email address (e.g. name@domain.com).')
+      return
+    }
+
+    // 4. Password Rules Validation
     if (!formData.password) {
       setError('Please enter a password.')
       return
     }
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters long.')
+    if (!passwordChecks.length) {
+      setError('Password must be at least 8 characters long.')
       return
     }
+    if (!passwordChecks.upper) {
+      setError('Password must contain at least one uppercase letter (A-Z).')
+      return
+    }
+    if (!passwordChecks.lower) {
+      setError('Password must contain at least one lowercase letter (a-z).')
+      return
+    }
+    if (!passwordChecks.number) {
+      setError('Password must contain at least one number (0-9).')
+      return
+    }
+    if (!passwordChecks.symbol) {
+      setError('Password must contain at least one symbol (!@#$%^&*).')
+      return
+    }
+    if (!passwordChecks.noSpaces) {
+      setError('Password cannot contain spaces.')
+      return
+    }
+    if (!passwordChecks.noRepeats) {
+      setError('Password cannot contain 3 or more repeated characters in a row (e.g. "aaa", "111").')
+      return
+    }
+    if (!passwordChecks.noWalks) {
+      setError('Password cannot contain keyboard walks or sequential patterns (e.g. "qwerty", "1234", "abcd").')
+      return
+    }
+
+    // 5. Confirm Password Match
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match.')
       return
     }
+
+    // 6. Terms of Service
     if (!formData.agreeTerms) {
       setError('Please agree to the Terms of Service and Privacy Policy.')
       return
     }
 
+    // 7. Avatar (if chosen)
+    if (avatarFile) {
+      const isJpgPng =
+        REGEX_PATTERNS.imageExt.test(avatarFile.name) &&
+        REGEX_PATTERNS.imageMime.test(avatarFile.type)
+      if (!isJpgPng) {
+        setError('Profile picture must be a JPG, JPEG, or PNG image under 5MB.')
+        return
+      }
+      if (avatarFile.size > 5 * 1024 * 1024) {
+        setError('Profile picture must be less than 5MB.')
+        return
+      }
+    }
+
     try {
       const data = new FormData()
-      data.append('firstName', formData.firstName.trim())
-      data.append('lastName', formData.lastName.trim())
-      data.append('email', formData.email.trim())
+      data.append('firstName', cleanFirst)
+      data.append('lastName', cleanLast)
+      data.append('email', cleanEmail)
       data.append('password', formData.password)
       if (avatarFile) {
         data.append('avatar', avatarFile)
@@ -194,12 +340,98 @@ export default function Signup() {
 
     try {
       await verifyOtp(formData.email.trim(), fullOtp)
-      setSuccessMsg('Account verified successfully! Redirecting to profile setup...')
-      setTimeout(() => {
-        navigate('/profile-setup')
-      }, 1000)
+      // Transition to optional MFA setup prompt
+      setStep('mfa-prompt')
+      setSuccessMsg('Account verified successfully! Enhance your account security below.')
     } catch (err) {
       setError(err.message || 'Invalid or expired verification code.')
+    }
+  }
+
+  // MFA 6-digit input handlers
+  const handleMfaDigitChange = (index, value) => {
+    const char = value.replace(/\D/g, '').slice(-1)
+    const newDigits = [...mfaCodeDigits]
+    newDigits[index] = char
+    setMfaCodeDigits(newDigits)
+
+    if (char && index < 5) {
+      mfaInputRefs.current[index + 1]?.focus()
+    }
+  }
+
+  const handleMfaKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !mfaCodeDigits[index] && index > 0) {
+      mfaInputRefs.current[index - 1]?.focus()
+    }
+  }
+
+  const handleMfaPaste = (e) => {
+    e.preventDefault()
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (!pasted) return
+
+    const newDigits = [...mfaCodeDigits]
+    for (let i = 0; i < 6; i++) {
+      newDigits[i] = pasted[i] || ''
+    }
+    setMfaCodeDigits(newDigits)
+    const nextIdx = Math.min(pasted.length, 5)
+    mfaInputRefs.current[nextIdx]?.focus()
+  }
+
+  const handleCopySecret = () => {
+    if (mfaData?.manualEntryKey) {
+      navigator.clipboard.writeText(mfaData.manualEntryKey)
+      setCopiedSecret(true)
+      setTimeout(() => setCopiedSecret(false), 2500)
+    }
+  }
+
+  // Start MFA setup (fetch QR Code & secret)
+  const handleStartMfaSetup = async () => {
+    setError('')
+    setSuccessMsg('')
+    setMfaLoading(true)
+    try {
+      const data = await setup2FA()
+      setMfaData(data)
+      setStep('mfa-setup')
+    } catch (err) {
+      setError(err.message || 'Failed to initialize authenticator setup.')
+    } finally {
+      setMfaLoading(false)
+    }
+  }
+
+  // Skip MFA step (navigates directly to profile onboarding)
+  const handleSkipMfa = () => {
+    navigate('/profile-setup')
+  }
+
+  // Enable MFA submission
+  const handleEnableMfaSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSuccessMsg('')
+
+    const code = mfaCodeDigits.join('')
+    if (code.length !== 6) {
+      setError('Please enter the complete 6-digit code displayed in your authenticator app.')
+      return
+    }
+
+    setMfaLoading(true)
+    try {
+      await enable2FA(mfaData.secret, code, mfaFrequency)
+      setSuccessMsg('Two-factor authentication enabled successfully! Redirecting to profile setup...')
+      setTimeout(() => {
+        navigate('/profile-setup')
+      }, 1200)
+    } catch (err) {
+      setError(err.message || 'Invalid verification code. Please check your authenticator app and try again.')
+    } finally {
+      setMfaLoading(false)
     }
   }
 
@@ -236,40 +468,54 @@ export default function Signup() {
 
           <div className="auth-typo-container">
             <h1 className="auth-typo-title">
-              YOUR NEXT
-              <br />
-              OPPORTUNITY
-              <br />
-              STARTS HERE.
+              {step.startsWith('mfa') ? (
+                <>
+                  FORTIFY
+                  <br />
+                  YOUR ACCOUNT
+                  <br />
+                  SECURITY.
+                </>
+              ) : (
+                <>
+                  YOUR NEXT
+                  <br />
+                  OPPORTUNITY
+                  <br />
+                  STARTS HERE.
+                </>
+              )}
             </h1>
           </div>
 
-          <div className="auth-left-bottom">
-            <div className="auth-divider">
-              <span>OR CONTINUE WITH</span>
+          {!step.startsWith('mfa') && (
+            <div className="auth-left-bottom">
+              <div className="auth-divider">
+                <span>OR CONTINUE WITH</span>
+              </div>
+
+              <button
+                type="button"
+                className="auth-google-btn"
+                onClick={() => navigate('/profile-setup')}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24Z" />
+                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15Z" />
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z" />
+                </svg>
+                Continue with Google
+              </button>
+
+              <p className="auth-switch-text">
+                Already have an account?
+                <span className="auth-switch-link" onClick={() => navigate('/login')}>
+                  Sign In
+                </span>
+              </p>
             </div>
-
-            <button
-              type="button"
-              className="auth-google-btn"
-              onClick={() => navigate('/profile-setup')}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z" />
-                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24Z" />
-                <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15Z" />
-                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98Z" />
-              </svg>
-              Continue with Google
-            </button>
-
-            <p className="auth-switch-text">
-              Already have an account?
-              <span className="auth-switch-link" onClick={() => navigate('/login')}>
-                Sign In
-              </span>
-            </p>
-          </div>
+          )}
         </div>
 
         {/* Right Side: Subtitle & Form Card */}
@@ -351,6 +597,9 @@ export default function Signup() {
                         onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
                         required
                       />
+                      {REGEX_PATTERNS.nameHasNumbers.test(formData.firstName) && (
+                        <span className="auth-field-warning">⚠️ Numbers are not allowed</span>
+                      )}
                     </div>
 
                     <div className="auth-form-group">
@@ -364,6 +613,9 @@ export default function Signup() {
                         onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                         required
                       />
+                      {REGEX_PATTERNS.nameHasNumbers.test(formData.lastName) && (
+                        <span className="auth-field-warning">⚠️ Numbers are not allowed</span>
+                      )}
                     </div>
                   </div>
 
@@ -378,6 +630,9 @@ export default function Signup() {
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       required
                     />
+                    {formData.email && !REGEX_PATTERNS.email.test(formData.email.trim()) && (
+                      <span className="auth-field-warning">⚠️ Please enter a valid email format</span>
+                    )}
                   </div>
 
                   <div className="auth-form-row">
@@ -388,7 +643,7 @@ export default function Signup() {
                           id="password"
                           type={showPassword ? 'text' : 'password'}
                           className="auth-input"
-                          placeholder="Create password (6+ chars)"
+                          placeholder="Create password (8+ chars)"
                           value={formData.password}
                           onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                           required
@@ -445,8 +700,59 @@ export default function Signup() {
                           )}
                         </button>
                       </div>
+                      {formData.confirmPassword && formData.password !== formData.confirmPassword && (
+                        <span className="auth-field-warning">⚠️ Passwords do not match</span>
+                      )}
                     </div>
                   </div>
+
+                  {/* Real-time Password Rules & Strength Checklist */}
+                  {formData.password && (
+                    <div className="auth-password-rules-box">
+                      <div className="auth-password-rules-header">
+                        <span>Password Strength</span>
+                        <span className={`auth-password-strength-label ${passwordStrength.class}`}>
+                          {passwordStrength.label}
+                        </span>
+                      </div>
+                      <div className="auth-strength-bar">
+                        <div className={`auth-strength-fill ${passwordStrength.class}`} />
+                      </div>
+                      <div className="auth-rules-grid">
+                        <div className={`auth-rule-item ${passwordChecks.length ? 'is-met' : ''}`}>
+                          <span className="auth-rule-icon">{passwordChecks.length ? '✓' : '○'}</span>
+                          <span>8+ characters</span>
+                        </div>
+                        <div className={`auth-rule-item ${passwordChecks.upper && passwordChecks.lower ? 'is-met' : ''}`}>
+                          <span className="auth-rule-icon">{passwordChecks.upper && passwordChecks.lower ? '✓' : '○'}</span>
+                          <span>Upper & lowercase</span>
+                        </div>
+                        <div className={`auth-rule-item ${passwordChecks.number ? 'is-met' : ''}`}>
+                          <span className="auth-rule-icon">{passwordChecks.number ? '✓' : '○'}</span>
+                          <span>At least 1 number</span>
+                        </div>
+                        <div className={`auth-rule-item ${passwordChecks.symbol ? 'is-met' : ''}`}>
+                          <span className="auth-rule-icon">{passwordChecks.symbol ? '✓' : '○'}</span>
+                          <span>At least 1 symbol</span>
+                        </div>
+                        {!passwordChecks.noWalks && (
+                          <div className="auth-rule-alert">
+                            ⚠️ No keyboard walks allowed (e.g. "qwerty", "1234")
+                          </div>
+                        )}
+                        {!passwordChecks.noRepeats && (
+                          <div className="auth-rule-alert">
+                            ⚠️ No repeated characters allowed (e.g. "aaa", "111")
+                          </div>
+                        )}
+                        {!passwordChecks.noSpaces && (
+                          <div className="auth-rule-alert">
+                            ⚠️ Password cannot contain spaces
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
 
                   <label className="auth-checkbox-wrap">
@@ -465,8 +771,8 @@ export default function Signup() {
                   </button>
                 </form>
               </>
-            ) : (
-              /* OTP VERIFICATION STEP */
+            ) : step === 'otp' ? (
+              /* STEP 2: OTP VERIFICATION STEP */
               <div className="auth-otp-view">
                 <div className="otp-card-header">
                   <div className="otp-icon-wrap">
@@ -528,9 +834,199 @@ export default function Signup() {
 
                   <button type="submit" className="auth-submit-btn" disabled={loading}>
                     {loading ? 'Verifying...' : (
-                      <>Verify & Activate Account <span className="auth-btn-arrow">→</span></>
+                      <>Verify & Continue <span className="auth-btn-arrow">→</span></>
                     )}
                   </button>
+                </form>
+              </div>
+            ) : step === 'mfa-prompt' ? (
+              /* STEP 3: OPTIONAL TWO-FACTOR AUTHENTICATION PROMPT */
+              <div className="auth-mfa-view">
+                <div className="otp-card-header">
+                  <div className="auth-mfa-shield-icon">
+                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <path d="m9 12 2 2 4-4" />
+                    </svg>
+                  </div>
+                  <div className="auth-mfa-optional-badge">Optional Security Step</div>
+                  <h2 className="auth-card-title">Enable Authenticator App</h2>
+                  <p className="auth-card-desc">
+                    Protect your candidate profile and interview history with multi-factor authentication using apps like Google Authenticator, Microsoft Authenticator, Apple Passwords, or 1Password.
+                  </p>
+                </div>
+
+                {error && <div className="auth-alert-error">{error}</div>}
+                {successMsg && <div className="auth-alert-success">{successMsg}</div>}
+
+                <div className="auth-mfa-feature-list">
+                  <div className="auth-mfa-feature-item">
+                    <span className="auth-mfa-check-icon">✓</span>
+                    <div>
+                      <strong>Official HireMind Branding</strong>
+                      <p>Shows official HireMind logo & your email inside your authenticator app.</p>
+                    </div>
+                  </div>
+                  <div className="auth-mfa-feature-item">
+                    <span className="auth-mfa-check-icon">✓</span>
+                    <div>
+                      <strong>Flexible Verification Frequency</strong>
+                      <p>Choose between entering code on every login or remembering your trusted device for 2 weeks.</p>
+                    </div>
+                  </div>
+                  <div className="auth-mfa-feature-item">
+                    <span className="auth-mfa-check-icon">✓</span>
+                    <div>
+                      <strong>Instant Offer & Data Protection</strong>
+                      <p>Prevent unauthorized access even if your password is ever compromised.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="auth-mfa-cta-stack">
+                  <button
+                    type="button"
+                    className="auth-submit-btn"
+                    onClick={handleStartMfaSetup}
+                    disabled={mfaLoading}
+                  >
+                    {mfaLoading ? 'Loading Setup...' : (
+                      <>Connect Authenticator App <span className="auth-btn-arrow">→</span></>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="auth-skip-btn"
+                    onClick={handleSkipMfa}
+                  >
+                    Skip for Now (Continue to Profile) →
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* STEP 4: SCAN QR CODE, SET FREQUENCY & VERIFY CODE */
+              <div className="auth-mfa-view">
+                <div className="otp-card-header">
+                  <div className="auth-mfa-shield-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <circle cx="12" cy="11" r="3" />
+                      <path d="m12 14v3" />
+                    </svg>
+                  </div>
+                  <h2 className="auth-card-title">Scan Authenticator QR</h2>
+                  <p className="auth-card-desc">
+                    Scan with Google Authenticator, Microsoft Authenticator, or Apple Passwords
+                  </p>
+                </div>
+
+                {error && <div className="auth-alert-error">{error}</div>}
+                {successMsg && <div className="auth-alert-success">{successMsg}</div>}
+
+                {/* QR Code Container with Center Logo Branding */}
+                <div className="auth-mfa-qr-card">
+                  {mfaData?.qrCodeUrl ? (
+                    <div className="auth-mfa-qr-container">
+                      <img src={mfaData.qrCodeUrl} alt="HireMind 2FA QR Code" className="auth-mfa-qr-image" />
+                      <div className="auth-mfa-qr-badge" title="HireMind Verified">
+                        <img src={logoIconBlack} alt="HireMind" className="auth-mfa-qr-logo" />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="auth-mfa-loading-box">Generating secure QR code...</div>
+                  )}
+
+                  <div className="auth-mfa-secret-section">
+                    <span className="auth-mfa-secret-label">Can&apos;t scan? Enter key manually:</span>
+                    <div className="auth-mfa-secret-box">
+                      <code>{mfaData?.manualEntryKey}</code>
+                      <button
+                        type="button"
+                        className="auth-mfa-copy-btn"
+                        onClick={handleCopySecret}
+                        title="Copy key to clipboard"
+                      >
+                        {copiedSecret ? 'Copied ✓' : 'Copy'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Authentication Frequency Options */}
+                <div className="auth-mfa-frequency-wrapper">
+                  <label className="auth-mfa-section-label">When Should We Require This Code?</label>
+                  <div className="auth-mfa-frequency-options">
+                    <div
+                      className={`auth-mfa-freq-card ${mfaFrequency === 'every_two_weeks' ? 'is-selected' : ''}`}
+                      onClick={() => setMfaFrequency('every_two_weeks')}
+                    >
+                      <div className="auth-mfa-freq-radio">
+                        <span className={`auth-mfa-radio-dot ${mfaFrequency === 'every_two_weeks' ? 'is-active' : ''}`} />
+                      </div>
+                      <div className="auth-mfa-freq-info">
+                        <div className="auth-mfa-freq-title">
+                          Every 2 Weeks (14 Days)
+                          <span className="auth-mfa-pill-recommended">Recommended</span>
+                        </div>
+                        <div className="auth-mfa-freq-desc">
+                          Trust this device for 14 days before requiring a new 6-digit authenticator code.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`auth-mfa-freq-card ${mfaFrequency === 'always' ? 'is-selected' : ''}`}
+                      onClick={() => setMfaFrequency('always')}
+                    >
+                      <div className="auth-mfa-freq-radio">
+                        <span className={`auth-mfa-radio-dot ${mfaFrequency === 'always' ? 'is-active' : ''}`} />
+                      </div>
+                      <div className="auth-mfa-freq-info">
+                        <div className="auth-mfa-freq-title">Every Time I Log In</div>
+                        <div className="auth-mfa-freq-desc">
+                          Prompt for a fresh authenticator code on every single sign-in attempt for maximum defense.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6-Digit Code Verification Input */}
+                <form onSubmit={handleEnableMfaSubmit} className="auth-mfa-code-form">
+                  <label className="auth-mfa-section-label">Enter 6-Digit Code from App to Confirm:</label>
+                  <div className="otp-input-container" onPaste={handleMfaPaste}>
+                    {mfaCodeDigits.map((digit, idx) => (
+                      <input
+                        key={idx}
+                        ref={(el) => (mfaInputRefs.current[idx] = el)}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        className="otp-digit-input"
+                        value={digit}
+                        onChange={(e) => handleMfaDigitChange(idx, e.target.value)}
+                        onKeyDown={(e) => handleMfaKeyDown(idx, e)}
+                        autoFocus={idx === 0}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="auth-mfa-cta-stack">
+                    <button type="submit" className="auth-submit-btn" disabled={mfaLoading}>
+                      {mfaLoading ? 'Activating...' : (
+                        <>Activate 2FA & Complete Setup <span className="auth-btn-arrow">→</span></>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="auth-skip-btn"
+                      onClick={handleSkipMfa}
+                    >
+                      Skip for Now (Continue to Profile) →
+                    </button>
+                  </div>
                 </form>
               </div>
             )}

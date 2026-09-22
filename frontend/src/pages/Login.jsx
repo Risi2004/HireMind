@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import logoImg from '../assets/images/logo.png'
@@ -7,7 +7,7 @@ import './Auth.css'
 
 export default function Login() {
   const navigate = useNavigate()
-  const { login, loading } = useAuth()
+  const { login, verify2FALogin, loading } = useAuth()
 
   const [formData, setFormData] = useState({
     email: '',
@@ -17,8 +17,14 @@ export default function Login() {
 
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
-
   const [needsVerificationEmail, setNeedsVerificationEmail] = useState(null)
+
+  // 2FA State
+  const [requires2FA, setRequires2FA] = useState(false)
+  const [tempToken, setTempToken] = useState(null)
+  const [twoFactorFrequency, setTwoFactorFrequency] = useState('always')
+  const [twoFactorDigits, setTwoFactorDigits] = useState(['', '', '', '', '', ''])
+  const twoFactorInputRefs = useRef([])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -36,6 +42,13 @@ export default function Login() {
 
     try {
       const data = await login(formData.email.trim(), formData.password, formData.rememberMe)
+      if (data?.requires2FA) {
+        setRequires2FA(true)
+        setTempToken(data.tempToken)
+        setTwoFactorFrequency(data.frequency || 'always')
+        return
+      }
+
       if (data?.user?.isProfileSetupCompleted) {
         navigate('/dashboard')
       } else {
@@ -48,6 +61,57 @@ export default function Login() {
       } else {
         setError(err.message || 'Invalid email or password.')
       }
+    }
+  }
+
+  // 2FA digit input handlers
+  const handleDigitChange = (index, value) => {
+    const char = value.replace(/\D/g, '').slice(-1)
+    const newDigits = [...twoFactorDigits]
+    newDigits[index] = char
+    setTwoFactorDigits(newDigits)
+    if (char && index < 5) {
+      twoFactorInputRefs.current[index + 1]?.focus()
+    }
+  }
+
+  const handleDigitKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !twoFactorDigits[index] && index > 0) {
+      twoFactorInputRefs.current[index - 1]?.focus()
+    }
+  }
+
+  const handleDigitPaste = (e) => {
+    e.preventDefault()
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    if (!pasted) return
+    const newDigits = [...twoFactorDigits]
+    for (let i = 0; i < 6; i++) {
+      newDigits[i] = pasted[i] || ''
+    }
+    setTwoFactorDigits(newDigits)
+    const nextIdx = Math.min(pasted.length, 5)
+    twoFactorInputRefs.current[nextIdx]?.focus()
+  }
+
+  const handleVerify2FASubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    const code = twoFactorDigits.join('')
+    if (code.length !== 6) {
+      setError('Please enter the complete 6-digit code from your authenticator app.')
+      return
+    }
+
+    try {
+      const data = await verify2FALogin(tempToken, code)
+      if (data?.user?.isProfileSetupCompleted) {
+        navigate('/dashboard')
+      } else {
+        navigate('/profile-setup')
+      }
+    } catch (err) {
+      setError(err.message || 'Invalid or expired authenticator code. Please try again.')
     }
   }
 
@@ -111,100 +175,164 @@ export default function Login() {
           </p>
 
           <div className="auth-card">
-            <div className="auth-card-header">
-              <h2 className="auth-card-title">Welcome Back</h2>
-              <p className="auth-card-desc">
-                Sign in to continue your preparation.
-              </p>
-            </div>
-
-            <form className="auth-form" onSubmit={handleSubmit}>
-              {error && <div className="auth-alert-error">{error}</div>}
-
-              {needsVerificationEmail && (
-                <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-                  <button
-                    type="button"
-                    className="otp-resend-btn"
-                    onClick={() => navigate('/signup')}
-                  >
-                    Go to Verification &rarr;
-                  </button>
+            {requires2FA ? (
+              <div className="auth-mfa-view">
+                <div className="otp-card-header">
+                  <div className="auth-mfa-shield-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                      <path d="m9 12 2 2 4-4" />
+                    </svg>
+                  </div>
+                  <h2 className="auth-card-title">Two-Factor Authentication</h2>
+                  <p className="auth-card-desc">
+                    Enter the 6-digit verification code from your authenticator app (Google Authenticator, Microsoft Authenticator, Apple Passwords).
+                  </p>
+                  <div className="otp-email-badge">{formData.email}</div>
+                  {twoFactorFrequency === 'every_two_weeks' && (
+                    <div className="auth-mfa-device-hint">
+                      ✨ Signing in will remember this device for the next 14 days.
+                    </div>
+                  )}
                 </div>
-              )}
 
-              <div className="auth-form-group">
-                <label className="auth-label" htmlFor="email">Email Address</label>
-                <input
-                  id="email"
-                  type="email"
-                  className="auth-input"
-                  placeholder="you@example.com"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required
-                />
-              </div>
+                <form onSubmit={handleVerify2FASubmit}>
+                  {error && <div className="auth-alert-error">{error}</div>}
 
-              <div className="auth-form-group">
-                <label className="auth-label" htmlFor="password">Password</label>
-                <div className="auth-input-password-wrap">
-                  <input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    className="auth-input"
-                    placeholder="Enter password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="auth-password-toggle-btn"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? (
-                      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
-                      </svg>
-                    ) : (
-                      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                        <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
-                      </svg>
+                  <div className="otp-input-container" onPaste={handleDigitPaste}>
+                    {twoFactorDigits.map((digit, idx) => (
+                      <input
+                        key={idx}
+                        ref={(el) => (twoFactorInputRefs.current[idx] = el)}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        className="otp-digit-input"
+                        value={digit}
+                        onChange={(e) => handleDigitChange(idx, e.target.value)}
+                        onKeyDown={(e) => handleDigitKeyDown(idx, e)}
+                        autoFocus={idx === 0}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="otp-actions-row">
+                    <button
+                      type="button"
+                      className="otp-back-btn"
+                      onClick={() => {
+                        setRequires2FA(false)
+                        setTempToken(null)
+                        setError('')
+                      }}
+                    >
+                      ← Back to Login
+                    </button>
+                  </div>
+
+                  <button type="submit" className="auth-submit-btn" disabled={loading}>
+                    {loading ? 'Verifying Code...' : (
+                      <>Verify & Sign In <span className="auth-btn-arrow">→</span></>
                     )}
                   </button>
-
+                </form>
+              </div>
+            ) : (
+              <>
+                <div className="auth-card-header">
+                  <h2 className="auth-card-title">Welcome Back</h2>
+                  <p className="auth-card-desc">
+                    Sign in to continue your preparation.
+                  </p>
                 </div>
-              </div>
 
+                <form className="auth-form" onSubmit={handleSubmit}>
+                  {error && <div className="auth-alert-error">{error}</div>}
 
-              <div className="auth-options-row">
-                <label className="auth-checkbox-wrap">
-                  <input
-                    type="checkbox"
-                    checked={formData.rememberMe}
-                    onChange={(e) => setFormData({ ...formData, rememberMe: e.target.checked })}
-                  />
-                  <span>Remember me for 30 days</span>
-                </label>
+                  {needsVerificationEmail && (
+                    <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                      <button
+                        type="button"
+                        className="otp-resend-btn"
+                        onClick={() => navigate('/signup')}
+                      >
+                        Go to Verification &rarr;
+                      </button>
+                    </div>
+                  )}
 
-                <span
-                  className="auth-forgot-link"
-                  onClick={() => navigate('/forgot-password')}
-                >
-                  Forgot Password?
-                </span>
-              </div>
+                  <div className="auth-form-group">
+                    <label className="auth-label" htmlFor="email">Email Address</label>
+                    <input
+                      id="email"
+                      type="email"
+                      className="auth-input"
+                      placeholder="you@example.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      required
+                    />
+                  </div>
 
-              <button type="submit" className="auth-submit-btn" disabled={loading}>
-                {loading ? 'Signing In...' : (
-                  <>Login Account <span className="auth-btn-arrow">→</span></>
-                )}
-              </button>
-            </form>
+                  <div className="auth-form-group">
+                    <label className="auth-label" htmlFor="password">Password</label>
+                    <div className="auth-input-password-wrap">
+                      <input
+                        id="password"
+                        type={showPassword ? 'text' : 'password'}
+                        className="auth-input"
+                        placeholder="Enter password"
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="auth-password-toggle-btn"
+                        onClick={() => setShowPassword((prev) => !prev)}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? (
+                          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+                          </svg>
+                        ) : (
+                          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                            <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="auth-options-row">
+                    <label className="auth-checkbox-wrap">
+                      <input
+                        type="checkbox"
+                        checked={formData.rememberMe}
+                        onChange={(e) => setFormData({ ...formData, rememberMe: e.target.checked })}
+                      />
+                      <span>Remember me for 30 days</span>
+                    </label>
+
+                    <span
+                      className="auth-forgot-link"
+                      onClick={() => navigate('/forgot-password')}
+                    >
+                      Forgot Password?
+                    </span>
+                  </div>
+
+                  <button type="submit" className="auth-submit-btn" disabled={loading}>
+                    {loading ? 'Signing In...' : (
+                      <>Login Account <span className="auth-btn-arrow">→</span></>
+                    )}
+                  </button>
+                </form>
+              </>
+            )}
           </div>
         </div>
       </div>

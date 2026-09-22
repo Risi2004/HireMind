@@ -100,10 +100,11 @@ export function AuthProvider({ children }) {
   const login = async (email, password, rememberMe = true) => {
     setLoading(true)
     try {
+      const trustedDeviceToken = localStorage.getItem('hiremind_device_token') || null
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, rememberMe }),
+        body: JSON.stringify({ email, password, rememberMe, trustedDeviceToken }),
       })
 
       const data = await res.json()
@@ -112,6 +113,140 @@ export function AuthProvider({ children }) {
         error.needsVerification = data.needsVerification
         error.email = data.email
         throw error
+      }
+
+      // If Two-Factor Authentication is required, return data to trigger 2FA input
+      if (data.requires2FA) {
+        return data
+      }
+
+      if (data.token && data.user) {
+        saveAuthSession(data.token, data.user)
+      }
+
+      return data
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Setup 2FA: generates secret and QR code for authenticator apps
+  const setup2FA = async (customToken = null) => {
+    const activeToken = customToken || token
+    if (!activeToken) {
+      throw new Error('You must be signed in to configure two-factor authentication')
+    }
+
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/2fa/setup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${activeToken}`,
+        },
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to generate 2FA setup')
+      }
+
+      return data
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Enable 2FA: verifies 6-digit TOTP code and configures frequency preference
+  const enable2FA = async (secret, code, frequency = 'always', customToken = null) => {
+    const activeToken = customToken || token
+    if (!activeToken) {
+      throw new Error('You must be signed in to activate two-factor authentication')
+    }
+
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/2fa/enable', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${activeToken}`,
+        },
+        body: JSON.stringify({ secret, code, frequency }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to activate two-factor authentication')
+      }
+
+      if (data.trustedDeviceToken) {
+        localStorage.setItem('hiremind_device_token', data.trustedDeviceToken)
+      }
+
+      if (data.user) {
+        setUser(data.user)
+        localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+      }
+
+      return data
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Disable 2FA: deactivates two-factor authentication for the account
+  const disable2FA = async () => {
+    if (!token) {
+      throw new Error('You must be signed in to disable two-factor authentication')
+    }
+
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/2fa/disable', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to disable two-factor authentication')
+      }
+
+      localStorage.removeItem('hiremind_device_token')
+
+      if (data.user) {
+        setUser(data.user)
+        localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+      }
+
+      return data
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Verify 2FA Login: exchanges tempToken and 6-digit authenticator code for session token
+  const verify2FALogin = async (tempToken, code) => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/2fa/verify-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tempToken, code }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || 'Invalid authenticator code')
+      }
+
+      if (data.trustedDeviceToken) {
+        localStorage.setItem('hiremind_device_token', data.trustedDeviceToken)
       }
 
       if (data.token && data.user) {
@@ -189,26 +324,260 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // Refresh user data from /api/auth/me
+  const refreshUser = async () => {
+    if (!token) return null
+    try {
+      const res = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (res.ok && data.user) {
+        setUser(data.user)
+        localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+        return data.user
+      }
+    } catch (e) {
+      console.warn('Failed to refresh user:', e.message)
+    }
+    return null
+  }
+
+  // Update Profile fields
+  const updateUserProfile = async (updates) => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await fetch('/api/profile', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(updates),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to update profile')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Upload Resume
+  const uploadUserResume = async (file) => {
+    if (!token) throw new Error('Not authenticated')
+    const formData = new FormData()
+    formData.append('resume', file)
+    const res = await fetch('/api/profile/resume', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to upload resume')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Delete Resume
+  const deleteUserResume = async () => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await fetch('/api/profile/resume', {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to remove resume')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Upload Avatar
+  const uploadUserAvatar = async (file) => {
+    if (!token) throw new Error('Not authenticated')
+    const formData = new FormData()
+    formData.append('avatar', file)
+    const res = await fetch('/api/profile/avatar', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to upload avatar')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Connect GitHub
+  const connectUserGithub = async (username) => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await fetch('/api/profile/github/connect', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ username }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to connect GitHub')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Disconnect GitHub
+  const disconnectUserGithub = async () => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await fetch('/api/profile/github/disconnect', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to disconnect GitHub')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Update Skills
+  const updateUserSkills = async (payload) => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await fetch('/api/profile/skills', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to update skills')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Update Interests
+  const updateUserInterests = async (payload) => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await fetch('/api/profile/interests', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to update career interests')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Update LinkedIn
+  const updateUserLinkedin = async (payload) => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await fetch('/api/profile/linkedin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to update LinkedIn')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // If token exists on mount but user object is not yet loaded, refresh from /api/auth/me
+  useEffect(() => {
+    if (token && !user) {
+      refreshUser()
+    }
+  }, [token])
+
   const value = useMemo(
     () => ({
       user,
       token,
-      isAuthenticated: !!token && !!user,
+      isAuthenticated: Boolean(token || user),
       loading,
       login,
       register,
       verifyOtp,
       resendOtp,
+      setup2FA,
+      enable2FA,
+      disable2FA,
+      verify2FALogin,
       forgotPassword,
       resetPassword,
       deleteAccount,
       logout,
       setUser,
+      refreshUser,
+      updateUserProfile,
+      uploadUserResume,
+      deleteUserResume,
+      uploadUserAvatar,
+      connectUserGithub,
+      disconnectUserGithub,
+      updateUserSkills,
+      updateUserInterests,
+      updateUserLinkedin,
     }),
     [user, token, loading]
   )
-
-
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

@@ -48,6 +48,66 @@ const userSchema = new mongoose.Schema(
       enum: ['Beginner', 'Intermediate', 'Experienced'],
       default: 'Beginner',
     },
+    skills: {
+      type: [String],
+      default: [],
+    },
+    title: {
+      type: String,
+      default: '',
+    },
+    tier: {
+      type: String,
+      enum: ['FREE', 'PRO', 'ENTERPRISE'],
+      default: 'FREE',
+    },
+    careerInterests: {
+      type: [String],
+      default: ['Backend Development', 'Full Stack Development', 'AI Engineering'],
+    },
+    linkedin: {
+      connected: {
+        type: Boolean,
+        default: false,
+      },
+      username: {
+        type: String,
+        default: '',
+      },
+      profileUrl: {
+        type: String,
+        default: '',
+      },
+      name: {
+        type: String,
+        default: '',
+      },
+    },
+    bio: {
+      type: String,
+      default: '',
+    },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    twoFactorSecret: {
+      type: String,
+      default: '',
+      select: false,
+    },
+    twoFactorFrequency: {
+      type: String,
+      enum: ['always', 'every_two_weeks'],
+      default: 'always',
+    },
+    twoFactorTrustedDevices: [
+      {
+        deviceToken: { type: String, required: true },
+        expiresAt: { type: Date, required: true },
+        userAgent: { type: String, default: '' },
+      },
+    ],
     isProfileSetupCompleted: {
       type: Boolean,
       default: false,
@@ -85,6 +145,25 @@ const userSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      accessToken: {
+        type: String,
+        default: '',
+        select: false,
+      },
+      repos: [
+        {
+          name: String,
+          fullName: String,
+          description: String,
+          url: String,
+          language: String,
+          stars: Number,
+          forks: Number,
+          isPrivate: Boolean,
+          defaultBranch: String,
+          updatedAt: Date,
+        },
+      ],
       connectedAt: {
         type: Date,
       },
@@ -108,10 +187,11 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Mask password completely from JSON outputs
+// Mask password and twoFactorSecret completely from JSON outputs
 userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
+  delete obj.twoFactorSecret;
   return obj;
 };
 
