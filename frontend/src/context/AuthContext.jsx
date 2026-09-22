@@ -341,6 +341,11 @@ export function AuthProvider({ children }) {
         localStorage.setItem('hiremind_user', JSON.stringify(data.user))
         return data.user
       }
+      // Token is stale/invalid (e.g. after switching databases) — clear it cleanly
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        console.warn('[Auth] Stale token detected — clearing session')
+        saveAuthSession(null, null)
+      }
     } catch (e) {
       console.warn('Failed to refresh user:', e.message)
     }
