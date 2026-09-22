@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { useAuth } from './AuthContext'
 import { getApiUrl } from '../config/api'
 
@@ -102,10 +102,7 @@ export function ProfileSetupProvider({ children }) {
   const [careerStage, setCareerStage] = useState('')
   const [customCareerStage, setCustomCareerStage] = useState('')
   const [skills, setSkills] = useState([])
-  const [careerInterests, setCareerInterests] = useState([
-    'Full Stack Development',
-    'AI Engineering',
-  ])
+  const [careerInterests, setCareerInterests] = useState([])
 
   const { user: authUser, token, setUser: setAuthUser } = useAuth()
 
@@ -154,8 +151,10 @@ export function ProfileSetupProvider({ children }) {
     repos: [],
   })
 
-  // Sync with authUser when user updates
-  useMemo(() => {
+  // Sync with authUser when user updates.
+  // IMPORTANT: Must use useEffect, NOT useMemo — calling setState inside useMemo
+  // happens during the render phase and causes a blank screen / infinite loop in React 18+.
+  useEffect(() => {
     if (authUser?.github) {
       setGithubData(authUser.github)
     }
