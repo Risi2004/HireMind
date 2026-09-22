@@ -18,6 +18,7 @@ import Navbar from '../components/Navbar'
 import DeleteAccountModal from '../components/DeleteAccountModal'
 import TwoFactorModal from '../components/TwoFactorModal'
 import { useAuth } from '../context/AuthContext'
+import { getApiUrl } from '../config/api'
 import {
   CAREER_STAGE_OPTIONS,
   FIELD_OPTIONS,
@@ -178,7 +179,7 @@ export default function Profile() {
     }
 
     const separator = targetUrl.includes('?') ? '&' : '?'
-    const fullUrl = `${targetUrl}${separator}token=${encodeURIComponent(token || '')}`
+    const fullUrl = `${getApiUrl(targetUrl)}${separator}token=${encodeURIComponent(token || '')}`
     window.open(fullUrl, '_blank')
   }
 
