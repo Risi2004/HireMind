@@ -1,4 +1,8 @@
 import { createContext, useContext, useState, useEffect, useMemo } from 'react'
+import { getApiUrl } from '../config/api'
+
+// Helper for making API calls with dynamic backend base URL (Method 2)
+const apiFetch = (endpoint, options) => fetch(getApiUrl(endpoint), options)
 
 const AuthContext = createContext(null)
 
@@ -40,7 +44,7 @@ export function AuthProvider({ children }) {
   const register = async (formData) => {
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         body: formData, // fetch will automatically set multipart/form-data boundary
       })
@@ -60,7 +64,7 @@ export function AuthProvider({ children }) {
   const verifyOtp = async (email, otp) => {
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/verify-otp', {
+      const res = await apiFetch('/api/auth/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp }),
@@ -83,7 +87,7 @@ export function AuthProvider({ children }) {
 
   // Resend OTP
   const resendOtp = async (email) => {
-    const res = await fetch('/api/auth/resend-otp', {
+    const res = await apiFetch('/api/auth/resend-otp', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
@@ -101,7 +105,7 @@ export function AuthProvider({ children }) {
     setLoading(true)
     try {
       const trustedDeviceToken = localStorage.getItem('hiremind_device_token') || null
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, rememberMe, trustedDeviceToken }),
@@ -139,7 +143,7 @@ export function AuthProvider({ children }) {
 
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/2fa/setup', {
+      const res = await apiFetch('/api/auth/2fa/setup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -167,7 +171,7 @@ export function AuthProvider({ children }) {
 
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/2fa/enable', {
+      const res = await apiFetch('/api/auth/2fa/enable', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -204,7 +208,7 @@ export function AuthProvider({ children }) {
 
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/2fa/disable', {
+      const res = await apiFetch('/api/auth/2fa/disable', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -234,7 +238,7 @@ export function AuthProvider({ children }) {
   const verify2FALogin = async (tempToken, code) => {
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/2fa/verify-login', {
+      const res = await apiFetch('/api/auth/2fa/verify-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tempToken, code }),
@@ -263,7 +267,7 @@ export function AuthProvider({ children }) {
   const forgotPassword = async (email) => {
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/forgot-password', {
+      const res = await apiFetch('/api/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
@@ -283,7 +287,7 @@ export function AuthProvider({ children }) {
   const resetPassword = async (email, otp, newPassword) => {
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/reset-password', {
+      const res = await apiFetch('/api/auth/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, otp, newPassword }),
@@ -304,7 +308,7 @@ export function AuthProvider({ children }) {
     setLoading(true)
     try {
       if (token) {
-        const res = await fetch('/api/auth/account', {
+        const res = await apiFetch('/api/auth/account', {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',
@@ -328,7 +332,7 @@ export function AuthProvider({ children }) {
   const refreshUser = async () => {
     if (!token) return null
     try {
-      const res = await fetch('/api/auth/me', {
+      const res = await apiFetch('/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` },
       })
       const data = await res.json()
@@ -346,7 +350,7 @@ export function AuthProvider({ children }) {
   // Update Profile fields
   const updateUserProfile = async (updates) => {
     if (!token) throw new Error('Not authenticated')
-    const res = await fetch('/api/profile', {
+    const res = await apiFetch('/api/profile', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -370,7 +374,7 @@ export function AuthProvider({ children }) {
     if (!token) throw new Error('Not authenticated')
     const formData = new FormData()
     formData.append('resume', file)
-    const res = await fetch('/api/profile/resume', {
+    const res = await apiFetch('/api/profile/resume', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -391,7 +395,7 @@ export function AuthProvider({ children }) {
   // Delete Resume
   const deleteUserResume = async () => {
     if (!token) throw new Error('Not authenticated')
-    const res = await fetch('/api/profile/resume', {
+    const res = await apiFetch('/api/profile/resume', {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -413,7 +417,7 @@ export function AuthProvider({ children }) {
     if (!token) throw new Error('Not authenticated')
     const formData = new FormData()
     formData.append('avatar', file)
-    const res = await fetch('/api/profile/avatar', {
+    const res = await apiFetch('/api/profile/avatar', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -434,7 +438,7 @@ export function AuthProvider({ children }) {
   // Connect GitHub
   const connectUserGithub = async (username) => {
     if (!token) throw new Error('Not authenticated')
-    const res = await fetch('/api/profile/github/connect', {
+    const res = await apiFetch('/api/profile/github/connect', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -456,7 +460,7 @@ export function AuthProvider({ children }) {
   // Disconnect GitHub
   const disconnectUserGithub = async () => {
     if (!token) throw new Error('Not authenticated')
-    const res = await fetch('/api/profile/github/disconnect', {
+    const res = await apiFetch('/api/profile/github/disconnect', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -476,7 +480,7 @@ export function AuthProvider({ children }) {
   // Update Skills
   const updateUserSkills = async (payload) => {
     if (!token) throw new Error('Not authenticated')
-    const res = await fetch('/api/profile/skills', {
+    const res = await apiFetch('/api/profile/skills', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -498,7 +502,7 @@ export function AuthProvider({ children }) {
   // Update Interests
   const updateUserInterests = async (payload) => {
     if (!token) throw new Error('Not authenticated')
-    const res = await fetch('/api/profile/interests', {
+    const res = await apiFetch('/api/profile/interests', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -520,7 +524,7 @@ export function AuthProvider({ children }) {
   // Update LinkedIn
   const updateUserLinkedin = async (payload) => {
     if (!token) throw new Error('Not authenticated')
-    const res = await fetch('/api/profile/linkedin', {
+    const res = await apiFetch('/api/profile/linkedin', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

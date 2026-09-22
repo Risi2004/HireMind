@@ -1,5 +1,9 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 import { useAuth } from './AuthContext'
+import { getApiUrl } from '../config/api'
+
+// Helper for making API calls with dynamic backend base URL (Method 2)
+const apiFetch = (endpoint, options) => fetch(getApiUrl(endpoint), options)
 
 const ProfileSetupContext = createContext(null)
 
@@ -180,7 +184,7 @@ export function ProfileSetupProvider({ children }) {
   // Connect GitHub account
   const connectGithub = async (username) => {
     if (!token) throw new Error('You must be logged in to connect GitHub.')
-    const res = await fetch('/api/profile/github/connect', {
+    const res = await apiFetch('/api/profile/github/connect', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -204,7 +208,7 @@ export function ProfileSetupProvider({ children }) {
   // Disconnect GitHub account
   const disconnectGithub = async () => {
     if (!token) return
-    const res = await fetch('/api/profile/github/disconnect', {
+    const res = await apiFetch('/api/profile/github/disconnect', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -238,8 +242,8 @@ export function ProfileSetupProvider({ children }) {
       alert('Please log in first to connect GitHub.')
       return
     }
-    const backendUrl = window.location.port === '5173' ? 'http://localhost:5000' : ''
-    window.location.href = `${backendUrl}/api/profile/github/auth?token=${encodeURIComponent(activeToken)}&redirect=${encodeURIComponent(redirectPath)}`
+    const targetUrl = getApiUrl(`/api/profile/github/auth?token=${encodeURIComponent(activeToken)}&redirect=${encodeURIComponent(redirectPath)}`)
+    window.location.href = targetUrl
   }
 
   // Submit complete profile setup (uploads resume to Cloudflare R2 and persists details)
@@ -265,7 +269,7 @@ export function ProfileSetupProvider({ children }) {
       formData.append('githubUsername', githubData.username)
     }
 
-    const res = await fetch('/api/profile/setup', {
+    const res = await apiFetch('/api/profile/setup', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
