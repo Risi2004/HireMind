@@ -1,0 +1,889 @@
+/* ==========================================================================
+   HireMind Admin - Performance Analytics Styles (AdminAnalytics.css)
+   ========================================================================== */
+
+/* Top Controls Header */
+.an-controls-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1rem 1.25rem;
+}
+
+.an-controls-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.an-controls-icon-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--admin-radius-md);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--admin-accent-cyan);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.an-controls-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  margin: 0;
+}
+
+.an-controls-desc {
+  font-size: 12px;
+  color: var(--admin-text-muted);
+  margin: 2px 0 0 0;
+}
+
+/* Date Range Pill Toggle Group */
+.an-date-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: rgba(7, 12, 24, 0.7);
+  padding: 4px;
+  border-radius: var(--admin-radius-md);
+  border: 1px solid var(--admin-border-subtle);
+}
+
+.an-date-pill {
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--admin-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--admin-transition);
+}
+
+.an-date-pill:hover {
+  color: var(--admin-text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.an-date-pill--active {
+  color: var(--admin-accent-cyan);
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+}
+
+/* Custom Date Selector Panel */
+.an-custom-date-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1.5rem;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: var(--admin-radius-md);
+  flex-wrap: wrap;
+  animation: anFadeIn 0.2s ease-out;
+}
+
+.an-custom-date-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12.5px;
+  color: var(--admin-text-muted);
+}
+
+.an-custom-date-field input[type="date"] {
+  background: rgba(7, 12, 24, 0.8);
+  border: 1px solid var(--admin-border-subtle);
+  color: var(--admin-text-primary);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  outline: none;
+}
+
+.an-custom-date-field input[type="date"]:focus {
+  border-color: var(--admin-accent-cyan);
+}
+
+/* 6 KPI Cards Grid */
+.an-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1400px) {
+  .an-kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .an-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 500px) {
+  .an-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.an-kpi-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.15rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+  transition: all var(--admin-transition);
+}
+
+.an-kpi-card:hover {
+  border-color: rgba(56, 189, 248, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.an-kpi-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.an-kpi-card__label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--admin-text-muted);
+}
+
+.an-kpi-card__icon-wrap {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.an-kpi-card__icon-wrap--cyan {
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--admin-accent-cyan);
+}
+
+.an-kpi-card__icon-wrap--emerald {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--admin-accent-emerald);
+}
+
+.an-kpi-card__icon-wrap--purple {
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--admin-accent-purple);
+}
+
+.an-kpi-card__icon-wrap--amber {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--admin-accent-amber);
+}
+
+.an-kpi-card__icon-wrap--blue {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+}
+
+.an-kpi-card__icon-wrap--rose {
+  background: rgba(244, 63, 94, 0.12);
+  color: var(--admin-accent-rose);
+}
+
+.an-kpi-card__value {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.4rem;
+}
+
+.an-kpi-card__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 11.5px;
+}
+
+.an-kpi-card__trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.an-kpi-card__trend--up {
+  color: var(--admin-accent-emerald);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.an-kpi-card__trend--neutral {
+  color: var(--admin-accent-cyan);
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.an-kpi-card__subtext {
+  color: var(--admin-text-dim);
+}
+
+/* Charts Grid Layouts */
+.an-charts-row-2col {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1080px) {
+  .an-charts-row-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.an-charts-row-3col {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr 1fr;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1200px) {
+  .an-charts-row-3col {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .an-charts-row-3col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* SVG Line & Area Charts */
+.an-chart-container {
+  position: relative;
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+.an-chart-svg {
+  width: 100%;
+  height: 220px;
+  display: block;
+}
+
+.an-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  margin-top: 0.75rem;
+  font-size: 12px;
+}
+
+.an-chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--admin-text-muted);
+}
+
+.an-chart-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Bar Pillars Container */
+.an-bar-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  height: 200px;
+  padding: 1rem 0.5rem 0.5rem;
+  border-bottom: 1px solid var(--admin-border-subtle);
+  margin-top: 0.5rem;
+}
+
+.an-bar-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 6px;
+  position: relative;
+}
+
+.an-bar-group:hover .an-bar-pillar {
+  filter: brightness(1.25);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.4);
+}
+
+.an-bar-group:hover .an-bar-tooltip {
+  opacity: 1;
+  transform: translateY(-4px);
+}
+
+.an-bar-pillar {
+  width: 100%;
+  max-width: 32px;
+  border-radius: 5px 5px 2px 2px;
+  transition: all var(--admin-transition);
+  min-height: 8px;
+}
+
+.an-bar-pillar--cyan {
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
+}
+
+.an-bar-pillar--emerald {
+  background: linear-gradient(180deg, #34d399, #059669);
+}
+
+.an-bar-pillar--purple {
+  background: linear-gradient(180deg, #c084fc, #7c3aed);
+}
+
+.an-bar-pillar--amber {
+  background: linear-gradient(180deg, #fbbf24, #d97706);
+}
+
+.an-bar-val {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.an-bar-label {
+  font-size: 11px;
+  color: var(--admin-text-muted);
+  white-space: nowrap;
+}
+
+.an-bar-tooltip {
+  position: absolute;
+  top: -24px;
+  background: #0f172a;
+  border: 1px solid var(--admin-border-subtle);
+  color: #fff;
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+/* Completion Rate Donut/Gauge Section */
+.an-gauge-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 0.75rem 0;
+}
+
+.an-donut-container {
+  position: relative;
+  width: 140px;
+  height: 140px;
+}
+
+.an-donut-inner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.an-donut-percent {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--admin-accent-emerald);
+  line-height: 1;
+}
+
+.an-donut-sub {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--admin-text-muted);
+  margin-top: 4px;
+}
+
+.an-gauge-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.an-gauge-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.an-gauge-item-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.an-gauge-item-title {
+  color: var(--admin-text-primary);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.an-gauge-item-val {
+  color: var(--admin-text-muted);
+  font-weight: 700;
+}
+
+.an-gauge-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.an-gauge-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Target Roles Horizontal Ranked Bars */
+.an-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.an-role-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.an-role-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.an-role-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.an-role-rank {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--admin-accent-cyan);
+  font-size: 10px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.an-role-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--admin-text-primary);
+}
+
+.an-role-meta {
+  font-size: 12px;
+  color: var(--admin-text-muted);
+  font-weight: 600;
+}
+
+.an-role-bar {
+  height: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.an-role-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #818cf8);
+  border-radius: 4px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Interview Duration Histogram */
+.an-duration-hist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.an-duration-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.an-duration-bracket {
+  width: 95px;
+  font-size: 12px;
+  color: var(--admin-text-muted);
+  font-weight: 600;
+}
+
+.an-duration-bar-track {
+  flex: 1;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.an-duration-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.3), rgba(56, 189, 248, 0.7));
+  border-radius: 6px;
+  transition: width 0.6s ease;
+}
+
+.an-duration-bar-fill--peak {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.4), rgba(16, 185, 129, 0.85));
+}
+
+.an-duration-stat {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  width: 70px;
+  text-align: right;
+}
+
+/* ==========================================================================
+   DEDICATED PILOT ANALYTICS & CONVERSION FUNNEL SECTION
+   ========================================================================== */
+
+.an-pilot-section {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.85), rgba(11, 18, 34, 0.95));
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.75rem;
+  margin-top: 2rem;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  position: relative;
+  overflow: hidden;
+}
+
+.an-pilot-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 340px;
+  height: 200px;
+  background: radial-gradient(circle at 100% 0%, rgba(168, 85, 247, 0.12), transparent 70%);
+  pointer-events: none;
+}
+
+.an-pilot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.an-pilot-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.an-pilot-icon-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--admin-radius-md);
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--admin-accent-purple);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.an-pilot-title {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.an-pilot-subtitle {
+  font-size: 13px;
+  color: var(--admin-text-muted);
+  margin: 3px 0 0 0;
+}
+
+/* Pilot Highlights (5 KPI Stat Chips) */
+.an-pilot-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 1024px) {
+  .an-pilot-stats-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .an-pilot-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.an-pilot-stat-chip {
+  background: rgba(7, 12, 24, 0.7);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: all var(--admin-transition);
+}
+
+.an-pilot-stat-chip:hover {
+  border-color: rgba(168, 85, 247, 0.4);
+  transform: translateY(-2px);
+}
+
+.an-pilot-stat-chip__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--admin-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.35rem;
+}
+
+.an-pilot-stat-chip__val {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.an-pilot-stat-chip__sub {
+  font-size: 11.5px;
+  color: var(--admin-text-dim);
+  margin-top: 0.3rem;
+}
+
+/* ==========================================================================
+   PILOT CONVERSION FUNNEL
+   ========================================================================== */
+
+.an-funnel-card {
+  background: rgba(7, 12, 24, 0.6);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.5rem;
+}
+
+.an-funnel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+}
+
+.an-funnel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  margin: 0;
+}
+
+.an-funnel-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.an-funnel-stage-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.an-funnel-stage-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  position: relative;
+  overflow: hidden;
+  transition: all var(--admin-transition);
+}
+
+.an-funnel-stage-card:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.an-funnel-stage-backdrop-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.12), rgba(168, 85, 247, 0.08));
+  border-right: 2px solid rgba(56, 189, 248, 0.5);
+  pointer-events: none;
+  transition: width 0.6s ease;
+}
+
+.an-funnel-stage-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  position: relative;
+  z-index: 1;
+}
+
+.an-funnel-stage-number {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--admin-accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 11px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.an-funnel-stage-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.an-funnel-stage-metrics {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+.an-funnel-stage-count {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+}
+
+.an-funnel-stage-pct {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-accent-emerald);
+  background: rgba(16, 185, 129, 0.1);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+/* Arrow connector between stages */
+.an-funnel-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  color: var(--admin-text-muted);
+  font-size: 11.5px;
+}
+
+.an-funnel-connector-arrow {
+  color: var(--admin-accent-purple);
+  font-size: 13px;
+}
+
+.an-funnel-connector-rate {
+  font-weight: 600;
+  color: var(--admin-accent-cyan);
+}
+
+@keyframes anFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -15,8 +15,9 @@ const {
   disable2FA,
   verify2FALogin,
   getBrandLogo,
+  verifyAdminStatus,
 } = require('../controllers/authController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, requireAdmin } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -73,6 +74,9 @@ router.get('/avatar/:filename', getAvatar);
 
 // Public brand logo for authenticator apps (Google Authenticator, Microsoft Authenticator, 2FAS, etc.)
 router.get('/logo.png', getBrandLogo);
+
+// Administrator verification & authentication validation
+router.get('/admin/verify', protect, requireAdmin, verifyAdminStatus);
 
 module.exports = router;
 

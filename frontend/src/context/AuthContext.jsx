@@ -555,11 +555,16 @@ export function AuthProvider({ children }) {
     }
   }, [token])
 
+  const isAdmin = useMemo(() => {
+    return user?.role === 'admin' || user?.email === 'admin@gmail.com'
+  }, [user])
+
   const value = useMemo(
     () => ({
       user,
       token,
       isAuthenticated: Boolean(token || user),
+      isAdmin,
       loading,
       login,
       register,

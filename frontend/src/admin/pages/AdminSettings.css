@@ -1,0 +1,330 @@
+/* ==========================================================================
+   HireMind Admin - Platform Settings Styles (AdminSettings.css)
+   ========================================================================== */
+
+/* Top Action Header */
+.st-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.15rem 1.35rem;
+}
+
+.st-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.st-header-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--admin-radius-md);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--admin-accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.st-header-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  margin: 0;
+}
+
+.st-header-subtitle {
+  font-size: 12px;
+  color: var(--admin-text-muted);
+  margin: 2px 0 0 0;
+}
+
+.st-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Tab Navigation Pills */
+.st-tabs-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.st-tab-pill {
+  padding: 6px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 20px;
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  color: var(--admin-text-muted);
+  cursor: pointer;
+  transition: all var(--admin-transition);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.st-tab-pill:hover {
+  color: var(--admin-text-primary);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.st-tab-pill--active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--admin-accent-cyan);
+  color: var(--admin-accent-cyan);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.12);
+}
+
+/* Sections Stack */
+.st-sections-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Section Card */
+.st-section-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  transition: all var(--admin-transition);
+}
+
+.st-section-card:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.st-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--admin-border-subtle);
+}
+
+.st-section-icon-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.st-section-icon-badge--cyan {
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--admin-accent-cyan);
+}
+
+.st-section-icon-badge--purple {
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--admin-accent-purple);
+}
+
+.st-section-icon-badge--emerald {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--admin-accent-emerald);
+}
+
+.st-section-icon-badge--amber {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--admin-accent-amber);
+}
+
+.st-section-icon-badge--rose {
+  background: rgba(244, 63, 94, 0.12);
+  color: var(--admin-accent-rose);
+}
+
+.st-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  margin: 0;
+}
+
+.st-section-desc {
+  font-size: 11.5px;
+  color: var(--admin-text-muted);
+  margin: 2px 0 0 0;
+}
+
+/* Fields Grid */
+.st-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+
+@media (max-width: 768px) {
+  .st-fields-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.st-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.st-field-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--admin-text-primary);
+}
+
+.st-field-desc {
+  font-size: 11px;
+  color: var(--admin-text-dim);
+}
+
+/* Toggle Switch Row */
+.st-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem;
+  background: rgba(7, 12, 24, 0.65);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  transition: all var(--admin-transition);
+}
+
+.st-toggle-row:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.st-toggle-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.st-toggle-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.st-toggle-sub {
+  font-size: 11.5px;
+  color: var(--admin-text-muted);
+  margin-top: 2px;
+}
+
+/* Custom CSS Switch */
+.st-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+}
+
+.st-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.st-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--admin-border-subtle);
+  transition: 0.25s;
+  border-radius: 24px;
+}
+
+.st-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #94a3b8;
+  transition: 0.25s;
+  border-radius: 50%;
+}
+
+input:checked + .st-slider {
+  background-color: rgba(16, 185, 129, 0.25);
+  border-color: var(--admin-accent-emerald);
+}
+
+input:checked + .st-slider:before {
+  transform: translateX(20px);
+  background-color: var(--admin-accent-emerald);
+  box-shadow: 0 0 8px var(--admin-accent-emerald);
+}
+
+/* Checkbox Tiles Group */
+.st-checkbox-group {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.st-checkbox-tile {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  background: rgba(7, 12, 24, 0.65);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  transition: all var(--admin-transition);
+}
+
+.st-checkbox-tile:hover {
+  border-color: var(--admin-accent-cyan);
+}
+
+.st-checkbox-tile--selected {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: var(--admin-accent-cyan);
+}
+
+.st-checkbox-tile input[type="checkbox"] {
+  accent-color: var(--admin-accent-cyan);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.st-checkbox-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.st-checkbox-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--admin-text-muted);
+}

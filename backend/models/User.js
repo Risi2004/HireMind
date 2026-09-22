@@ -61,6 +61,11 @@ const userSchema = new mongoose.Schema(
       enum: ['FREE', 'PRO', 'ENTERPRISE'],
       default: 'FREE',
     },
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+    },
     careerInterests: {
       type: [String],
       default: ['Backend Development', 'Full Stack Development', 'AI Engineering'],

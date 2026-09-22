@@ -11,10 +11,10 @@ const { sendOtpEmail, sendOnboardingEmail, sendPasswordResetOtpEmail, sendAccoun
 
 
 
-// Helper to generate signed JWT
-const generateToken = (userId, email, rememberMe = false) => {
+// Helper to generate signed JWT with role
+const generateToken = (userId, email, rememberMe = false, role = 'user') => {
   return jwt.sign(
-    { id: userId, email },
+    { id: userId, email, role },
     process.env.JWT_SECRET || 'super_secret_hiremind_jwt_dev_key',
     { expiresIn: rememberMe ? '30d' : '7d' }
   );
@@ -208,7 +208,7 @@ const verifyOtp = async (req, res) => {
     );
 
     // Issue JWT token
-    const token = generateToken(user._id, user.email, false);
+    const token = generateToken(user._id, user.email, false, user.role || 'user');
 
     return res.status(200).json({
       success: true,
@@ -344,10 +344,11 @@ const login = async (req, res) => {
       }
     }
 
-    const token = generateToken(user._id, user.email, !!rememberMe);
+    const token = generateToken(user._id, user.email, !!rememberMe, user.role || 'user');
 
     return res.status(200).json({
       success: true,
+      message: 'Logged in successfully',
       token,
       user,
     });
@@ -741,7 +742,7 @@ const verify2FALogin = async (req, res) => {
       await user.save();
     }
 
-    const token = generateToken(user._id, user.email, !!decoded.rememberMe);
+    const token = generateToken(user._id, user.email, !!decoded.rememberMe, user.role || 'user');
 
     return res.status(200).json({
       success: true,
@@ -768,6 +769,19 @@ const getBrandLogo = (req, res) => {
   return res.sendFile(logoPath);
 };
 
+/**
+ * @desc    Verify current authenticated user is an administrator
+ * @route   GET /api/auth/admin/verify
+ * @access  Private (Admin only)
+ */
+const verifyAdminStatus = async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    isAdmin: true,
+    user: req.user,
+  });
+};
+
 module.exports = {
   register,
   verifyOtp,
@@ -783,6 +797,7 @@ module.exports = {
   disable2FA,
   verify2FALogin,
   getBrandLogo,
+  verifyAdminStatus,
 };
 
 

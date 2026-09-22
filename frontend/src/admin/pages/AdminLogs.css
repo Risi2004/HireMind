@@ -1,0 +1,287 @@
+/* ==========================================================================
+   HireMind Admin - System & Audit Logs Styles (AdminLogs.css)
+   ========================================================================== */
+
+/* Tabs Header */
+.lg-tabs-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 0.85rem 1.25rem;
+}
+
+.lg-tabs-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(7, 12, 24, 0.7);
+  padding: 4px;
+  border-radius: var(--admin-radius-md);
+  border: 1px solid var(--admin-border-subtle);
+}
+
+.lg-tab-btn {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--admin-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--admin-transition);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lg-tab-btn:hover {
+  color: var(--admin-text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.lg-tab-btn--active {
+  color: var(--admin-accent-cyan);
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+}
+
+/* Category Filter Pills */
+.lg-categories-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.lg-cat-pill {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 20px;
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  color: var(--admin-text-muted);
+  cursor: pointer;
+  transition: all var(--admin-transition);
+}
+
+.lg-cat-pill:hover {
+  color: var(--admin-text-primary);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.lg-cat-pill--active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: var(--admin-accent-cyan);
+  color: var(--admin-accent-cyan);
+}
+
+.lg-cat-pill--error.lg-cat-pill--active {
+  background: rgba(244, 63, 94, 0.15);
+  border-color: var(--admin-accent-rose);
+  color: var(--admin-accent-rose);
+}
+
+/* Filter Toolbar */
+.lg-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1rem 1.25rem;
+}
+
+.lg-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  max-width: 650px;
+}
+
+.lg-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Status Badges in Log Table */
+.lg-badge-success {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--admin-accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lg-badge-warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--admin-accent-amber);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.lg-badge-error {
+  background: rgba(244, 63, 94, 0.12);
+  color: var(--admin-accent-rose);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ==========================================================================
+   LOG DETAILS MODAL
+   ========================================================================== */
+.lg-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1.25rem;
+  animation: lgFadeIn 0.2s ease-out;
+}
+
+.lg-modal-container {
+  background: #0b1222;
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  width: 100%;
+  max-width: 680px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+}
+
+.lg-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--admin-border-subtle);
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.lg-modal-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.lg-modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.lg-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 580px) {
+  .lg-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lg-detail-item {
+  background: rgba(7, 12, 24, 0.65);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 0.85rem 1rem;
+}
+
+.lg-detail-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--admin-text-muted);
+  margin-bottom: 3px;
+}
+
+.lg-detail-val {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.lg-detail-val--code {
+  font-family: monospace;
+  color: var(--admin-accent-cyan);
+}
+
+.lg-detail-box {
+  background: rgba(7, 12, 24, 0.65);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 1rem;
+}
+
+.lg-json-block {
+  background: #060a14;
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: 6px;
+  padding: 0.85rem;
+  font-family: monospace;
+  font-size: 11.5px;
+  color: #94a3b8;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 6px 0 0;
+}
+
+@keyframes lgFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
