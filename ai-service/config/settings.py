@@ -15,13 +15,14 @@ load_dotenv(BASE_DIR / ".env")
 # -------------------------------------------------------------
 # Model & Provider Configuration
 # -------------------------------------------------------------
-# Options: "runpod" (OpenAI-compatible vLLM/Ollama on RunPod), "gemini"
-MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "runpod").lower()
+# Options: "openrouter", "gemini"
+MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openrouter").lower()
 
-# RunPod Configuration for local/remote model (e.g. Qwen 14B)
-RUNPOD_MODEL_NAME = os.getenv("RUNPOD_MODEL_NAME", "qwen3:14b")
-RUNPOD_ENDPOINT_URL = os.getenv("RUNPOD_ENDPOINT_URL", "http://localhost:8000/v1")
-RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY", "runpod")
+# OpenRouter Configuration
+# The model identifier to use with OpenRouter, configured via the 'aimodel' environment variable
+AI_MODEL = os.getenv("aimodel", os.getenv("AIMODEL", "qwen/qwen-2.5-72b-instruct"))
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Google Gemini Fallback Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -33,9 +34,9 @@ AI_SERVICE_HOST = os.getenv("AI_SERVICE_HOST", "0.0.0.0")
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:5000/api")
 
 
-def is_runpod_configured() -> bool:
-    """Check if RunPod endpoint is provided."""
-    return bool(RUNPOD_ENDPOINT_URL and RUNPOD_ENDPOINT_URL.strip())
+def is_openrouter_configured() -> bool:
+    """Check if OpenRouter API key is provided."""
+    return bool(OPENROUTER_API_KEY and OPENROUTER_API_KEY.strip() and OPENROUTER_API_KEY != "your_openrouter_api_key_here")
 
 
 def is_gemini_configured() -> bool:
@@ -46,27 +47,26 @@ def is_gemini_configured() -> bool:
 def get_orchestrator_model() -> Union[str, Any]:
     """Resolves and configures the LLM for Google ADK.
 
-    For RunPod (e.g., Qwen 14B), returns a Google ADK LiteLlm instance
-    pointed to the RunPod OpenAI-compatible endpoint.
+    For OpenRouter, returns a Google ADK LiteLlm instance pointed
+    to OpenRouter with the model specified in the 'aimodel' env variable.
     For Gemini, returns the Gemini model string.
     """
-    if MODEL_PROVIDER == "runpod":
+    if MODEL_PROVIDER == "openrouter":
         try:
             from google.adk.models.lite_llm import LiteLlm
-            # LiteLLM format for OpenAI-compatible endpoints is "openai/<model_name>"
-            lite_model_id = f"openai/{RUNPOD_MODEL_NAME}"
+            lite_model_id = f"openrouter/{AI_MODEL}"
             logger.info(
-                f"Configuring Google ADK with RunPod model '{RUNPOD_MODEL_NAME}' "
-                f"at endpoint '{RUNPOD_ENDPOINT_URL}'"
+                f"Configuring Google ADK with OpenRouter model '{AI_MODEL}' "
+                f"at endpoint '{OPENROUTER_BASE_URL}'"
             )
             return LiteLlm(
                 model=lite_model_id,
-                api_base=RUNPOD_ENDPOINT_URL,
-                api_key=RUNPOD_API_KEY
+                api_base=OPENROUTER_BASE_URL,
+                api_key=OPENROUTER_API_KEY
             )
         except Exception as e:
-            logger.error(f"Error initializing LiteLlm for RunPod: {e}. Falling back to default string.")
-            return RUNPOD_MODEL_NAME
+            logger.error(f"Error initializing LiteLlm for OpenRouter: {e}. Falling back to model name.")
+            return AI_MODEL
 
     # Default to Gemini
     return GEMINI_MODEL_NAME

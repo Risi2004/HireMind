@@ -9,9 +9,9 @@ from datetime import datetime
 
 from config.settings import (
     MODEL_PROVIDER,
-    RUNPOD_MODEL_NAME,
-    RUNPOD_ENDPOINT_URL,
-    is_runpod_configured,
+    AI_MODEL,
+    OPENROUTER_BASE_URL,
+    is_openrouter_configured,
     is_gemini_configured,
     get_orchestrator_model
 )
@@ -238,8 +238,9 @@ class HireMindOrchestrator:
             "orchestrator_agent_initialized": self.root_agent is not None,
             "provider": MODEL_PROVIDER,
             "model": model_repr,
-            "runpod_configured": is_runpod_configured(),
-            "runpod_endpoint": RUNPOD_ENDPOINT_URL if MODEL_PROVIDER == "runpod" else None,
+            "aimodel": AI_MODEL,
+            "openrouter_configured": is_openrouter_configured(),
+            "openrouter_endpoint": OPENROUTER_BASE_URL if MODEL_PROVIDER == "openrouter" else None,
             "gemini_api_key_configured": is_gemini_configured(),
             "active_sessions_count": len(self.sessions),
             "registered_sub_agents": list(self.sub_agents.keys())
@@ -255,3 +256,9 @@ try:
     orchestrator_instance.register_sub_agent("resume_analyzer", resume_analyzer_instance)
 except Exception as e:
     logger.warning(f"Could not auto-register resume_analyzer: {e}")
+
+try:
+    from agents.jd_analyzer import jd_analyzer_instance
+    orchestrator_instance.register_sub_agent("jd_analyzer", jd_analyzer_instance)
+except Exception as e:
+    logger.warning(f"Could not auto-register jd_analyzer: {e}")

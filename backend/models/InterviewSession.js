@@ -63,9 +63,13 @@ const interviewSessionSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    jdAnalysis: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
     interviewType: {
       type: String,
-      default: 'Technical',
+      default: 'Role-Specific',
     },
     difficulty: {
       type: String,
@@ -79,9 +83,17 @@ const interviewSessionSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    interviewPlan: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    userFacingPlan: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
     status: {
       type: String,
-      enum: ['setup', 'analyzing_resume', 'ready', 'in_progress', 'completed'],
+      enum: ['setup', 'analyzing_resume', 'ready', 'planned', 'in_progress', 'completed'],
       default: 'setup',
     },
     chatMessages: [chatMessageSchema],

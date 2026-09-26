@@ -48,8 +48,15 @@ export function getAllInterviewSessions() {
       return []
     }
 
-    // Filter out any legacy dummy records
-    const cleanList = parsed.filter((item) => item && item.id && !DUMMY_IDS.has(item.id))
+    // Filter out any legacy dummy records and sanitize legacy 'New Interview' in targetRole
+    const cleanList = parsed
+      .filter((item) => item && item.id && !DUMMY_IDS.has(item.id))
+      .map((item) => {
+        if (item.targetRole === 'New Interview') {
+          return { ...item, targetRole: '' }
+        }
+        return item
+      })
     if (cleanList.length !== parsed.length) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanList))
     }
@@ -85,15 +92,20 @@ export function saveInterviewSession(sessionData) {
     const index = all.findIndex((item) => String(item.id) === String(sessionData.id))
 
     const companyName = sessionData.company || (index >= 0 ? all[index].company : '')
-    const roleName = sessionData.targetRole || sessionData.title || (index >= 0 ? all[index].title : 'Interview Session')
+    const roleName = sessionData.targetRole && sessionData.targetRole !== 'New Interview'
+      ? sessionData.targetRole
+      : (index >= 0 && all[index].targetRole !== 'New Interview' ? all[index].targetRole : '')
+    const displayTitle = sessionData.title || roleName || (companyName ? `${companyName} Interview` : 'New Interview')
 
     const updatedSession = {
       ...(index >= 0 ? all[index] : {}),
       ...sessionData,
-      title: roleName,
-      targetRole: sessionData.targetRole || roleName,
+      title: displayTitle,
+      targetRole: sessionData.targetRole !== undefined
+        ? (sessionData.targetRole === 'New Interview' ? '' : sessionData.targetRole)
+        : (index >= 0 ? (all[index].targetRole === 'New Interview' ? '' : all[index].targetRole) : ''),
       company: companyName,
-      track: sessionData.interviewType ? `${sessionData.interviewType} Interview` : (index >= 0 ? all[index].track : 'Technical'),
+      track: sessionData.interviewType ? `${sessionData.interviewType} Interview` : (index >= 0 ? all[index].track : 'Role-Specific Interview'),
       updatedAt: new Date().toISOString(),
     }
 
@@ -132,16 +144,16 @@ export function saveInterviewSession(sessionData) {
  */
 export function createInterviewSession(overrides = {}) {
   const uniqueId = generateInterviewId()
-  const role = overrides.targetRole || overrides.title || 'New Interview'
+  const role = overrides.targetRole && overrides.targetRole !== 'New Interview' ? overrides.targetRole : ''
   const company = overrides.company || ''
 
   const newSession = {
     id: uniqueId,
-    title: role,
+    title: role || (company ? `${company} Interview` : 'New Interview'),
     targetRole: role,
     company: company,
-    track: overrides.interviewType ? `${overrides.interviewType} Interview` : 'Technical',
-    interviewType: overrides.interviewType || 'Technical',
+    track: overrides.interviewType ? `${overrides.interviewType} Interview` : 'Role-Specific Interview',
+    interviewType: overrides.interviewType || 'Role-Specific',
     difficulty: overrides.difficulty || 'Intermediate',
     duration: overrides.duration || '30 min',
     jobDescription: overrides.jobDescription || '',
@@ -157,4 +169,53 @@ export function createInterviewSession(overrides = {}) {
 
   saveInterviewSession(newSession)
   return newSession
+}
+
+/**
+ * Permanently delete an interview session and all associated data from localStorage and MongoDB.
+ */
+export async function deleteInterviewSession(id) {
+  if (!id) return false
+
+  try {
+    // 1. Remove from localStorage
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const filtered = parsed.filter((item) => String(item.id) !== String(id))
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered))
+      }
+    }
+
+    // 2. Remove related session caches
+    try {
+      localStorage.removeItem(`hiremind_chat_${id}`)
+      localStorage.removeItem(`hiremind_eval_${id}`)
+      localStorage.removeItem(`hiremind_feedback_${id}`)
+      localStorage.removeItem(`hiremind_session_${id}`)
+    } catch (_) {}
+
+    // 3. Delete from backend MongoDB
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      await fetch(`http://localhost:5000/api/interview/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+      })
+    } catch (netErr) {
+      console.warn('Backend interview delete call error (continuing local removal):', netErr)
+    }
+
+    // 4. Broadcast change event so Dashboard, drawers, and all tabs update immediately
+    window.dispatchEvent(new CustomEvent('hiremind_interviews_updated', { detail: { id, deleted: true } }))
+
+    return true
+  } catch (err) {
+    console.error('Error deleting interview session:', err)
+    return false
+  }
 }

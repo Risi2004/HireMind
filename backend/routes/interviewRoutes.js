@@ -5,8 +5,11 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const {
   analyzeResume,
+  analyzeJobDescription,
   getSession,
   updateSession,
+  deleteSession,
+  generateInterviewPlan,
 } = require('../controllers/interviewController');
 
 // Multer memory storage configuration for PDF / DOCX files up to 10MB
@@ -47,7 +50,10 @@ const optionalProtect = async (req, res, next) => {
 
 // Routes
 router.post('/:sessionId/analyze-resume', optionalProtect, upload.single('resume'), analyzeResume);
+router.post('/:sessionId/analyze-jd', optionalProtect, analyzeJobDescription);
+router.post('/:sessionId/plan', optionalProtect, generateInterviewPlan);
 router.get('/:sessionId', optionalProtect, getSession);
 router.put('/:sessionId', optionalProtect, updateSession);
+router.delete('/:sessionId', optionalProtect, deleteSession);
 
 module.exports = router;

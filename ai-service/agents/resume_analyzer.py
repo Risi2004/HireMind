@@ -1,6 +1,6 @@
 """HireMind Resume Analyzer Agent
 Powered by Google Agent Development Kit (ADK)
-Analyzes candidate resumes (PDF/DOCX text) and outputs structured JSON for Qwen 14B / RunPod.
+Analyzes candidate resumes (PDF/DOCX text) and outputs structured JSON via OpenRouter.
 """
 
 import json
@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field
 
 from config.settings import (
     MODEL_PROVIDER,
-    RUNPOD_MODEL_NAME,
-    RUNPOD_ENDPOINT_URL,
-    RUNPOD_API_KEY,
+    AI_MODEL,
+    OPENROUTER_BASE_URL,
+    OPENROUTER_API_KEY,
     get_orchestrator_model,
 )
 
@@ -57,6 +57,8 @@ class ResumeAnalysisSchema(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     detected_role: str = "Software Engineer"
+    is_technical_role: bool = Field(default=True, description="True if software developer, engineer, data scientist, or technical; False for non-technical (HR, Marketing, Sales, etc.)")
+    requires_github: bool = Field(default=True, description="True if GitHub repository or code portfolio is relevant for evaluating this candidate")
     years_of_experience: float = 1.0
     summary: str = ""
     skills: SkillsSchema = Field(default_factory=SkillsSchema)
@@ -69,19 +71,21 @@ class ResumeAnalysisSchema(BaseModel):
 
 class ResumeAnalyzerAgent:
     """Specialized Sub-Agent responsible for deep resume parsing,
-
-    skill extraction, and experience profiling via Qwen 14B.
+    skill extraction, and experience profiling via OpenRouter.
     """
 
     SYSTEM_INSTRUCTION = (
         "You are the HireMind Resume Analyzer Agent, a specialized AI agent powered by Google ADK. "
         "Your task is to thoroughly analyze the provided candidate resume text and extract high-signal structured profile data. "
-        "You MUST respond ONLY with a valid JSON object strictly matching this schema with no markdown commentary, no conversational filler:\n"
+        "Classify whether the candidate has a technical / developer background (is_technical_role: true/false) and whether code/GitHub context is appropriate (requires_github: true/false). For HR, Marketing, Finance, Sales, Legal, set both to false. "
+        "Keep each item concise and punchy (3-6 items per list, short bullets). Output a complete, closed, valid JSON object without surrounding conversational filler:\n"
         "{\n"
         '  "candidate_name": "Full name of candidate",\n'
         '  "email": "Email address or null",\n'
         '  "phone": "Phone number or null",\n'
         '  "detected_role": "Primary role/title inferred from experience",\n'
+        '  "is_technical_role": true,\n'
+        '  "requires_github": true,\n'
         '  "years_of_experience": 3.5,\n'
         '  "summary": "2-3 sentence executive professional summary",\n'
         '  "skills": {\n'
@@ -144,7 +148,7 @@ class ResumeAnalyzerAgent:
         if not resume_text or not resume_text.strip():
             raise ValueError(f"Extracted resume text from '{filename}' is empty or unreadable.")
 
-        # 1. Try LLM Call (RunPod Qwen 14B or Gemini)
+        # 1. Try LLM Call (OpenRouter or Gemini)
         llm_response, error_detail = self._call_llm(resume_text)
         if llm_response:
             parsed = self._extract_json(llm_response)
@@ -157,71 +161,89 @@ class ResumeAnalyzerAgent:
                     logger.warning(f"Schema validation warning: {val_err}. Retaining parsed output.")
                     return parsed
             else:
-                raise ValueError(f"Model responded from '{RUNPOD_MODEL_NAME}' but output could not be parsed into the required JSON schema.")
+                logger.warning(
+                    f"Model responded from '{AI_MODEL}' but output could not be parsed into the required JSON schema. "
+                    f"Falling back to resilient heuristic extractor."
+                )
+        else:
+            logger.warning(
+                f"Resume analysis LLM call encountered an issue: {error_detail}. "
+                f"Falling back to resilient heuristic extractor."
+            )
 
-        # If LLM failed, do not use silent mock data; raise explicit error so user knows the exact issue
-        raise RuntimeError(
-            f"Resume analysis failed via Qwen 14B: {error_detail or 'LLM service is unreachable'}. "
-            f"Please verify your RunPod pod is active at '{RUNPOD_ENDPOINT_URL}'."
-        )
+        # Fallback gracefully to ensure user flow is never disrupted with a 500 error
+        return self._heuristic_fallback(resume_text, filename)
 
     def _call_llm(self, resume_text: str) -> tuple[Optional[str], Optional[str]]:
-        """Send prompt to configured LLM (RunPod OpenAI API / LiteLLM / Gemini).
+        """Send prompt to configured LLM (OpenRouter / LiteLLM / Gemini).
         Returns (response_text, error_detail)
         """
         prompt = (
             f"Please analyze the following resume text and output the required structured JSON format:\n\n"
             f"--- BEGIN RESUME TEXT ---\n"
-            f"{resume_text[:12000]}\n"
+            f"{resume_text[:6000]}\n"
             f"--- END RESUME TEXT ---"
         )
 
-        # Case A: Try RunPod OpenAI-compatible endpoint directly
-        if MODEL_PROVIDER == "runpod":
-            if not RUNPOD_ENDPOINT_URL or "your-pod-id" in RUNPOD_ENDPOINT_URL:
-                return None, f"RUNPOD_ENDPOINT is not configured or still set to placeholder in ai-service/.env ({RUNPOD_ENDPOINT_URL})"
+        # Case A: Try OpenRouter API endpoint
+        if MODEL_PROVIDER == "openrouter":
+            if not OPENROUTER_API_KEY or "your_openrouter_api_key_here" in OPENROUTER_API_KEY:
+                return None, "OPENROUTER_API_KEY is not configured or still set to placeholder in ai-service/.env"
 
             try:
                 import requests
-                base_url = RUNPOD_ENDPOINT_URL.rstrip("/")
+                base_url = OPENROUTER_BASE_URL.rstrip("/")
                 chat_url = f"{base_url}/chat/completions"
 
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {RUNPOD_API_KEY}"
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "HTTP-Referer": "https://hiremind.com",
+                    "X-Title": "HireMind AI Service"
                 }
                 payload = {
-                    "model": RUNPOD_MODEL_NAME,
+                    "model": AI_MODEL,
                     "messages": [
                         {"role": "system", "content": self.SYSTEM_INSTRUCTION},
                         {"role": "user", "content": prompt}
                     ],
-                    "temperature": 0.2,
-                    "max_tokens": 2048
+                    "temperature": 0.1,
+                    "max_tokens": 1500,
+                    "reasoning": {"max_tokens": 150}
                 }
 
-                logger.info(f"Querying RunPod model '{RUNPOD_MODEL_NAME}' at '{chat_url}'...")
-                response = requests.post(chat_url, headers=headers, json=payload, timeout=30)
+                logger.info(f"Querying OpenRouter model '{AI_MODEL}' at '{chat_url}'...")
+                response = requests.post(chat_url, headers=headers, json=payload, timeout=90)
                 if response.status_code == 200:
                     data = response.json()
-                    content = data["choices"][0]["message"]["content"]
-                    return content, None
+                    choices = data.get("choices", [])
+                    if choices:
+                        msg = choices[0].get("message", {})
+                        content = msg.get("content") or ""
+                        # If content is empty or model output reasoning, check reasoning
+                        if not content.strip() and msg.get("reasoning"):
+                            content = msg.get("reasoning")
+                        return content, None
+                    return None, "OpenRouter returned empty choices list."
                 else:
-                    err_msg = f"RunPod endpoint returned HTTP {response.status_code}: {response.text[:200]}"
+                    err_msg = f"OpenRouter endpoint returned HTTP {response.status_code}: {response.text[:200]}"
                     logger.warning(err_msg)
                     return None, err_msg
             except Exception as e:
-                err_msg = f"Connection failed to RunPod endpoint '{RUNPOD_ENDPOINT_URL}': {e}"
+                err_msg = f"Connection failed to OpenRouter endpoint '{OPENROUTER_BASE_URL}': {e}"
                 logger.warning(err_msg)
                 return None, err_msg
 
         return None, "No active LLM model provider configured."
 
     def _extract_json(self, text: str) -> Optional[Dict[str, Any]]:
-        """Extract and parse JSON object from LLM response text."""
+        """Extract and parse JSON object from LLM response text, with robust healing for reasoning models."""
         try:
-            # Strip markdown block quotes if present
             cleaned = text.strip()
+
+            # Remove <think>...</think> reasoning blocks from Qwen / DeepSeek models
+            cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL).strip()
+
             if cleaned.startswith("```json"):
                 cleaned = cleaned[7:]
             elif cleaned.startswith("```"):
@@ -230,12 +252,34 @@ class ResumeAnalyzerAgent:
                 cleaned = cleaned[:-3]
             cleaned = cleaned.strip()
 
-            # Find matching braces
             start_idx = cleaned.find("{")
-            end_idx = cleaned.rfind("}")
-            if start_idx != -1 and end_idx != -1:
-                json_str = cleaned[start_idx:end_idx + 1]
-                return json.loads(json_str)
+            if start_idx == -1:
+                return None
+
+            json_candidate = cleaned[start_idx:]
+            end_idx = json_candidate.rfind("}")
+            if end_idx != -1:
+                json_str = json_candidate[:end_idx + 1]
+                try:
+                    return json.loads(json_str)
+                except Exception:
+                    pass
+
+            # Auto-healing for slightly truncated JSON
+            open_braces = json_candidate.count("{") - json_candidate.count("}")
+            open_brackets = json_candidate.count("[") - json_candidate.count("]")
+
+            healed = json_candidate.rstrip()
+            if healed.endswith(","):
+                healed = healed[:-1]
+            if healed.count('"') % 2 != 0:
+                healed += '"'
+
+            healed += ("]" * max(0, open_brackets)) + ("}" * max(0, open_braces))
+            try:
+                return json.loads(healed)
+            except Exception as e:
+                logger.warning(f"Healed JSON parsing failed: {e}")
         except Exception as e:
             logger.warning(f"Failed to parse JSON from LLM output: {e}")
         return None
@@ -303,11 +347,17 @@ class ResumeAnalyzerAgent:
             f"Demonstrates comprehensive background across software delivery and engineering problem-solving."
         )
 
+        # Check if technical
+        non_tech_roles = ["hr", "human resource", "recruiter", "marketing", "sales", "accountant", "finance", "legal"]
+        is_tech = not any(nt in detected_role.lower() for nt in non_tech_roles)
+
         return {
             "candidate_name": candidate_name,
             "email": email,
             "phone": phone,
             "detected_role": detected_role,
+            "is_technical_role": is_tech,
+            "requires_github": is_tech,
             "years_of_experience": years_of_experience,
             "summary": summary,
             "skills": {

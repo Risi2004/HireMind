@@ -15,12 +15,16 @@ import languageIcon from '../assets/icons/language.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/AuthContext'
-import { getAllInterviewSessions, createInterviewSession } from '../utils/interviewUtils'
+import { getAllInterviewSessions, createInterviewSession, deleteInterviewSession } from '../utils/interviewUtils'
 import './Dashboard.css'
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuth()
+
+  // Delete modal state
+  const [sessionToDelete, setSessionToDelete] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // If authenticated user hasn't completed profile setup, navigate to profile setup
   useEffect(() => {
@@ -29,11 +33,23 @@ export default function Dashboard() {
     }
   }, [user, navigate])
 
-  const candidateName = user
-    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
-    : 'Jazeel Jaufer'
-  const candidateFirstName = user?.firstName || 'Jazeel'
-  const candidateInitial = user?.firstName ? user.firstName[0].toUpperCase() : 'J'
+  const candidateFullName = (() => {
+    if (!user) return 'Jazeel Jaufer'
+    const nameParts = [user.firstName, user.lastName]
+      .filter(Boolean)
+      .map((s) => String(s).trim())
+      .filter((s) => s.length > 0)
+    if (nameParts.length > 0) {
+      return nameParts.join(' ')
+    }
+    if (user.name && typeof user.name === 'string' && user.name.trim()) {
+      return user.name.trim().replace(/\s+/g, ' ')
+    }
+    return user.email || 'Candidate'
+  })()
+  const candidateName = candidateFullName
+  const candidateFirstName = user?.firstName?.trim() || candidateFullName.split(' ')[0] || 'Jazeel'
+  const candidateInitial = candidateFirstName ? candidateFirstName[0].toUpperCase() : 'J'
   const candidateEmail = user?.email || 'jazeel.jaufer@example.com'
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -123,6 +139,29 @@ export default function Dashboard() {
     }, 900)
   }
 
+  const handleDeleteClick = (e, item) => {
+    e.stopPropagation()
+    setSessionToDelete(item)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!sessionToDelete) return
+    setIsDeleting(true)
+    try {
+      await deleteInterviewSession(sessionToDelete.id)
+      setSessionToDelete(null)
+    } catch (err) {
+      console.error('Failed to delete interview:', err)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const handleCancelDelete = () => {
+    if (isDeleting) return
+    setSessionToDelete(null)
+  }
+
   return (
     <div className="dash-page">
       {/* Top Application Header */}
@@ -175,6 +214,18 @@ export default function Dashboard() {
                           {item.company} • {item.track || item.interviewType || 'Technical'}
                         </span>
                       </div>
+                      <button
+                        type="button"
+                        className="dash-history-card__delete-btn"
+                        onClick={(e) => handleDeleteClick(e, item)}
+                        title={`Delete interview: ${item.title || item.targetRole}`}
+                        aria-label="Delete interview"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
                     </div>
                   ))
                 ) : (
@@ -204,6 +255,18 @@ export default function Dashboard() {
                           {item.company} • {item.track || item.interviewType || 'Technical'}
                         </span>
                       </div>
+                      <button
+                        type="button"
+                        className="dash-history-card__delete-btn"
+                        onClick={(e) => handleDeleteClick(e, item)}
+                        title={`Delete interview: ${item.title || item.targetRole}`}
+                        aria-label="Delete interview"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
                     </div>
                   ))
                 ) : (
@@ -220,7 +283,7 @@ export default function Dashboard() {
         <section className="dash-main-col">
           {/* Welcome Headline */}
           <div className="dash-welcome">
-            <h1 className="dash-welcome__title">Welcome Back, {candidateFirstName}</h1>
+            <h1 className="dash-welcome__title">Welcome Back, {candidateFullName}</h1>
             <p className="dash-welcome__desc">
               Ready to take another step toward your next opportunity? Your personalized dashboard is updated with your latest progress.
             </p>
@@ -314,6 +377,20 @@ export default function Dashboard() {
                         aria-label="Review Session Details"
                       >
                         <img src={arrow2Icon} alt="" className="dash-arrow-diag" />
+                      </button>
+                      <button
+                        type="button"
+                        className="dash-delete-btn"
+                        onClick={(e) => handleDeleteClick(e, item)}
+                        title="Delete Interview & all related data"
+                        aria-label={`Delete interview for ${item.title || item.targetRole}`}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          <line x1="10" y1="11" x2="10" y2="17" />
+                          <line x1="14" y1="11" x2="14" y2="17" />
+                        </svg>
                       </button>
                     </div>
                   </div>
@@ -448,6 +525,61 @@ export default function Dashboard() {
           )}
         </aside>
       </main>
+
+      {/* Delete Confirmation Modal */}
+      {sessionToDelete && (
+        <div className="dash-modal-backdrop" onClick={handleCancelDelete}>
+          <div className="dash-delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="dash-delete-modal__icon-wrap">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+            </div>
+
+            <h3 className="dash-delete-modal__title">Delete Interview?</h3>
+            <p className="dash-delete-modal__desc">
+              Are you sure you want to delete <strong>{sessionToDelete.title || sessionToDelete.targetRole || 'this interview'}</strong>?
+              <br />
+              All associated data—including resume analysis, job description, chat history, and evaluation scores—will be permanently deleted from the database.
+            </p>
+
+            <div className="dash-delete-modal__actions">
+              <button
+                type="button"
+                className="dash-delete-modal__cancel-btn"
+                onClick={handleCancelDelete}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="dash-delete-modal__confirm-btn"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <span className="dash-delete-spinner" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                    <span>Delete All Data</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

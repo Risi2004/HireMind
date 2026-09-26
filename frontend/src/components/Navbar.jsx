@@ -22,7 +22,7 @@ export default function Navbar({
   const { user } = useAuth()
 
   const displayName = user
-    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+    ? [user.firstName, user.lastName].filter(Boolean).map((s) => String(s).trim()).filter(Boolean).join(' ') || (user.name ? String(user.name).trim().replace(/\s+/g, ' ') : user.email)
     : propUserName || 'Candidate'
   const displayEmail = user?.email || propUserEmail || 'candidate@hiremind.com'
   const displayInitial = user?.firstName?.trim()

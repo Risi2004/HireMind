@@ -18,9 +18,8 @@ export default function ProfileDropdown({
   const navigate = useNavigate()
   const { user, logout } = useAuth()
 
-  // Dynamic user data from AuthContext with fallbacks
   const displayName = user
-    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
+    ? [user.firstName, user.lastName].filter(Boolean).map((s) => String(s).trim()).filter(Boolean).join(' ') || (user.name ? String(user.name).trim().replace(/\s+/g, ' ') : user.email)
     : propName || 'Candidate'
   const displayEmail = user?.email || propEmail || 'candidate@hiremind.com'
   const displayInitial = user?.firstName?.trim()
