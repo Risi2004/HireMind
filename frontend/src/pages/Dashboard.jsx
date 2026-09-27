@@ -5,7 +5,6 @@ import userAvatarImg from '../assets/images/Frame 230.png'
 import company1Icon from '../assets/icons/company1.svg'
 import company2Icon from '../assets/icons/company2.svg'
 import searchIcon from '../assets/icons/search.svg'
-import tickIcon from '../assets/icons/tick.svg'
 import arrowIcon from '../assets/icons/arrow.svg'
 import arrow2Icon from '../assets/icons/arrow2.svg'
 import problemSolvingIcon from '../assets/icons/problem solving.svg'
@@ -314,21 +313,6 @@ export default function Dashboard() {
                   START NEW INTERVIEW
                   <img src={arrowIcon} alt="" className="dash-btn-arrow" aria-hidden="true" />
                 </button>
-
-                <div className="dash-hero-badges">
-                  <span className="dash-pill-badge">
-                    <img src={tickIcon} alt="" className="dash-tick-icon" />
-                    RESUME
-                  </span>
-                  <span className="dash-pill-badge">
-                    <img src={tickIcon} alt="" className="dash-tick-icon" />
-                    LINKEDIN
-                  </span>
-                  <span className="dash-pill-badge">
-                    <img src={tickIcon} alt="" className="dash-tick-icon" />
-                    GITHUB
-                  </span>
-                </div>
               </div>
             </div>
           </div>

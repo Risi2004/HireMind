@@ -28,6 +28,11 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 
+# Voice Interview Configuration (STT & TTS)
+STT_MODEL = os.getenv("STT_MODEL", "openai/whisper-large-v3-turbo")
+TTS_MODEL = os.getenv("TTS_MODEL", "gemini-3.8-flash-lite-tts")
+TTS_VOICE = os.getenv("TTS_VOICE", "Puck")
+
 # Service Configuration
 AI_SERVICE_PORT = int(os.getenv("AI_SERVICE_PORT", "8000"))
 AI_SERVICE_HOST = os.getenv("AI_SERVICE_HOST", "0.0.0.0")

@@ -599,7 +599,7 @@ export default function NewInterview() {
 
   const stepDetails = isAnalyzingResume
     ? {
-        badge: 'AI RESUME ANALYZING (BACKGROUND)',
+        badge: 'ANALYZING RESUME (BACKGROUND)',
         headline: !hasRole
           ? 'Enter Your Target Role'
           : !hasCompany
@@ -607,13 +607,13 @@ export default function NewInterview() {
           : !hasJd
           ? 'Add Job Description'
           : 'Calibrating Session in Background...',
-        subtext: 'Google ADK Resume Analyzer is extracting your skills in the background. You do not need to wait—feel free to fill Target Role, Company, and Job Description below!',
+        subtext: 'Your resume and skills are being processed in the background. You can continue filling in your Target Role, Company, and Job Description below!',
       }
     : isAnalyzingJd
     ? {
-        badge: 'AI JD ANALYZING (BACKGROUND)',
+        badge: 'ANALYZING JOB DESCRIPTION (BACKGROUND)',
         headline: 'Interview Options Unlocked!',
-        subtext: 'The JD Analyzer Agent is evaluating employer expectations in the background. Options below are now unlocked—select your interview type, difficulty, and duration!',
+        subtext: 'Job requirements are being processed in the background. Options below are now unlocked—select your interview type, difficulty, and duration!',
       }
     : analysisError
     ? {
@@ -790,7 +790,7 @@ export default function NewInterview() {
               </div>
               <h1 className="new-int-plan-title">Your Interview Plan</h1>
               <p className="new-int-plan-subtitle">
-                Synthesized by the HireMind Planning Agent for{' '}
+                Personalized interview plan generated for{' '}
                 <strong className="new-int-highlight">{planData.role || targetRole}</strong>
                 {planData.company || company ? (
                   <>
@@ -1013,8 +1013,8 @@ export default function NewInterview() {
                 {isAnalyzingResume ? (
                   <div className="new-int-dropzone__loading">
                     <img src={jdSkillsIcon} alt="" className="new-int-pipe-icon--spin" width="26" height="26" />
-                    <div className="new-int-dropzone__title">Analyzing Resume with AI Agent...</div>
-                    <div className="new-int-dropzone__sub">Google ADK Agent extracting profile & skills</div>
+                    <div className="new-int-dropzone__title">Analyzing Resume...</div>
+                    <div className="new-int-dropzone__sub">Extracting background & skills</div>
                     <div className="new-int-dropzone__progress">
                       <div className="new-int-dropzone__bar" />
                     </div>
@@ -1171,12 +1171,12 @@ export default function NewInterview() {
                     className={`new-int-analyze-jd-btn ${isAnalyzingJd ? 'is-analyzing' : ''} ${hasJdAnalysis ? 'is-analyzed' : ''}`}
                     onClick={triggerJdAnalysis}
                     disabled={!jobDescription.trim() || isAnalyzingJd}
-                    title={!jobDescription.trim() ? 'Paste a job description first' : 'Analyze with Job Description Analyzer Agent'}
+                    title={!jobDescription.trim() ? 'Paste a job description first' : 'Analyze job description'}
                   >
                     {isAnalyzingJd ? (
                       <>
                         <span className="new-int-analyze-spinner" />
-                        <span>Analyzing with JD Agent...</span>
+                        <span>Analyzing requirements...</span>
                       </>
                     ) : hasJdAnalysis ? (
                       <>
@@ -1432,9 +1432,9 @@ export default function NewInterview() {
               disabled={isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete}
               title={
                 isAnalyzingResume
-                  ? 'Analyzing resume with AI agent... Start unlocks once analysis completes'
+                  ? 'Analyzing resume... Start unlocks once analysis completes'
                   : isAnalyzingJd
-                  ? 'Analyzing job description with AI agent... Start unlocks once analysis completes'
+                  ? 'Analyzing job description... Start unlocks once analysis completes'
                   : isOptionsLocked
                   ? 'Analyze Job Description above to unlock remaining options'
                   : isPlanning
@@ -1561,9 +1561,9 @@ export default function NewInterview() {
                       isPlanning
                         ? 'Preparing your personalized interview plan...'
                         : isAnalyzingResume
-                        ? 'Analyzing resume with AI agent...'
+                        ? 'Analyzing resume...'
                         : isAnalyzingJd
-                        ? 'Analyzing job description with AI agent...'
+                        ? 'Analyzing job description...'
                         : isOptionsLocked
                         ? 'Analyze Job Description above to unlock remaining options'
                         : analysisError
@@ -1653,7 +1653,7 @@ export default function NewInterview() {
                   <div className="new-int-step-title">4. Job Description & AI Analysis</div>
                   <div className="new-int-step-sub">
                     {isAnalyzingJd
-                      ? 'JD Analyzer Agent evaluating requirements...'
+                      ? 'Evaluating role requirements...'
                       : hasJdAnalysis
                       ? `Analysis complete • ${jdAnalysis?.candidate_alignment?.match_percentage_estimate ?? jdAnalysis?.candidate_alignment?.match_percentage ?? 80}% candidate fit`
                       : jdAnalysisError
@@ -1716,7 +1716,7 @@ export default function NewInterview() {
                     Parsing Resume & Experience
                     {analysisError && !isAnalyzingResume ? (
                       <div className="new-int-pipe-error-preview">
-                        AI Service Unreachable / Failed
+                        Analysis Incomplete / Click to Retry
                       </div>
                     ) : hasResumeReady && resumeAnalysis?.skills?.technical?.length > 0 && !isAnalyzingResume ? (
                       <div className="new-int-pipe-skills-preview">
@@ -1846,16 +1846,16 @@ export default function NewInterview() {
               </div>
             </div>
 
-            {/* Stage 4: Interview Planning Agent */}
+            {/* Stage 4: Interview Structure & Agenda */}
             <div className={`new-int-pipe-card ${planData ? 'new-int-pipe-card--done' : isPlanning ? 'new-int-pipe-card--active' : isSetupComplete ? 'new-int-pipe-card--active' : 'new-int-pipe-card--queued'}`}>
               <div className="new-int-pipe-card__left">
                 <div className={`new-int-pipe-card__icon-wrap ${planData ? 'is-done' : isPlanning || isSetupComplete ? 'is-analyzing' : 'is-queued'}`}>
                   <img src={planData ? tick2Icon : genQuestionsIcon} alt="" className="new-int-pipe-icon" />
                 </div>
                 <div className="new-int-pipe-card__title">
-                  Interview Planning
+                  Interview Structure
                   <br />
-                  Agent
+                  & Agenda
                 </div>
               </div>
               <div className={`new-int-pipe-badge ${planData ? 'new-int-pipe-badge--done' : isPlanning ? 'new-int-pipe-badge--analyzing' : isSetupComplete ? 'new-int-pipe-badge--analyzing' : 'new-int-pipe-badge--queued'}`}>
@@ -1886,7 +1886,7 @@ export default function NewInterview() {
             </div>
             <span className="new-int-planning-agent-tag">
               <span className="new-int-planning-pulse-dot" />
-              HIREMIND PLANNING AGENT ACTIVE
+              PERSONALIZED INTERVIEW PLAN ACTIVE
             </span>
           </div>
         </div>

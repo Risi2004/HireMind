@@ -60,8 +60,10 @@ export default function App() {
               <Route path="/interview-room/:id" element={<InterviewRoom />} />
               <Route path="/interview-room" element={<InterviewRoom />} />
               <Route path="/interview-report" element={<InterviewReport />} />
+              <Route path="/interview-report/:id" element={<InterviewReport />} />
               <Route path="/report" element={<InterviewReport />} />
               <Route path="/new-interview/report" element={<InterviewReport />} />
+              <Route path="/new-interview/:id/report" element={<InterviewReport />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/my-profile" element={<Profile />} />
             </Route>

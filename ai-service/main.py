@@ -13,16 +13,19 @@ venv_python = venv_dir / "Scripts" / "python.exe" if sys.platform == "win32" els
 if venv_python.exists() and os.path.abspath(sys.executable).lower() != os.path.abspath(str(venv_python)).lower():
     sys.exit(subprocess.call([str(venv_python)] + sys.argv))
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from config.settings import AI_SERVICE_PORT, AI_SERVICE_HOST
 from orchestrator.orchestrator import orchestrator_instance
 from agents.resume_analyzer import resume_analyzer_instance
 from agents.jd_analyzer import jd_analyzer_instance
 from agents.interview_planner import interview_planner_instance
+from agents.interview_agent import interview_agent_instance
+from services.stt_service import stt_service_instance
+from services.tts_service import tts_service_instance
 from utils.text_extractor import extract_text_from_resume
 
 app = FastAPI(
@@ -213,6 +216,156 @@ def plan_interview_endpoint(payload: InterviewPlanningPayload):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Interview planning failed: {str(e)}")
+
+
+class InterviewAgentBeginPayload(BaseModel):
+    candidate: Dict[str, Any] = Field(default_factory=dict, description="Structured candidate profile")
+    targetJob: Dict[str, Any] = Field(default_factory=dict, description="Structured target role & company")
+    interviewConfiguration: Dict[str, Any] = Field(default_factory=dict, description="Interview type, difficulty, duration")
+    plan: Dict[str, Any] = Field(default_factory=dict, description="Stored interview plan")
+
+
+@app.post("/agents/interview-agent/begin")
+def interview_agent_begin_endpoint(payload: InterviewAgentBeginPayload):
+    """Generate the single opening question for live interview based on stored plan."""
+    try:
+        result = interview_agent_instance.generate_opening_question(payload.model_dump())
+        return {
+            "status": "success",
+            **result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate opening interview question: {str(e)}")
+
+
+class InterviewAgentTurnPayload(BaseModel):
+    candidate: Dict[str, Any] = Field(default_factory=dict)
+    targetJob: Dict[str, Any] = Field(default_factory=dict)
+    interviewConfiguration: Dict[str, Any] = Field(default_factory=dict)
+    plan: Dict[str, Any] = Field(default_factory=dict)
+    timing: Dict[str, Any] = Field(default_factory=dict)
+    state: Dict[str, Any] = Field(default_factory=dict)
+    conversationHistory: List[Dict[str, Any]] = Field(default_factory=list)
+    latestAnswer: str = Field(..., description="Candidate's latest answer")
+
+
+@app.post("/agents/interview-agent/next")
+def interview_agent_next_endpoint(payload: InterviewAgentTurnPayload):
+    """Evaluate candidate answer, decide action (FOLLOW_UP, CLARIFY, NEXT_TOPIC, NEXT_STAGE, END_INTERVIEW),
+    and generate strictly ONE next question.
+    """
+    try:
+        result = interview_agent_instance.process_turn(payload.model_dump())
+        return {
+            "status": "success",
+            **result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process interview turn: {str(e)}")
+
+
+from agents.evaluation_agent import evaluation_agent_instance
+
+
+class EvaluationPayload(BaseModel):
+    candidate: Dict[str, Any] = Field(default_factory=dict)
+    targetJob: Dict[str, Any] = Field(default_factory=dict)
+    interviewConfiguration: Dict[str, Any] = Field(default_factory=dict)
+    chatMessages: List[Dict[str, Any]] = Field(default_factory=list)
+    interviewState: Dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/agents/evaluation-agent/evaluate")
+def evaluation_agent_endpoint(payload: EvaluationPayload):
+    """Evaluate completed interview session and synthesize full performance report."""
+    try:
+        evaluation = evaluation_agent_instance.evaluate_interview(payload.model_dump())
+        return {
+            "status": "success",
+            "evaluation": evaluation
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to evaluate interview: {str(e)}")
+
+
+# -------------------------------------------------------------
+# Voice Interview Endpoints (STT & TTS)
+# -------------------------------------------------------------
+class VoiceSynthesisPayload(BaseModel):
+    text: str = Field(..., description="Interviewer question text to synthesize")
+    voice: Optional[str] = Field(default=None, description="Prebuilt voice name (e.g. Puck, Aoede, Charon)")
+    format: Optional[str] = Field(default="json", description="'json' for base64 response, 'audio' for direct WAV binary")
+
+
+@app.post("/voice/transcribe")
+async def voice_transcribe_endpoint(file: UploadFile = File(...)):
+    """Transcribe candidate speech audio to text using Whisper Large V3 Turbo."""
+    try:
+        content = await file.read()
+        filename = file.filename or "recording.webm"
+        mime_type = file.content_type or "audio/webm"
+
+        result = stt_service_instance.transcribe_audio(
+            audio_bytes=content,
+            filename=filename,
+            mime_type=mime_type
+        )
+        if not result.get("success"):
+            return {
+                "status": "error",
+                "error": result.get("error", "Transcription failed"),
+                "text": "",
+                "latencyMs": result.get("latencyMs", 0)
+            }
+
+        return {
+            "status": "success",
+            "text": result["text"],
+            "language": result.get("language", "en"),
+            "duration": result.get("duration"),
+            "latencyMs": result.get("latencyMs", 0)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Voice transcription failed: {str(e)}")
+
+
+@app.post("/voice/synthesize")
+def voice_synthesize_endpoint(payload: VoiceSynthesisPayload):
+    """Synthesize interviewer speech from question text using Gemini 3.8 Flash-Lite TTS."""
+    try:
+        result = tts_service_instance.generate_speech(
+            text=payload.text,
+            voice=payload.voice
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("error", "TTS synthesis failed"))
+
+        audio_bytes = result["audio_bytes"]
+
+        if payload.format == "audio":
+            return Response(
+                content=audio_bytes,
+                media_type="audio/wav",
+                headers={
+                    "X-Latency-Ms": str(result.get("latencyMs", 0)),
+                    "X-Cached": str(result.get("cached", False)),
+                }
+            )
+
+        import base64
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        return {
+            "status": "success",
+            "audioUrl": f"data:audio/wav;base64,{audio_b64}",
+            "voice": result.get("voice"),
+            "model": result.get("model"),
+            "cached": result.get("cached", False),
+            "latencyMs": result.get("latencyMs", 0)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
 
 
 if __name__ == "__main__":
