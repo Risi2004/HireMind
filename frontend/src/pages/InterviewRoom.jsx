@@ -183,14 +183,19 @@ export default function InterviewRoom() {
   }
 
   const handleToggleAudio = () => {
-    if (isAudioOn) {
-      stopMicrophone()
+    if (interviewModeRef.current === 'voice') {
+      handleToggleMute()
     } else {
-      startMicrophone().catch((err) => {
-        console.warn('Manual audio toggle error:', err)
-      })
+      if (isAudioOn) {
+        stopMicrophone()
+      } else {
+        startMicrophone().catch((err) => {
+          console.warn('Manual audio toggle error:', err)
+        })
+      }
     }
   }
+
 
   // Cleanup on unmount only
   useEffect(() => {
@@ -266,6 +271,7 @@ export default function InterviewRoom() {
   const recordedChunksRef = useRef([])
   const recordingTimerRef = useRef(null)
   const currentAudioPlayerRef = useRef(null)
+  const currentUtteranceRef = useRef(null)
   const audioCacheRef = useRef(new Map())
 
   // Stop any active TTS audio playback
@@ -276,6 +282,9 @@ export default function InterviewRoom() {
         currentAudioPlayerRef.current.currentTime = 0
       } catch (_) {}
       currentAudioPlayerRef.current = null
+    }
+    if (currentUtteranceRef.current) {
+      currentUtteranceRef.current = null
     }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
@@ -289,10 +298,15 @@ export default function InterviewRoom() {
   const handleAiSpeakingFinished = () => {
     setPlayingMessageId(null)
     currentAudioPlayerRef.current = null
-    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice') {
+    if (currentUtteranceRef.current) {
+      currentUtteranceRef.current = null
+    }
+
+    voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
+    setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+
+    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice' && !isCompleted) {
       startVoiceListening()
-    } else {
-      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     }
   }
 
@@ -303,14 +317,23 @@ export default function InterviewRoom() {
         try {
           stopCurrentAudio()
           const utterance = new SpeechSynthesisUtterance(fallbackText)
+          currentUtteranceRef.current = utterance
           utterance.rate = 1.0
           setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
           setPlayingMessageId(messageId)
-          utterance.onend = () => handleAiSpeakingFinished()
-          utterance.onerror = () => handleAiSpeakingFinished()
+          utterance.onend = () => {
+            currentUtteranceRef.current = null
+            handleAiSpeakingFinished()
+          }
+          utterance.onerror = () => {
+            currentUtteranceRef.current = null
+            handleAiSpeakingFinished()
+          }
           window.speechSynthesis.speak(utterance)
           return
-        } catch (_) {}
+        } catch (_) {
+          currentUtteranceRef.current = null
+        }
       }
       handleAiSpeakingFinished()
       return
@@ -333,10 +356,20 @@ export default function InterviewRoom() {
         if (fallbackText && 'speechSynthesis' in window) {
           try {
             const utterance = new SpeechSynthesisUtterance(fallbackText)
-            utterance.onend = () => handleAiSpeakingFinished()
+            currentUtteranceRef.current = utterance
+            utterance.onend = () => {
+              currentUtteranceRef.current = null
+              handleAiSpeakingFinished()
+            }
+            utterance.onerror = () => {
+              currentUtteranceRef.current = null
+              handleAiSpeakingFinished()
+            }
             window.speechSynthesis.speak(utterance)
             return
-          } catch (_) {}
+          } catch (_) {
+            currentUtteranceRef.current = null
+          }
         }
         handleAiSpeakingFinished()
       }
@@ -346,10 +379,20 @@ export default function InterviewRoom() {
         if (fallbackText && 'speechSynthesis' in window) {
           try {
             const utterance = new SpeechSynthesisUtterance(fallbackText)
-            utterance.onend = () => handleAiSpeakingFinished()
+            currentUtteranceRef.current = utterance
+            utterance.onend = () => {
+              currentUtteranceRef.current = null
+              handleAiSpeakingFinished()
+            }
+            utterance.onerror = () => {
+              currentUtteranceRef.current = null
+              handleAiSpeakingFinished()
+            }
             window.speechSynthesis.speak(utterance)
             return
-          } catch (_) {}
+          } catch (_) {
+            currentUtteranceRef.current = null
+          }
         }
         handleAiSpeakingFinished()
       })
@@ -776,7 +819,6 @@ export default function InterviewRoom() {
   const startVoiceListening = async () => {
     if (
       isVoiceMutedRef.current ||
-      voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING ||
       voiceStateRef.current === VOICE_STATES.AI_PROCESSING ||
       voiceStateRef.current === VOICE_STATES.TRANSCRIBING ||
       isAiTyping ||
@@ -789,12 +831,20 @@ export default function InterviewRoom() {
     setVoiceError(null)
     updateLiveTranscript('')
     resetSilenceDetection()
+    setIsAudioOn(true)
+    voiceStateRef.current = VOICE_STATES.CANDIDATE_SPEAKING
+    setVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
 
     try {
       let stream = mediaStreamRef.current
-      const hasLiveTrack = stream && stream.getAudioTracks().some((t) => t.readyState === 'live' && t.enabled)
+      const hasLiveTrack = stream && stream.getAudioTracks().some((t) => t.readyState === 'live')
       if (!hasLiveTrack) {
         stream = await startMicrophone()
+      } else {
+        stream.getAudioTracks().forEach((t) => {
+          t.enabled = true
+        })
+        setIsAudioOn(true)
       }
 
       // 1. Initialize Web Speech API for real-time live typing directly into the UI
@@ -850,7 +900,16 @@ export default function InterviewRoom() {
             }
           }
 
-          recognition.start()
+          try {
+            recognition.start()
+          } catch (recStartErr) {
+            console.warn('[WebSpeech] SpeechRecognition start warning, retrying:', recStartErr)
+            setTimeout(() => {
+              if (!isVoiceMutedRef.current && voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
+                try { recognition.start() } catch (_) {}
+              }
+            }, 150)
+          }
           recognitionRef.current = recognition
         } catch (recErr) {
           console.warn('[WebSpeech] SpeechRecognition start notice:', recErr)
@@ -931,18 +990,49 @@ export default function InterviewRoom() {
     if (isVoiceMuted) {
       setIsVoiceMuted(false)
       isVoiceMutedRef.current = false
-      if (
-        voiceState !== VOICE_STATES.INTERVIEWER_SPEAKING &&
-        voiceState !== VOICE_STATES.AI_PROCESSING &&
-        voiceState !== VOICE_STATES.TRANSCRIBING &&
-        !isCompleted
-      ) {
-        startVoiceListening()
+      setIsAudioOn(true)
+
+      // Stop interviewer audio immediately so candidate can speak without overlap
+      stopCurrentAudio()
+      voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
+      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+
+      if (!mediaStreamRef.current || !mediaStreamRef.current.getAudioTracks().some((t) => t.readyState === 'live')) {
+        startMicrophone()
+          .then(() => {
+            if (interviewModeRef.current === 'voice' && !isCompleted) {
+              startVoiceListening()
+            }
+          })
+          .catch((err) => {
+            console.warn('Microphone start on unmute notice:', err)
+          })
+      } else {
+        try {
+          mediaStreamRef.current.getAudioTracks().forEach((track) => {
+            track.enabled = true
+          })
+        } catch (_) {}
+        if (
+          voiceStateRef.current !== VOICE_STATES.AI_PROCESSING &&
+          voiceStateRef.current !== VOICE_STATES.TRANSCRIBING &&
+          !isAiTyping &&
+          !isCompleted
+        ) {
+          startVoiceListening()
+        }
       }
     } else {
       setIsVoiceMuted(true)
       isVoiceMutedRef.current = true
       resetSilenceDetection()
+      if (mediaStreamRef.current) {
+        try {
+          mediaStreamRef.current.getAudioTracks().forEach((track) => {
+            track.enabled = false
+          })
+        } catch (_) {}
+      }
       if (recognitionRef.current) {
         try { recognitionRef.current.stop() } catch (_) {}
       }
@@ -953,6 +1043,7 @@ export default function InterviewRoom() {
         clearInterval(recordingTimerRef.current)
         recordingTimerRef.current = null
       }
+      voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
       setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     }
   }
@@ -1341,14 +1432,14 @@ export default function InterviewRoom() {
                 {/* Floating Microphone Action Button */}
                 <button
                   type="button"
-                  className={`int-room-mic-status-pill ${isAudioOn ? 'is-active' : 'is-muted'}`}
+                  className={`int-room-mic-status-pill ${isAudioOn && !isVoiceMuted ? 'is-active' : 'is-muted'}`}
                   onClick={handleToggleAudio}
-                  title={isAudioOn ? 'Mute microphone' : 'Unmute microphone'}
+                  title={isAudioOn && !isVoiceMuted ? 'Mute microphone' : 'Unmute microphone'}
                   aria-label="Toggle Microphone"
                 >
                   <img src={audioIcon} alt="Mic" className="int-room-mic-status-icon" />
-                  <span>{isAudioOn ? 'Mic Active' : 'Muted'}</span>
-                  {isAudioOn && audioVolume > 5 && <span className="int-room-mic-wave-pulse" />}
+                  <span>{isAudioOn && !isVoiceMuted ? 'Mic Active' : 'Muted'}</span>
+                  {isAudioOn && !isVoiceMuted && audioVolume > 5 && <span className="int-room-mic-wave-pulse" />}
                 </button>
               </div>
             </div>
@@ -1632,19 +1723,24 @@ export default function InterviewRoom() {
                     className={`int-room-voice-dock__toggle-btn ${isVoiceMuted ? 'is-muted-btn' : 'is-live-btn'}`}
                     onClick={handleToggleMute}
                     disabled={
-                      voiceState === VOICE_STATES.INTERVIEWER_SPEAKING ||
                       voiceState === VOICE_STATES.AI_PROCESSING ||
                       voiceState === VOICE_STATES.TRANSCRIBING ||
                       isAiTyping ||
                       isCompleted
                     }
-                    title={isVoiceMuted ? 'Click to Unmute Microphone' : 'Click to Mute Microphone'}
+                    title={
+                      isVoiceMuted
+                        ? 'Click to Unmute Microphone'
+                        : voiceState === VOICE_STATES.INTERVIEWER_SPEAKING
+                        ? 'Click to Unmute & Answer Immediately'
+                        : 'Click to Mute Microphone'
+                    }
                   >
                     <span>
-                      {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING
-                        ? '🔊 Interviewer Speaking...'
-                        : isVoiceMuted
+                      {isVoiceMuted
                         ? '🎙️ Unmute Microphone'
+                        : voiceState === VOICE_STATES.INTERVIEWER_SPEAKING
+                        ? '🔊 Interviewer Speaking (Click to Answer)'
                         : '🔇 Mute Microphone'}
                     </span>
                   </button>
