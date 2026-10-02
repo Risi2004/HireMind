@@ -48,6 +48,23 @@
   display: block;
 }
 
+.app-navbar__version {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(148, 163, 184, 0.7);
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 4px;
+  padding: 2px 5px;
+  line-height: 1;
+  margin-left: -2px;
+  align-self: flex-end;
+  margin-bottom: 4px;
+  user-select: none;
+  pointer-events: none;
+}
+
 /* Left Badge (e.g. Evaluation Report, Live Session) */
 .app-navbar__badge {
   display: inline-flex;
@@ -116,6 +133,9 @@
   }
   .app-navbar__logo {
     height: 32px;
+  }
+  .app-navbar__version {
+    display: none;
   }
   .app-navbar__badge {
     display: none;
