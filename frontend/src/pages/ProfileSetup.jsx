@@ -9,8 +9,15 @@ import './ProfileSetup.css'
 export default function ProfileSetup() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { refreshUser } = useAuth()
+  const { user, refreshUser } = useAuth()
   const { githubData, connectGithub, disconnectGithub, startGithubOAuth } = useProfileSetup()
+
+  // If user already completed profile setup, navigate directly to dashboard
+  useEffect(() => {
+    if (user?.isProfileSetupCompleted) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [user?.isProfileSetupCompleted, navigate])
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [usernameInput, setUsernameInput] = useState('')

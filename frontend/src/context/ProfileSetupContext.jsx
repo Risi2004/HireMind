@@ -283,6 +283,7 @@ export function ProfileSetupProvider({ children }) {
 
     if (data.user && setAuthUser) {
       setAuthUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
     }
 
     return data
