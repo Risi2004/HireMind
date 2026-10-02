@@ -1,0 +1,443 @@
+/* ==========================================================================
+   HireMind Admin User Feedback Styles
+   Theme: Minimal Dark SaaS / Pilot Feedback Intelligence
+   ========================================================================== */
+
+/* 5 Summary Cards Grid */
+.fb-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1.15rem;
+  margin-bottom: 1.75rem;
+}
+
+@media (max-width: 1280px) {
+  .fb-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .fb-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .fb-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fb-summary-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.25rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  box-shadow: var(--admin-shadow-sm);
+  transition: var(--admin-transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.fb-summary-card:hover {
+  background: var(--admin-bg-card-hover);
+  border-color: var(--admin-border-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--admin-shadow-md);
+}
+
+.fb-summary-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fb-summary-card__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--admin-text-secondary);
+}
+
+.fb-summary-card__icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--admin-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fb-summary-card__icon-wrap--cyan {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--admin-accent-cyan);
+}
+.fb-summary-card__icon-wrap--emerald {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--admin-accent-emerald);
+}
+.fb-summary-card__icon-wrap--purple {
+  background: rgba(168, 85, 247, 0.1);
+  color: var(--admin-accent-purple);
+}
+.fb-summary-card__icon-wrap--amber {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--admin-accent-amber);
+}
+.fb-summary-card__icon-wrap--rose {
+  background: rgba(244, 63, 94, 0.1);
+  color: var(--admin-accent-rose);
+}
+
+.fb-summary-card__value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+}
+
+.fb-summary-card__bottom {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 11.5px;
+}
+
+/* ==========================================================================
+   RATING OVERVIEW 8-CARD GRID
+   ========================================================================== */
+.fb-rating-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.1rem;
+  margin-bottom: 1.75rem;
+}
+
+@media (max-width: 1200px) {
+  .fb-rating-overview-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 580px) {
+  .fb-rating-overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fb-rating-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.15rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  transition: var(--admin-transition);
+}
+
+.fb-rating-card:hover {
+  background: var(--admin-bg-card-hover);
+  border-color: rgba(56, 189, 248, 0.25);
+  transform: translateY(-2px);
+}
+
+.fb-rating-card__title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--admin-text-secondary);
+}
+
+.fb-rating-card__score-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.fb-rating-card__score-big {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  letter-spacing: -0.5px;
+}
+
+.fb-rating-card__score-denom {
+  font-size: 13px;
+  color: var(--admin-text-muted);
+}
+
+.fb-rating-card__stars {
+  color: #fbbf24;
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+.fb-rating-card__bar {
+  width: 100%;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9999px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.fb-rating-card__fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8 0%, #10b981 100%);
+  border-radius: 9999px;
+}
+
+/* ==========================================================================
+   CHARTS SECTION (4 CHARTS)
+   ========================================================================== */
+.fb-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 1.75rem;
+}
+
+@media (max-width: 1024px) {
+  .fb-charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fb-chart-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.fb-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.fb-chart-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  margin: 0;
+}
+
+.fb-chart-desc {
+  font-size: 11.5px;
+  color: var(--admin-text-muted);
+  margin: 2px 0 0;
+}
+
+/* Star Distribution Rows */
+.fb-dist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.fb-dist-label {
+  width: 45px;
+  color: var(--admin-text-secondary);
+  font-weight: 500;
+}
+
+.fb-dist-bar-wrap {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.fb-dist-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: #fbbf24;
+}
+
+.fb-dist-percent {
+  width: 35px;
+  text-align: right;
+  color: var(--admin-text-muted);
+  font-weight: 600;
+}
+
+/* Would Use Again Split Widget */
+.fb-use-again-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 1.25rem;
+  background: var(--admin-bg-card-subtle);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  margin-top: 0.5rem;
+}
+
+.fb-use-again-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.fb-use-again-stat__val {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.fb-use-again-stat__label {
+  font-size: 12px;
+  color: var(--admin-text-muted);
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   FEEDBACK TABLE BADGES & STYLES
+   ========================================================================== */
+.fb-status-reviewed {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--admin-accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.fb-status-pending {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--admin-accent-amber);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.fb-tech-issue-tag {
+  color: var(--admin-accent-rose);
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fb-tech-clean-tag {
+  color: var(--admin-text-dim);
+  font-size: 12px;
+}
+
+/* ==========================================================================
+   FEEDBACK DETAILS MODAL (LARGE DRAWER)
+   ========================================================================== */
+.fb-details-modal {
+  width: 100%;
+  max-width: 860px;
+  background: var(--admin-bg-sidebar);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: var(--admin-radius-xl);
+  box-shadow: var(--admin-shadow-lg), 0 0 44px rgba(56, 189, 248, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 88vh;
+  animation: fbModalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fbModalIn {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.fb-details-header {
+  padding: 1.25rem 1.75rem;
+  border-bottom: 1px solid var(--admin-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(7, 12, 24, 0.65);
+}
+
+.fb-details-body {
+  padding: 1.75rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.fb-scores-matrix {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.85rem;
+}
+
+@media (max-width: 768px) {
+  .fb-scores-matrix {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.fb-score-tile {
+  background: rgba(7, 12, 24, 0.65);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fb-score-tile__label {
+  font-size: 11px;
+  color: var(--admin-text-muted);
+}
+
+.fb-score-tile__val {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.fb-feedback-text-card {
+  background: var(--admin-bg-card-subtle);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.fb-feedback-text-card__label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--admin-accent-cyan);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fb-feedback-text-card__content {
+  font-size: 13px;
+  color: #e2e8f0;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.fb-details-footer {
+  padding: 1rem 1.75rem;
+  border-top: 1px solid var(--admin-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(7, 12, 24, 0.65);
+}

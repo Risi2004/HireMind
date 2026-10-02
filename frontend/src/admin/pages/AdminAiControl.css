@@ -1,0 +1,561 @@
+/* ==========================================================================
+   HireMind Admin - AI Control Center Styles (AdminAiControl.css)
+   ========================================================================== */
+
+/* Top AI Command & Status Banner */
+.ai-control-banner {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(11, 18, 34, 0.95) 100%);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.5rem;
+  margin-bottom: 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.ai-control-banner::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: radial-gradient(circle at 100% 50%, rgba(56, 189, 248, 0.08), transparent 70%);
+  pointer-events: none;
+}
+
+.ai-control-banner__left {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  position: relative;
+  z-index: 1;
+}
+
+.ai-control-banner__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--admin-radius-md);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--admin-accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-control-banner__title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.ai-control-banner__desc {
+  font-size: 13px;
+  color: var(--admin-text-muted);
+  margin: 4px 0 0 0;
+}
+
+/* Master AI Interviews Switch (ON / OFF) */
+.ai-master-switch-wrap {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: rgba(7, 12, 24, 0.85);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 0.75rem 1.25rem;
+  position: relative;
+  z-index: 1;
+}
+
+.ai-master-switch-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-master-switch-label {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.ai-master-switch-status {
+  font-size: 11.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.ai-master-switch-status--on {
+  color: var(--admin-accent-emerald);
+}
+
+.ai-master-switch-status--off {
+  color: var(--admin-accent-rose);
+}
+
+/* Custom Toggle Pill (ON / OFF) */
+.ai-toggle-btn {
+  display: flex;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: 24px;
+  padding: 3px;
+  cursor: pointer;
+  transition: all var(--admin-transition);
+}
+
+.ai-toggle-option {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: 18px;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.ai-toggle-option--active-on {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4);
+}
+
+.ai-toggle-option--active-off {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(244, 63, 94, 0.4);
+}
+
+.ai-toggle-option--inactive {
+  color: var(--admin-text-dim);
+}
+
+/* ==========================================================================
+   SERVICE STATUS CARDS (4 SERVICES)
+   ========================================================================== */
+.ai-services-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+  margin-bottom: 1.75rem;
+}
+
+@media (max-width: 1200px) {
+  .ai-services-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .ai-services-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ai-service-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all var(--admin-transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-service-card:hover {
+  border-color: rgba(56, 189, 248, 0.35);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.ai-service-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.ai-service-card__title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.ai-service-card__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-service-card__icon--cyan {
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--admin-accent-cyan);
+}
+
+.ai-service-card__icon--purple {
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--admin-accent-purple);
+}
+
+.ai-service-card__icon--emerald {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--admin-accent-emerald);
+}
+
+.ai-service-card__icon--amber {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--admin-accent-amber);
+}
+
+.ai-service-card__name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  margin: 0;
+}
+
+.ai-service-card__model {
+  font-size: 11.5px;
+  color: var(--admin-text-muted);
+  margin-top: 2px;
+  font-family: monospace;
+}
+
+.ai-service-card__status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.ai-service-card__status-badge--healthy {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--admin-accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.ai-service-card__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* Service Metrics 3-Item Strip */
+.ai-service-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--admin-border-subtle);
+}
+
+.ai-service-metric-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-service-metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--admin-text-dim);
+  margin-bottom: 2px;
+}
+
+.ai-service-metric-val {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+/* ==========================================================================
+   AI RUNTIME CONTROLS GRID
+   ========================================================================== */
+.ai-runtime-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.ai-runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 1100px) {
+  .ai-runtime-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .ai-runtime-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ai-runtime-control-box {
+  background: rgba(7, 12, 24, 0.7);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.75rem;
+  transition: all var(--admin-transition);
+}
+
+.ai-runtime-control-box:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.ai-runtime-control-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.ai-runtime-control-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.ai-runtime-control-val {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--admin-accent-cyan);
+  font-family: monospace;
+}
+
+.ai-runtime-control-slider {
+  width: 100%;
+  accent-color: var(--admin-accent-cyan);
+  cursor: pointer;
+}
+
+.ai-runtime-control-sub {
+  font-size: 11px;
+  color: var(--admin-text-dim);
+}
+
+/* ==========================================================================
+   AI USAGE OVERVIEW (METRICS + CHART)
+   ========================================================================== */
+.ai-usage-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.ai-usage-kpis-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1300px) {
+  .ai-usage-kpis-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 680px) {
+  .ai-usage-kpis-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 440px) {
+  .ai-usage-kpis-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ai-usage-kpi-tile {
+  background: rgba(7, 12, 24, 0.65);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-usage-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--admin-text-muted);
+  margin-bottom: 4px;
+}
+
+.ai-usage-kpi-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--admin-text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.ai-usage-kpi-sub {
+  font-size: 11px;
+  color: var(--admin-text-dim);
+  margin-top: 3px;
+}
+
+/* Hourly AI Requests Chart */
+.ai-chart-bars-wrap {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  height: 180px;
+  padding: 1rem 0.5rem 0.5rem;
+  border-bottom: 1px solid var(--admin-border-subtle);
+  margin-top: 0.5rem;
+}
+
+.ai-chart-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 6px;
+  position: relative;
+}
+
+.ai-chart-bar-col:hover .ai-chart-bar-fill {
+  filter: brightness(1.25);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.5);
+}
+
+.ai-chart-bar-col:hover .ai-chart-tooltip {
+  opacity: 1;
+  transform: translateY(-4px);
+}
+
+.ai-chart-bar-fill {
+  width: 100%;
+  max-width: 28px;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
+  transition: all var(--admin-transition);
+  min-height: 6px;
+}
+
+.ai-chart-bar-fill--peak {
+  background: linear-gradient(180deg, #818cf8, #4f46e5);
+}
+
+.ai-chart-val {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+}
+
+.ai-chart-label {
+  font-size: 11px;
+  color: var(--admin-text-muted);
+  white-space: nowrap;
+}
+
+.ai-chart-tooltip {
+  position: absolute;
+  top: -24px;
+  background: #0f172a;
+  border: 1px solid var(--admin-border-subtle);
+  color: #fff;
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  z-index: 10;
+}
+
+/* ==========================================================================
+   RECENT AI ERRORS TABLE
+   ========================================================================== */
+.ai-errors-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.ai-errors-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.ai-errors-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.ai-errors-icon-wrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(244, 63, 94, 0.12);
+  color: var(--admin-accent-rose);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-errors-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  margin: 0;
+}
+
+.ai-errors-desc {
+  font-size: 12px;
+  color: var(--admin-text-muted);
+  margin: 2px 0 0 0;
+}

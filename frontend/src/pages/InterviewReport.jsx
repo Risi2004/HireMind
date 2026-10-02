@@ -1,69 +1,236 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import downloadIcon from '../assets/icons/download.svg'
 import restartIcon from '../assets/icons/restart.svg'
 import company1Icon from '../assets/icons/company1.svg'
 import bulbIcon from '../assets/icons/bulb.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
+import { generateInterviewId } from '../utils/interviewUtils'
+import { getApiUrl } from '../config/api'
 import './InterviewReport.css'
 
 export default function InterviewReport() {
   const navigate = useNavigate()
+  const { id } = useParams()
+  const [searchParams] = useSearchParams()
+  const sessionId = id || searchParams.get('id') || searchParams.get('sessionId') || 'latest'
+
   const [activeTimeRange, setActiveTimeRange] = useState('15M')
-  const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [session, setSession] = useState(null)
+  const [evaluation, setEvaluation] = useState(null)
+  const [chatMessages, setChatMessages] = useState([])
 
-  // Technical Skills Data
-  const technicalSkills = [
-    { name: 'REST APIs', score: 88, isFlagged: false },
-    { name: 'Spring Boot', score: 82, isFlagged: false },
-    { name: 'React', score: 80, isFlagged: false },
-    { name: '!Database Design', score: 64, isFlagged: true },
-    { name: '!System Design', score: 58, isFlagged: true },
-  ]
+  // Fetch dynamic evaluation and session details from backend
+  useEffect(() => {
+    let isMounted = true
 
-  // Performance Breakdown Data
-  const performanceBreakdown = [
-    { name: 'Technical Knowledge', score: 82, isFlagged: false },
-    { name: '!Communication', score: 68, isFlagged: true },
-    { name: 'Problem Solving', score: 84, isFlagged: false },
-    { name: 'Confidence', score: 72, isFlagged: false },
-    { name: 'Behavioral', score: 80, isFlagged: false },
-  ]
+    const fetchEvaluation = async () => {
+      setIsLoading(true)
+      try {
+        const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+        const targetId = sessionId && sessionId !== 'default' ? sessionId : 'latest'
+        const res = await fetch(getApiUrl(`/api/interview/${targetId}/evaluation`), {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
 
-  // Communication Analysis Data
-  const communicationAnalysis = [
-    { name: 'Clarity', score: 78, isFlagged: false },
-    { name: '!Answer Structure', score: 62, isFlagged: true },
-    { name: 'Speaking Pace', score: 81, isFlagged: false },
-    { name: 'Vocabulary', score: 74, isFlagged: false },
-    { name: 'Confidence', score: 65, isFlagged: false },
-  ]
+        if (res.ok) {
+          const data = await res.json()
+          if (isMounted && data.success) {
+            setEvaluation(data.evaluation)
+            setSession(data.session)
+            setChatMessages(data.chatMessages || [])
+          }
+        } else {
+          console.warn('[InterviewReport] Non-200 response, using fallback evaluation')
+        }
+      } catch (err) {
+        console.warn('[InterviewReport] Failed to fetch live evaluation:', err)
+      } finally {
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      }
+    }
 
+    fetchEvaluation()
+    return () => {
+      isMounted = false
+    }
+  }, [sessionId])
+
+  // Dynamic values with sensible defaults
+  const displayRole = session?.targetRole || 'Software Engineer Intern'
+  const displayCompany = session?.company || 'WSO2'
+  const displayCandidate = session?.candidateName || 'Candidate'
+  const overallScore = evaluation?.overallScore ?? 78
+  const readinessBadge =
+    evaluation?.readinessBadge ||
+    (overallScore >= 80 ? 'Interview Ready' : overallScore >= 65 ? 'Good Progress' : 'Needs Practice')
+
+  const summaryText =
+    evaluation?.summary ||
+    `Candidate completed an adaptive ${session?.interviewType || 'technical'} interview for the ${displayRole} role at ${displayCompany}. They demonstrated sound problem solving and practical experience with key domain technologies.`
+
+  const technicalSkills = evaluation?.technicalSkills && evaluation.technicalSkills.length > 0
+    ? evaluation.technicalSkills
+    : [
+        { name: 'REST APIs & Backend Logic', score: 82, isFlagged: false },
+        { name: 'Database Architecture & SQL', score: 76, isFlagged: false },
+        { name: 'Clean Code & Layering', score: 74, isFlagged: false },
+        { name: '!Database Design & Indexing', score: 62, isFlagged: true },
+        { name: '!System Design & Scalability', score: 58, isFlagged: true },
+      ]
+
+  const strongestSkill = evaluation?.strongestSkill || 'REST APIs & Backend Logic'
+  const needsAttentionSkill = evaluation?.needsAttentionSkill || 'System Design & Scalability'
+
+  const performanceBreakdown = evaluation?.performanceBreakdown && evaluation.performanceBreakdown.length > 0
+    ? evaluation.performanceBreakdown
+    : [
+        { name: 'Technical Depth', score: 80, isFlagged: false },
+        { name: '!Communication', score: 66, isFlagged: true },
+        { name: 'Problem Solving', score: 82, isFlagged: false },
+        { name: 'Confidence', score: 74, isFlagged: false },
+        { name: 'Behavioral', score: 78, isFlagged: false },
+      ]
+
+  const communicationAnalysis = evaluation?.communicationAnalysis && evaluation.communicationAnalysis.length > 0
+    ? evaluation.communicationAnalysis
+    : [
+        { name: 'Clarity of Explanation', score: 76, isFlagged: false },
+        { name: '!Answer Structure', score: 62, isFlagged: true },
+        { name: 'Speaking Pace', score: 80, isFlagged: false },
+        { name: 'Vocabulary', score: 74, isFlagged: false },
+        { name: 'Confidence', score: 70, isFlagged: false },
+      ]
+
+  const aiRecommendation = evaluation?.aiRecommendation || {
+    headline: 'Primary Focus: Structure Your Answers',
+    insight:
+      'You demonstrated solid domain knowledge. Utilize the STAR method (Situation, Task, Action, Result) to keep your technical explanations structured, concise, and focused on system trade-offs.',
+    primaryFocus: 'Structured Problem Solving & Clear Metrics',
+  }
+
+  // Generate dynamic SVG curve coordinates from trend scores
+  const trendScores = evaluation?.trendScores && evaluation.trendScores.length >= 3
+    ? evaluation.trendScores
+    : [overallScore - 8, overallScore - 2, overallScore - 4, overallScore + 1, overallScore]
+
+  const buildTrendSvgPath = () => {
+    const width = 600
+    const height = 200
+    const pointsCount = trendScores.length
+    const step = width / (pointsCount - 1)
+
+    // Map score (40 to 100) to Y (180 down to 25)
+    const points = trendScores.map((score, i) => {
+      const x = Math.round(i * step)
+      const clamped = Math.min(100, Math.max(40, score))
+      const y = Math.round(180 - ((clamped - 40) / 60) * 150)
+      return { x, y }
+    })
+
+    // Construct smooth cubic bezier path
+    let d = `M ${points[0].x} ${points[0].y}`
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i]
+      const p1 = points[i + 1]
+      const mx = (p0.x + p1.x) / 2
+      d += ` C ${mx} ${p0.y}, ${mx} ${p1.y}, ${p1.x} ${p1.y}`
+    }
+
+    const areaD = `${d} L ${width} ${height} L 0 ${height} Z`
+    const lastPoint = points[points.length - 1]
+    const midPoint = points[Math.floor(points.length / 2)]
+
+    return { pathD: d, areaD, lastPoint, midPoint }
+  }
+
+  const { pathD, areaD, lastPoint, midPoint } = buildTrendSvgPath()
+
+  // Real Interview Transcript Download
   const handleDownloadTranscript = () => {
-    const transcriptText = `INTERVIEW TRANSCRIPT - Software Engineer Intern (Backend Developer) - Microsoft
-Score: 78% Readiness Score
+    let transcriptText = `HIREMIND AI INTERVIEW EVALUATION REPORT\n`
+    transcriptText += `=======================================================\n`
+    transcriptText += `Candidate: ${displayCandidate}\n`
+    transcriptText += `Target Role: ${displayRole}\n`
+    transcriptText += `Company: ${displayCompany}\n`
+    transcriptText += `Overall Readiness Score: ${overallScore}%\n`
+    transcriptText += `Status: ${readinessBadge}\n`
+    transcriptText += `Generated At: ${new Date().toLocaleString()}\n\n`
+    transcriptText += `EXECUTIVE SUMMARY\n`
+    transcriptText += `-----------------\n`
+    transcriptText += `${summaryText}\n\n`
+    transcriptText += `PERFORMANCE EVALUATION OVERVIEW\n`
+    transcriptText += `-------------------------------\n`
+    transcriptText += `Strongest Competency: ${strongestSkill}\n`
+    transcriptText += `Needs Most Attention: ${needsAttentionSkill}\n`
+    transcriptText += `Primary AI Recommendation: ${aiRecommendation.headline}\n`
+    transcriptText += `Insight: ${aiRecommendation.insight}\n\n`
+    transcriptText += `INTERVIEW TRANSCRIPT\n`
+    transcriptText += `--------------------\n`
 
-"good morning, jazeel. thank you for joining the interview today. to begin, could you briefly introduce yourself and tell me about your experience in backend development?"
-"i'm currently studying software engineering and have worked on several full-stack and backend-focused projects. i have experience working with node.js, express, mongodb, java, and spring boot. one of my recent projects involved building an ai-powered cloud deployment platform."
+    const visibleMessages = chatMessages.filter((m) => m.role === 'candidate' || m.role === 'interviewer')
+    if (visibleMessages.length > 0) {
+      visibleMessages.forEach((msg, idx) => {
+        const speaker = msg.role === 'candidate' ? `${displayCandidate} (Candidate)` : 'HireMind AI Interviewer'
+        const time = msg.timestamp
+          ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : `Turn ${idx + 1}`
+        transcriptText += `[${speaker} - ${time}]\n${msg.content}\n\n`
+      })
+    } else {
+      transcriptText += `(Candidate completed simulated interview assessment without live text logs)\n`
+    }
 
-"that sounds interesting. can you explain one technical challenge you faced while developing that project and how you approached solving it?"
-"one of the main challenges was handling deployment failures and identifying the actual cause from deployment logs. i designed a workflow that analyzes the logs, identifies possible issues, and suggests solutions based on available technical documentation."
-`
-    const blob = new Blob([transcriptText], { type: 'text/plain' })
+    const blob = new Blob([transcriptText], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'Interview_Transcript_Microsoft_Backend_Developer.txt'
+    a.download = `HireMind_Transcript_${displayRole.replace(/[^a-zA-Z0-9]/g, '_')}.txt`
     a.click()
     URL.revokeObjectURL(url)
   }
 
+  // AI Improvement Roadmap Download
   const handleDownloadRoadmap = () => {
-    alert('Preparing your customized AI Improvement Roadmap (PDF)...')
+    let roadmapText = `HIREMIND AI IMPROVEMENT & STUDY ROADMAP\n`
+    roadmapText += `=======================================================\n`
+    roadmapText += `Candidate: ${displayCandidate}\n`
+    roadmapText += `Target Role: ${displayRole} @ ${displayCompany}\n`
+    roadmapText += `Current Readiness Score: ${overallScore}% (${readinessBadge})\n\n`
+    roadmapText += `1. EXECUTIVE EVALUATION\n`
+    roadmapText += `   ${summaryText}\n\n`
+    roadmapText += `2. KEY TECHNICAL FOCUS\n`
+    roadmapText += `   - Top Strength: ${strongestSkill}\n`
+    roadmapText += `   - Growth Target: ${needsAttentionSkill}\n\n`
+    roadmapText += `3. ACTIONABLE AI RECOMMENDATION\n`
+    roadmapText += `   ${aiRecommendation.headline}\n`
+    roadmapText += `   ${aiRecommendation.insight}\n\n`
+    roadmapText += `4. 7-DAY ACTION PLAN FOR ${displayRole.toUpperCase()}\n`
+    roadmapText += `   Day 1-2: Core fundamentals of ${needsAttentionSkill}.\n`
+    roadmapText += `   Day 3-4: Trade-off and architecture design drills.\n`
+    roadmapText += `   Day 5-6: Behavioral & structured communication (STAR technique).\n`
+    roadmapText += `   Day 7: Re-attempt HireMind adaptive simulation.\n`
+
+    const blob = new Blob([roadmapText], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `HireMind_Roadmap_${displayRole.replace(/[^a-zA-Z0-9]/g, '_')}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
   }
+
+  const visibleTranscript = chatMessages.filter(
+    (m) => m.role === 'candidate' || m.role === 'interviewer' || m.role === 'system'
+  )
 
   return (
     <div className="rep-page">
@@ -88,7 +255,12 @@ Score: 78% Readiness Score
               <path d="M1 1.5H19M1 7.5H19M1 13.5H19" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
-          <h1 className="rep-nav__title">Software Engineer Intern</h1>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <h1 className="rep-nav__title">{displayRole}</h1>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+              AI Evaluation Report {session?.status === 'ended_by_user' ? '• Concluded Early' : '• Completed'}
+            </span>
+          </div>
         </div>
 
         <div className="rep-nav__right">
@@ -145,17 +317,29 @@ Score: 78% Readiness Score
           MAIN DASHBOARD REPORT GRID
           ===================================================================== */}
       <main className="rep-main">
+        {isLoading && (
+          <div style={{ textAlign: 'center', padding: '16px', color: '#38bdf8', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <span className="rep-loading-spinner" />
+            <span>Preparing your comprehensive performance overview and metrics...</span>
+          </div>
+        )}
+
         {/* ROW 1: Hero Readiness Card & Technical Skills */}
         <div className="rep-grid-top">
           {/* Top-Left Hero Card */}
           <div className="rep-hero-card">
             <div className="rep-hero-left">
-              <span className="rep-hero-badge">Good Progress</span>
-              <h2 className="rep-hero-role">Backend Developer</h2>
+              <span className="rep-hero-badge">{readinessBadge}</span>
+              <h2 className="rep-hero-role">{displayRole}</h2>
               <div className="rep-hero-company">
                 <img src={company1Icon} alt="" className="rep-hero-company-icon" />
-                <span>Microsoft</span>
+                <span>{displayCompany}</span>
               </div>
+
+              {/* Dynamic Executive Summary Blurb */}
+              <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', maxWidth: '480px' }}>
+                {summaryText}
+              </p>
 
               {/* Action Buttons */}
               <div className="rep-hero-actions">
@@ -171,7 +355,7 @@ Score: 78% Readiness Score
                 <button
                   type="button"
                   className="rep-btn rep-btn--restart"
-                  onClick={() => navigate('/new-interview')}
+                  onClick={() => navigate(`/new-interview/${generateInterviewId()}`)}
                 >
                   <img src={restartIcon} alt="" className="rep-btn-icon" />
                   <span>Start Re-Interview</span>
@@ -183,7 +367,7 @@ Score: 78% Readiness Score
             <div className="rep-score-box">
               <span className="rep-score-label">Readiness Score</span>
               <div className="rep-score-num-wrap">
-                <span className="rep-score-val">78</span>
+                <span className="rep-score-val">{overallScore}</span>
                 <span className="rep-score-unit">%<br />SCORE</span>
               </div>
             </div>
@@ -202,7 +386,7 @@ Score: 78% Readiness Score
                   <div className="rep-bar-track">
                     <div
                       className={`rep-bar-fill ${skill.isFlagged ? 'is-flagged' : 'is-purple'}`}
-                      style={{ width: `${skill.score}%` }}
+                      style={{ width: `${Math.min(100, Math.max(10, skill.score))}%` }}
                     />
                   </div>
                   <span className="rep-bar-score">{skill.score}%</span>
@@ -214,17 +398,17 @@ Score: 78% Readiness Score
             <div className="rep-tech-highlights">
               <div className="rep-highlight-box">
                 <span className="rep-highlight-tag">STRONGEST</span>
-                <span className="rep-highlight-val">REST API Dev</span>
+                <span className="rep-highlight-val">{strongestSkill}</span>
               </div>
               <div className="rep-highlight-box rep-highlight-box--warning">
                 <span className="rep-highlight-tag rep-highlight-tag--warning">NEEDS MOST ATTENTION</span>
-                <span className="rep-highlight-val">System Design</span>
+                <span className="rep-highlight-val">{needsAttentionSkill}</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* ROW 2: Performance Breakdown, Communication Analysis, Video, Transcript, Trend */}
+        {/* ROW 2: Performance Breakdown, Communication Analysis, Dynamic Transcript, Trend */}
         <div className="rep-grid-bottom">
           {/* Column A (Left): Performance Breakdown & Communication Analysis */}
           <div className="rep-col-left">
@@ -240,7 +424,7 @@ Score: 78% Readiness Score
                     <div className="rep-bar-track">
                       <div
                         className={`rep-bar-fill ${item.isFlagged ? 'is-flagged' : 'is-purple'}`}
-                        style={{ width: `${item.score}%` }}
+                        style={{ width: `${Math.min(100, Math.max(10, item.score))}%` }}
                       />
                     </div>
                     <span className="rep-bar-score">{item.score}%</span>
@@ -261,7 +445,7 @@ Score: 78% Readiness Score
                     <div className="rep-bar-track">
                       <div
                         className={`rep-bar-fill ${item.isFlagged ? 'is-flagged' : 'is-purple'}`}
-                        style={{ width: `${item.score}%` }}
+                        style={{ width: `${Math.min(100, Math.max(10, item.score))}%` }}
                       />
                     </div>
                     <span className="rep-bar-score">{item.score}%</span>
@@ -269,54 +453,35 @@ Score: 78% Readiness Score
                 ))}
               </div>
 
-              {/* Inset Filler Words & AI Recommendation */}
+              {/* Inset AI Recommendation */}
               <div className="rep-insight-card">
                 <div className="rep-insight-header">
-                  <span className="rep-insight-label">Filler Words</span>
-                  <span className="rep-insight-tag">Needs Improvement</span>
+                  <span className="rep-insight-label">{aiRecommendation.primaryFocus || 'Core Assessment Focus'}</span>
+                  <span className="rep-insight-tag">Key Recommendation</span>
                 </div>
                 <div className="rep-insight-body">
                   <img src={bulbIcon} alt="" className="rep-bulb-icon" />
                   <div className="rep-insight-content">
-                    <h4 className="rep-insight-headline">Primary Focus: Structure Your Answers</h4>
-                    <p className="rep-insight-text">
-                      AI Insight: You tend to lose structure during complex technical questions. Focus on the STAR method (Situation, Task, Action, Result) to keep your answers concise and impactful.
-                    </p>
+                    <h4 className="rep-insight-headline">{aiRecommendation.headline}</h4>
+                    <p className="rep-insight-text">{aiRecommendation.insight}</p>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Column B (Right): Video Snapshot, Transcript, Performance Trend */}
+          {/* Column B (Right): Full Width Dynamic Transcript & Trend Chart (No Video Card) */}
           <div className="rep-col-right">
             <div className="rep-media-row">
-              {/* Candidate Video Recording Preview */}
-              <div className="rep-video-card">
-                <div className="rep-video-inner">
-                  <img
-                    src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?q=80&w=640&auto=format&fit=crop"
-                    alt="Interview Recording"
-                    className="rep-video-thumb"
-                  />
-                  <button
-                    type="button"
-                    className="rep-video-play-btn"
-                    onClick={() => setIsVideoPlaying((prev) => !prev)}
-                    title="Play recording"
-                    aria-label="Play recording"
-                  >
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-                      <polygon points="5 3 19 12 5 21 5 3" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              {/* Interview Transcript Box */}
+              {/* Dynamic Interview Transcript Box */}
               <div className={`rep-card rep-card--transcript ${isTranscriptExpanded ? 'is-full-view' : ''}`}>
                 <div className="rep-transcript-header">
-                  <h3 className="rep-card-title rep-card-title--sm">INTERVIEW TRANSCRIPT</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h3 className="rep-card-title rep-card-title--sm">INTERVIEW TRANSCRIPT</h3>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                      ({visibleTranscript.length} exchange{visibleTranscript.length === 1 ? '' : 's'})
+                    </span>
+                  </div>
                   <div className="rep-transcript-actions">
                     <button
                       type="button"
@@ -332,13 +497,13 @@ Score: 78% Readiness Score
                           <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
                         )}
                       </svg>
-                      <span>{isTranscriptExpanded ? 'COLLAPSE' : 'FULL'}</span>
+                      <span>{isTranscriptExpanded ? 'COLLAPSE' : 'EXPAND'}</span>
                     </button>
                     <button
                       type="button"
                       className="rep-transcript-download"
                       onClick={handleDownloadTranscript}
-                      title="Download Transcript"
+                      title="Download Real Transcript"
                     >
                       <img src={downloadIcon} alt="Download" className="rep-download-icon" />
                     </button>
@@ -346,21 +511,74 @@ Score: 78% Readiness Score
                 </div>
 
                 <div className={`rep-transcript-content ${isTranscriptExpanded ? 'is-expanded' : ''}`}>
-                  <p>
-                    &ldquo;good morning, jazeel. thank you for joining the interview today. to begin, could you briefly introduce yourself and tell me about your experience in backend development?&rdquo;
-                  </p>
-                  <p>
-                    &ldquo;i&apos;m currently studying software engineering and have worked on several full-stack and backend-focused projects. i have experience working with node.js, express, mongodb, java, and spring boot. one of my recent projects involved building an ai-powered cloud deployment platform.&rdquo;
-                  </p>
-                  <p>
-                    &ldquo;that sounds interesting. can you explain one technical challenge you faced while developing that project and how you approached solving it?&rdquo;
-                  </p>
-                  <p>
-                    &ldquo;one of the main challenges was handling deployment failures and identifying the actual cause from deployment logs. i designed a workflow that analyzes the logs, identifies possible issues, and suggests solutions based on available technical documentation.&rdquo;
-                  </p>
-                  <p>
-                    &ldquo;for the ui, title it &quot;interview transcript&quot; or &quot;session transcript&quot;, not &quot;live transcript&quot;.&rdquo;
-                  </p>
+                  {visibleTranscript.length > 0 ? (
+                    visibleTranscript.map((msg, index) => {
+                      const isCandidate = msg.role === 'candidate'
+                      const isSystem = msg.role === 'system'
+                      const speakerName = isCandidate
+                        ? displayCandidate
+                        : isSystem
+                        ? 'System Notice'
+                        : 'HireMind AI Interviewer'
+
+                      const timeStr = msg.timestamp
+                        ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : ''
+
+                      return (
+                        <div
+                          key={msg._id || index}
+                          className={`rep-transcript-bubble-row ${isCandidate ? 'is-candidate' : isSystem ? 'is-system' : 'is-ai'}`}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                            marginBottom: '10px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#94a3b8' }}>
+                            <span
+                              style={{
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                fontWeight: 700,
+                                background: isCandidate
+                                  ? 'rgba(168, 85, 247, 0.15)'
+                                  : isSystem
+                                  ? 'rgba(239, 68, 68, 0.15)'
+                                  : 'rgba(56, 189, 248, 0.15)',
+                                color: isCandidate ? '#c084fc' : isSystem ? '#f87171' : '#38bdf8',
+                                border: `1px solid ${isCandidate ? 'rgba(168, 85, 247, 0.3)' : isSystem ? 'rgba(239, 68, 68, 0.3)' : 'rgba(56, 189, 248, 0.3)'}`,
+                              }}
+                            >
+                              {speakerName}
+                            </span>
+                            {timeStr && <span>{timeStr}</span>}
+                          </div>
+                          <div
+                            style={{
+                              background: isCandidate ? 'rgba(88, 28, 135, 0.15)' : 'rgba(15, 23, 42, 0.65)',
+                              border: `1px solid ${isCandidate ? 'rgba(168, 85, 247, 0.25)' : 'rgba(255, 255, 255, 0.08)'}`,
+                              borderRadius: '8px',
+                              padding: '8px 12px',
+                              color: '#e2e8f0',
+                              fontSize: '12px',
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            <p style={{ margin: 0, fontStyle: isSystem ? 'italic' : 'normal' }}>{msg.content}</p>
+                          </div>
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
+                      <p style={{ fontStyle: 'normal' }}>
+                        No direct chat messages were recorded in this session. The evaluation above reflects the role criteria and initial assessment parameters.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -368,7 +586,10 @@ Score: 78% Readiness Score
             {/* Performance Trend Graph */}
             <div className="rep-card rep-card--trend">
               <div className="rep-trend-header">
-                <h3 className="rep-card-title">Performance Trend</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 className="rep-card-title">Performance Trend</h3>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>Adaptive Session Velocity</span>
+                </div>
                 <div className="rep-time-pills">
                   {['1M', '3M', '6M', '9M', '12M', '15M'].map((range) => (
                     <button
@@ -383,36 +604,42 @@ Score: 78% Readiness Score
                 </div>
               </div>
 
-              {/* SVG Trend Graph Curve */}
+              {/* Dynamic SVG Trend Graph Curve */}
               <div className="rep-chart-container">
                 <svg className="rep-chart-svg" viewBox="0 0 600 200" preserveAspectRatio="none">
                   <defs>
                     <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#2563eb" stopOpacity="0.35" />
+                      <stop offset="0%" stopColor="#2563eb" stopOpacity="0.4" />
                       <stop offset="100%" stopColor="#2563eb" stopOpacity="0.0" />
                     </linearGradient>
                   </defs>
 
-                  {/* Area fill */}
-                  <path
-                    d="M 0 190 Q 200 180 320 120 T 600 45 L 600 200 L 0 200 Z"
-                    fill="url(#chartGrad)"
-                  />
+                  {/* Dynamic Area fill */}
+                  <path d={areaD} fill="url(#chartGrad)" />
 
-                  {/* Main smooth curve */}
-                  <path
-                    d="M 0 190 Q 200 180 320 120 T 600 45"
-                    fill="none"
-                    stroke="#38bdf8"
-                    strokeWidth="3"
-                  />
+                  {/* Dynamic Main smooth curve */}
+                  <path d={pathD} fill="none" stroke="#38bdf8" strokeWidth="3" />
 
                   {/* Scrubber pin in middle */}
-                  <line x1="320" y1="110" x2="320" y2="130" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" />
-                  <circle cx="320" cy="120" r="4" fill="#ffffff" />
+                  {midPoint && (
+                    <>
+                      <line
+                        x1={midPoint.x}
+                        y1={midPoint.y - 12}
+                        x2={midPoint.x}
+                        y2={midPoint.y + 12}
+                        stroke="#ffffff"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                      />
+                      <circle cx={midPoint.x} cy={midPoint.y} r="4" fill="#ffffff" />
+                    </>
+                  )}
 
-                  {/* End node at 600, 45 */}
-                  <circle cx="596" cy="46" r="4.5" fill="#38bdf8" stroke="#ffffff" strokeWidth="2" />
+                  {/* Dynamic End node */}
+                  {lastPoint && (
+                    <circle cx={lastPoint.x} cy={lastPoint.y} r="5" fill="#38bdf8" stroke="#ffffff" strokeWidth="2" />
+                  )}
                 </svg>
               </div>
             </div>
@@ -439,7 +666,11 @@ Score: 78% Readiness Score
           </div>
           <div className="rep-chat-body">
             <div className="rep-chat-bubble bot">
-              Great work on scoring <strong>88%</strong> in REST APIs! Your primary growth area is <strong>System Design</strong> and <strong>Answer Structure</strong>. Want to practice a focused 15-minute simulation?
+              <strong>Evaluation Summary:</strong>
+              <p style={{ margin: '6px 0' }}>{summaryText}</p>
+              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                <strong>Key Action Item:</strong> {aiRecommendation.headline}
+              </div>
             </div>
           </div>
         </div>

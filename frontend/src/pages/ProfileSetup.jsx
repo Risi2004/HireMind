@@ -98,8 +98,7 @@ export default function ProfileSetup() {
           <h1 className="profile-setup__title">Build Your Professional Profile</h1>
           <p className="profile-setup__desc">
             Help HireMind tailor your interview scenarios by telling us a bit about your
-            background and technical stack. The more context you provide, the smarter the AI
-            gets.
+            background and skills. The more context you provide, the better we can tailor your experience.
           </p>
 
           {/* GitHub Connection Card */}

@@ -49,7 +49,9 @@ export default function Login() {
         return
       }
 
-      if (data?.user?.isProfileSetupCompleted) {
+      if (data?.user?.role === 'admin' || data?.user?.email === 'admin@gmail.com') {
+        navigate('/admin/dashboard')
+      } else if (data?.user?.isProfileSetupCompleted) {
         navigate('/dashboard')
       } else {
         navigate('/profile-setup')
@@ -105,7 +107,9 @@ export default function Login() {
 
     try {
       const data = await verify2FALogin(tempToken, code)
-      if (data?.user?.isProfileSetupCompleted) {
+      if (data?.user?.role === 'admin' || data?.user?.email === 'admin@gmail.com') {
+        navigate('/admin/dashboard')
+      } else if (data?.user?.isProfileSetupCompleted) {
         navigate('/dashboard')
       } else {
         navigate('/profile-setup')

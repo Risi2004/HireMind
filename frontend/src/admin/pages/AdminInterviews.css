@@ -1,0 +1,417 @@
+/* ==========================================================================
+   HireMind Admin Interview Sessions Styles
+   Theme: Minimal Dark SaaS / Mock Interview Telemetry
+   ========================================================================== */
+
+/* 5 Summary Cards Grid */
+.int-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1.1rem;
+  margin-bottom: 1.75rem;
+}
+
+@media (max-width: 1280px) {
+  .int-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .int-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .int-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.int-summary-card {
+  background: var(--admin-bg-card);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-lg);
+  padding: 1.15rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  box-shadow: var(--admin-shadow-sm);
+  transition: var(--admin-transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.int-summary-card:hover {
+  background: var(--admin-bg-card-hover);
+  border-color: var(--admin-border-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--admin-shadow-md);
+}
+
+.int-summary-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.int-summary-card__label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--admin-text-secondary);
+}
+
+.int-summary-card__icon-wrap {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--admin-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.int-summary-card__icon-wrap--cyan {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--admin-accent-cyan);
+}
+.int-summary-card__icon-wrap--emerald {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--admin-accent-emerald);
+}
+.int-summary-card__icon-wrap--amber {
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--admin-accent-amber);
+}
+.int-summary-card__icon-wrap--rose {
+  background: rgba(244, 63, 94, 0.1);
+  color: var(--admin-accent-rose);
+}
+.int-summary-card__icon-wrap--purple {
+  background: rgba(168, 85, 247, 0.1);
+  color: var(--admin-accent-purple);
+}
+
+.int-summary-card__value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--admin-text-primary);
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+}
+
+.int-summary-card__bottom {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 11.5px;
+}
+
+/* Controls Toolbar */
+.int-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.int-toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+/* Badges for status & interview types */
+.badge-status-completed {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--admin-accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-status-inprogress {
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--admin-accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.badge-status-failed {
+  background: rgba(244, 63, 94, 0.12);
+  color: var(--admin-accent-rose);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.badge-status-cancelled {
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--admin-text-muted);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.badge-type-technical {
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.badge-type-behavioral {
+  background: rgba(168, 85, 247, 0.12);
+  color: var(--admin-accent-purple);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.badge-type-systemdesign {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--admin-accent-amber);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* ==========================================================================
+   INTERVIEW DETAILS MODAL / DRAWER
+   ========================================================================== */
+.int-details-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 7, 14, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.int-details-modal {
+  width: 100%;
+  max-width: 820px;
+  background: var(--admin-bg-sidebar);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: var(--admin-radius-xl);
+  box-shadow: var(--admin-shadow-lg), 0 0 40px rgba(56, 189, 248, 0.14);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 88vh;
+  animation: intModalIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes intModalIn {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.int-details-modal__header {
+  padding: 1.25rem 1.65rem;
+  border-bottom: 1px solid var(--admin-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(7, 12, 24, 0.65);
+}
+
+.int-details-modal__body {
+  padding: 1.65rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Quick Metadata Strip */
+.int-details-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.85rem;
+  padding: 1rem 1.25rem;
+  background: rgba(7, 12, 24, 0.6);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+}
+
+@media (max-width: 680px) {
+  .int-details-meta-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.int-meta-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.int-meta-col__label {
+  font-size: 11px;
+  color: var(--admin-text-muted);
+}
+
+.int-meta-col__val {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--admin-text-primary);
+}
+
+/* Conversation Section */
+.int-conversation-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.int-convo-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  border-radius: var(--admin-radius-md);
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--admin-border-subtle);
+  position: relative;
+}
+
+.int-convo-bubble--ai {
+  background: rgba(56, 189, 248, 0.05);
+  border-color: rgba(56, 189, 248, 0.22);
+  margin-right: 2rem;
+}
+
+.int-convo-bubble--candidate {
+  background: rgba(15, 23, 42, 0.8);
+  border-color: rgba(255, 255, 255, 0.08);
+  margin-left: 2rem;
+}
+
+.int-convo-speaker-tag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.int-convo-speaker-tag--ai {
+  color: var(--admin-accent-cyan);
+}
+
+.int-convo-speaker-tag--candidate {
+  color: #cbd5e1;
+}
+
+.int-convo-text {
+  font-size: 13px;
+  color: #e2e8f0;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Interview Evaluation Grid */
+.int-eval-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  background: rgba(7, 12, 24, 0.6);
+  border: 1px solid var(--admin-border-subtle);
+  border-radius: var(--admin-radius-md);
+  padding: 1.25rem;
+}
+
+@media (max-width: 600px) {
+  .int-eval-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.int-eval-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.int-eval-metric__header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+}
+
+.int-eval-metric__name {
+  font-weight: 600;
+  color: var(--admin-text-primary);
+}
+
+.int-eval-metric__score {
+  font-weight: 700;
+  color: var(--admin-accent-cyan);
+}
+
+.int-eval-metric__track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.int-eval-metric__fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.6s ease;
+}
+
+/* Final Feedback Card */
+.int-feedback-card {
+  background: rgba(16, 185, 129, 0.05);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: var(--admin-radius-md);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.int-feedback-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.int-feedback-summary {
+  font-size: 12.5px;
+  color: #cbd5e1;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.int-feedback-bullets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+@media (max-width: 600px) {
+  .int-feedback-bullets {
+    grid-template-columns: 1fr;
+  }
+}
+
+.int-feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.int-details-modal__footer {
+  padding: 1rem 1.65rem;
+  border-top: 1px solid var(--admin-border-subtle);
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(7, 12, 24, 0.65);
+}

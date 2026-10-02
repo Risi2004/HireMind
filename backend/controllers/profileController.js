@@ -8,6 +8,7 @@ const {
   uploadProfilePicture,
   deleteAvatar,
 } = require('../services/cloudflareR2');
+const { getClientUrl } = require('../config/clientConfig');
 
 /**
  * Universal GitHub HTTPS API Request Helper
@@ -133,7 +134,7 @@ const mapGithubRepos = (repos) => {
  */
 const githubAuthRedirect = async (req, res) => {
   try {
-    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const clientUrl = getClientUrl();
     const clientId = process.env.GITHUB_CLIENT_ID;
     const redirectParam = req.query.redirect || '/profile-setup';
 
@@ -174,7 +175,7 @@ const githubAuthRedirect = async (req, res) => {
     return res.redirect(githubAuthUrl);
   } catch (error) {
     console.error('[GitHub Auth Error]:', error);
-    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+    const clientUrl = getClientUrl();
     return res.redirect(`${clientUrl}/profile-setup?github_error=failed_to_start_oauth`);
   }
 };
@@ -185,7 +186,7 @@ const githubAuthRedirect = async (req, res) => {
  * @access  Public
  */
 const githubCallback = async (req, res) => {
-  const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const clientUrl = getClientUrl();
   const { code, state, error: ghError } = req.query;
 
   let redirectPath = '/profile-setup';

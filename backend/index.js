@@ -3,14 +3,19 @@ const cors = require('cors');
 const helmet = require('helmet');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
+const seedAdmin = require('./config/seedAdmin');
 const authRoutes = require('./routes/authRoutes');
 const profileRoutes = require('./routes/profileRoutes');
+const interviewRoutes = require('./routes/interviewRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const { checkR2Connection } = require('./services/cloudflareR2');
 
 dotenv.config();
 
-// Connect to MongoDB
-connectDB();
+// Connect to MongoDB & ensure admin account is seeded
+connectDB().then(() => {
+  seedAdmin().catch((err) => console.error('[HireMind DB] Admin seeding error:', err.message));
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -95,9 +100,11 @@ app.get(['/health', '/api/health'], (req, res) => {
   });
 });
 
-// Authentication & Profile Routes
+// Authentication & Profile & Interview Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/interview', interviewRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Start server on 0.0.0.0 for containerized Render runtime
 const server = app.listen(PORT, HOST, async () => {

@@ -16,3 +16,10 @@ yarn-error.log*
 dist/
 build/
 .DS_Store
+
+# Python & AI Service
+ai-service/.venv/
+ai-service/.env
+__pycache__/
+*.pyc
+
