@@ -559,12 +559,168 @@ export function AuthProvider({ children }) {
     return user?.role === 'admin' || user?.email === 'admin@gmail.com'
   }, [user])
 
+  const demoAccess = user?.demoAccess || {}
+  const hasDemoAccess = Boolean(demoAccess.enabled)
+  const allowedInterviews = Number(demoAccess.allowedInterviews) || 0
+  const completedInterviews = Number(demoAccess.completedInterviews) || 0
+  const remainingInterviews = Math.max(0, allowedInterviews - completedInterviews)
+
+  // Can the user enter an AI Interview session?
+  const canAccessInterview = useMemo(() => {
+    if (isAdmin) return true
+    return hasDemoAccess && remainingInterviews > 0
+  }, [isAdmin, hasDemoAccess, remainingInterviews])
+
+  const updateDemoQuota = (newDemoAccess) => {
+    if (!newDemoAccess) return
+    setUser((prev) => {
+      if (!prev) return prev
+      const updated = {
+        ...prev,
+        demoAccess: {
+          ...(prev.demoAccess || {}),
+          ...newDemoAccess,
+        },
+      }
+      localStorage.setItem('hiremind_user', JSON.stringify(updated))
+      return updated
+    })
+  }
+
+  const checkInterviewAccessStatus = async () => {
+    try {
+      const activeToken = token || localStorage.getItem('hiremind_token')
+      const res = await apiFetch('/api/interview/access-status', {
+        headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+      })
+      const data = await res.json()
+      if (data.success && user) {
+        // Immediately sync local state so navigation gates block without delay
+        const updatedUser = {
+          ...user,
+          demoAccess: {
+            ...(user.demoAccess || {}),
+            enabled: typeof data.hasDemoAccess !== 'undefined' ? data.hasDemoAccess : user.demoAccess?.enabled,
+            allowedInterviews: typeof data.allowedInterviews !== 'undefined' ? data.allowedInterviews : user.demoAccess?.allowedInterviews,
+            completedInterviews: typeof data.completedInterviews !== 'undefined' ? data.completedInterviews : user.demoAccess?.completedInterviews,
+            notes: data.notes || user.demoAccess?.notes || '',
+          },
+        }
+        setUser(updatedUser)
+        localStorage.setItem('hiremind_user', JSON.stringify(updatedUser))
+        refreshUser()
+      }
+      return data
+    } catch {
+      return { canAccess: canAccessInterview, isComingSoon: !hasDemoAccess }
+    }
+  }
+
+  // Live Real-Time Stream (Server-Sent Events) & Cross-Tab Sync for Demo Access updates
+  useEffect(() => {
+    if (!token || !user) return
+
+    let eventSource = null
+    let pollInterval = null
+
+    // 1. Server-Sent Events (SSE) live connection to backend
+    try {
+      const activeToken = token || localStorage.getItem('hiremind_token')
+      if (activeToken) {
+        const streamUrl = getApiUrl(`/api/interview/live-events?token=${encodeURIComponent(activeToken)}`)
+        eventSource = new EventSource(streamUrl)
+
+        eventSource.addEventListener('demo_access_changed', (evt) => {
+          try {
+            const payload = JSON.parse(evt.data)
+            const currentId = (user._id || user.id || '').toString()
+            if (payload.userId && payload.userId.toString() === currentId) {
+              console.log('[RealTime SSE] Received live demo access update:', payload)
+              if (payload.demoAccess) {
+                updateDemoQuota(payload.demoAccess)
+              }
+              checkInterviewAccessStatus()
+              window.dispatchEvent(
+                new CustomEvent('hiremind_demo_access_live_updated', { detail: payload })
+              )
+            }
+          } catch (e) {
+            console.warn('[RealTime SSE] Parse error:', e)
+          }
+        })
+      }
+    } catch (sseErr) {
+      console.warn('[RealTime SSE] Could not start EventSource:', sseErr)
+    }
+
+    // 2. BroadcastChannel cross-tab instant sync
+    let broadcastChannel = null
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        broadcastChannel = new BroadcastChannel('hiremind_demo_sync')
+        broadcastChannel.onmessage = (msg) => {
+          const currentId = (user._id || user.id || '').toString()
+          if (!msg.data || !msg.data.userId || msg.data.userId.toString() === currentId) {
+            checkInterviewAccessStatus()
+            window.dispatchEvent(
+              new CustomEvent('hiremind_demo_access_live_updated', { detail: msg.data })
+            )
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 3. Storage event sync
+    const handleStorage = (e) => {
+      if (e.key === 'hiremind_demo_sync' && e.newValue) {
+        checkInterviewAccessStatus()
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+
+    // 4. Adaptive heartbeat polling (every 4 seconds when candidate is waiting for demo access or remaining is 0)
+    // and instant refresh on window focus / tab visibility
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkInterviewAccessStatus()
+      }
+    }
+    const handleFocus = () => {
+      checkInterviewAccessStatus()
+    }
+    window.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
+
+    if (!isAdmin) {
+      pollInterval = setInterval(() => {
+        checkInterviewAccessStatus()
+      }, 4000)
+    }
+
+    return () => {
+      if (eventSource) eventSource.close()
+      if (broadcastChannel) broadcastChannel.close()
+      if (pollInterval) clearInterval(pollInterval)
+      window.removeEventListener('storage', handleStorage)
+      window.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [token, user?._id, user?.id, isAdmin])
+
   const value = useMemo(
     () => ({
       user,
       token,
       isAuthenticated: Boolean(token || user),
       isAdmin,
+      demoAccess,
+      hasDemoAccess,
+      allowedInterviews,
+      completedInterviews,
+      remainingInterviews,
+      canAccessInterview,
+      checkInterviewAccessStatus,
+      updateDemoQuota,
       loading,
       login,
       register,
@@ -590,7 +746,7 @@ export function AuthProvider({ children }) {
       updateUserInterests,
       updateUserLinkedin,
     }),
-    [user, token, loading]
+    [user, token, loading, canAccessInterview, hasDemoAccess, allowedInterviews, completedInterviews, remainingInterviews]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -12,6 +12,7 @@ import chatbotIcon from '../assets/icons/chatbot.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
 import { useAuth } from '../context/AuthContext'
 import { getInterviewSession, saveInterviewSession } from '../utils/interviewUtils'
+import { getApiUrl } from '../config/api'
 import Editor from '@monaco-editor/react'
 import './InterviewRoom.css'
 
@@ -57,7 +58,7 @@ export default function InterviewRoom() {
   const navigate = useNavigate()
   const { token, id } = useParams()
   const interviewId = id || token || 'default'
-  const { user } = useAuth()
+  const { user, updateDemoQuota, checkInterviewAccessStatus } = useAuth()
 
   // Track dynamic session details
   const [session, setSession] = useState(() => getInterviewSession(interviewId) || {})
@@ -79,7 +80,7 @@ export default function InterviewRoom() {
     const fetchRemoteSession = async () => {
       try {
         const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-        const res = await fetch(`http://localhost:5000/api/interview/${interviewId}`, {
+        const res = await fetch(getApiUrl(`/api/interview/${interviewId}`), {
           headers: {
             ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
           },
@@ -453,7 +454,7 @@ export default function InterviewRoom() {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 3500)
 
-      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/voice/speech`, {
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/speech`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -527,7 +528,7 @@ export default function InterviewRoom() {
 
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/code/run`, {
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/code/run`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -578,7 +579,7 @@ export default function InterviewRoom() {
 
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/code/submit`, {
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/code/submit`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -625,6 +626,12 @@ export default function InterviewRoom() {
         }
 
         if (data.isComplete) {
+          if (data.demoAccess && updateDemoQuota) {
+            updateDemoQuota(data.demoAccess)
+          }
+          if (checkInterviewAccessStatus) {
+            checkInterviewAccessStatus().catch(() => {})
+          }
           setIsCompleted(true)
           setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
           setIsAiTyping(false)
@@ -686,7 +693,7 @@ export default function InterviewRoom() {
     try {
       setVoiceState(VOICE_STATES.INITIALIZING)
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/begin`, {
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/begin`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -766,7 +773,7 @@ export default function InterviewRoom() {
     const checkInitialSession = async () => {
       try {
         const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-        const res = await fetch(`http://localhost:5000/api/interview/${interviewId}`, {
+        const res = await fetch(getApiUrl(`/api/interview/${interviewId}`), {
           headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
         })
 
@@ -851,7 +858,7 @@ export default function InterviewRoom() {
 
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/answer`, {
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/answer`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -887,6 +894,12 @@ export default function InterviewRoom() {
           setIsAiTyping(false)
 
           if (data.isComplete) {
+            if (data.demoAccess && updateDemoQuota) {
+              updateDemoQuota(data.demoAccess)
+            }
+            if (checkInterviewAccessStatus) {
+              checkInterviewAccessStatus().catch(() => {})
+            }
             setIsCompleted(true)
           }
 
@@ -901,6 +914,12 @@ export default function InterviewRoom() {
         }
 
         if (data.isComplete) {
+          if (data.demoAccess && updateDemoQuota) {
+            updateDemoQuota(data.demoAccess)
+          }
+          if (checkInterviewAccessStatus) {
+            checkInterviewAccessStatus().catch(() => {})
+          }
           setIsCompleted(true)
           setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
           setIsAiTyping(false)
@@ -1305,7 +1324,7 @@ export default function InterviewRoom() {
       formData.append('audio', audioBlob, 'candidate_answer.webm')
       formData.append('duration', durationSnapshot)
 
-      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/voice/transcribe`, {
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/transcribe`), {
         method: 'POST',
         headers: {
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
@@ -1387,13 +1406,22 @@ export default function InterviewRoom() {
 
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      await fetch(`http://localhost:5000/api/interview/${interviewId}/end`, {
+      const endRes = await fetch(getApiUrl(`/api/interview/${interviewId}/end`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
         },
       })
+      if (endRes.ok) {
+        const endData = await endRes.json()
+        if (endData.demoAccess && updateDemoQuota) {
+          updateDemoQuota(endData.demoAccess)
+        }
+      }
+      if (checkInterviewAccessStatus) {
+        await checkInterviewAccessStatus()
+      }
     } catch (e) {
       console.warn('Manual end call network notice:', e)
     }

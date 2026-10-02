@@ -5,7 +5,8 @@
  * Synthesizes interviewer question text into audio for playback.
  */
 
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+const { getAiServiceUrl } = require('../config/aiServiceConfig');
+const AI_SERVICE_URL = getAiServiceUrl();
 
 class TextToSpeechService {
   constructor() {

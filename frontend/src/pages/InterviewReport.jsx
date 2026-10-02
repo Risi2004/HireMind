@@ -7,6 +7,7 @@ import company1Icon from '../assets/icons/company1.svg'
 import bulbIcon from '../assets/icons/bulb.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
 import { generateInterviewId } from '../utils/interviewUtils'
+import { getApiUrl } from '../config/api'
 import './InterviewReport.css'
 
 export default function InterviewReport() {
@@ -32,7 +33,7 @@ export default function InterviewReport() {
       try {
         const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
         const targetId = sessionId && sessionId !== 'default' ? sessionId : 'latest'
-        const res = await fetch(`http://localhost:5000/api/interview/${targetId}/evaluation`, {
+        const res = await fetch(getApiUrl(`/api/interview/${targetId}/evaluation`), {
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },

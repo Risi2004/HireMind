@@ -4,7 +4,8 @@
  * Owns interview reasoning, question selection, and stage/topic progression.
  */
 
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+const { getAiServiceUrl } = require('../config/aiServiceConfig');
+const AI_SERVICE_URL = getAiServiceUrl();
 
 class InterviewAgentService {
   /**

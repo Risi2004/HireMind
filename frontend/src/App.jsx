@@ -30,6 +30,7 @@ import AdminSettings from './admin/pages/AdminSettings'
 
 import AdminProtectedRoute from './admin/AdminProtectedRoute'
 import CandidateProtectedRoute from './components/CandidateProtectedRoute'
+import InterviewAccessGate from './components/InterviewAccessGate'
 
 import './App.css'
 
@@ -52,13 +53,19 @@ export default function App() {
               <Route path="/profile-setup/your-field" element={<YourField />} />
               <Route path="/profile-setup/career-stage" element={<CareerStage />} />
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/new-interview" element={<NewInterview />} />
-              <Route path="/new-interview/:id" element={<NewInterview />} />
-              <Route path="/new-interview/:id/room" element={<InterviewRoom />} />
-              <Route path="/new-interview/token" element={<InterviewRoom />} />
-              <Route path="/new-interview/room" element={<InterviewRoom />} />
-              <Route path="/interview-room/:id" element={<InterviewRoom />} />
-              <Route path="/interview-room" element={<InterviewRoom />} />
+
+              {/* High Security Gate for AI Mock Interview (Enforces Admin or Active Demo Account Quota) */}
+              <Route element={<InterviewAccessGate />}>
+                <Route path="/new-interview" element={<NewInterview />} />
+                <Route path="/new-interview/:id" element={<NewInterview />} />
+                <Route path="/new-interview/:id/room" element={<InterviewRoom />} />
+                <Route path="/new-interview/token" element={<InterviewRoom />} />
+                <Route path="/new-interview/room" element={<InterviewRoom />} />
+                <Route path="/interview-room/:id" element={<InterviewRoom />} />
+                <Route path="/interview-room" element={<InterviewRoom />} />
+              </Route>
+
+              {/* Interview Performance Reports remain viewable */}
               <Route path="/interview-report" element={<InterviewReport />} />
               <Route path="/interview-report/:id" element={<InterviewReport />} />
               <Route path="/report" element={<InterviewReport />} />
@@ -75,6 +82,7 @@ export default function App() {
                 <Route path="dashboard" element={<AdminDashboard />} />
                 <Route path="users" element={<AdminUsers />} />
                 <Route path="pilot-access" element={<AdminPilotAccess />} />
+                <Route path="demo-accounts" element={<AdminPilotAccess />} />
                 <Route path="interviews" element={<AdminInterviews />} />
                 <Route path="feedback" element={<AdminFeedback />} />
                 <Route path="analytics" element={<AdminAnalytics />} />

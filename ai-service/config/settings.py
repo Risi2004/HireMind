@@ -34,9 +34,15 @@ TTS_MODEL = os.getenv("TTS_MODEL", "gemini-3.8-flash-lite-tts")
 TTS_VOICE = os.getenv("TTS_VOICE", "Puck")
 
 # Service Configuration
-AI_SERVICE_PORT = int(os.getenv("AI_SERVICE_PORT", "8000"))
+AI_SERVICE_PORT = int(os.getenv("PORT") or os.getenv("AI_SERVICE_PORT") or "8000")
 AI_SERVICE_HOST = os.getenv("AI_SERVICE_HOST", "0.0.0.0")
-BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:5000/api")
+
+raw_backend = os.getenv("BACKEND_API_URL", "http://localhost:5000/api")
+if not (raw_backend.startswith("http://") or raw_backend.startswith("https://")):
+    raw_backend = f"http://{raw_backend}"
+BACKEND_API_URL = raw_backend.rstrip("/")
+if not BACKEND_API_URL.endswith("/api"):
+    BACKEND_API_URL = f"{BACKEND_API_URL}/api"
 
 
 def is_openrouter_configured() -> bool:

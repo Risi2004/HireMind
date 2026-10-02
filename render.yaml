@@ -1,4 +1,7 @@
 services:
+  # =========================================================================
+  # 1. HIREMIND EXPRESS BACKEND WEB SERVICE
+  # =========================================================================
   - type: web
     name: hiremind-backend
     runtime: node
@@ -23,6 +26,11 @@ services:
           type: web
           name: hiremind-backend
           property: host
+      - key: AI_SERVICE_URL
+        fromService:
+          type: web
+          name: hiremind-ai-service
+          property: host
       - key: CLOUDFLARE_R2_ACCOUNT_ID
         sync: false
       - key: CLOUDFLARE_R2_ACCESS_KEY_ID
@@ -45,3 +53,39 @@ services:
         sync: false
       - key: GITHUB_CLIENT_SECRET
         sync: false
+
+  # =========================================================================
+  # 2. HIREMIND AI SERVICE (FASTAPI + GOOGLE ADK) WEB SERVICE
+  # =========================================================================
+  - type: web
+    name: hiremind-ai-service
+    runtime: python
+    rootDir: ai-service
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: MODEL_PROVIDER
+        value: openrouter
+      - key: aimodel
+        value: qwen/qwen-2.5-72b-instruct
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL_NAME
+        value: gemini-2.0-flash
+      - key: STT_MODEL
+        value: openai/whisper-large-v3-turbo
+      - key: TTS_MODEL
+        value: gemini-3.8-flash-lite-tts
+      - key: TTS_VOICE
+        value: Puck
+      - key: BACKEND_API_URL
+        fromService:
+          type: web
+          name: hiremind-backend
+          property: host

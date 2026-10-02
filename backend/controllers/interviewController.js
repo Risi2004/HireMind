@@ -6,7 +6,10 @@ const textToSpeechService = require('../services/textToSpeechService');
 const interviewAgentService = require('../services/interviewAgentService');
 const codeExecutionService = require('../services/codeExecutionService');
 
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+const { getAiServiceUrl } = require('../config/aiServiceConfig');
+const { recordCompletedDemoInterview } = require('../middleware/demoAccessMiddleware');
+
+const AI_SERVICE_URL = getAiServiceUrl();
 
 /**
  * Helper to convert a readable stream into a Buffer
@@ -673,13 +676,17 @@ exports.beginLiveInterview = async (req, res) => {
       topics: ['Background', 'Motivation'],
     };
 
-    // If session was ended previously, allow restart if beginning again
+    // If session was ended previously, prevent resurrecting/restarting
     if (session.status === 'ended_by_user' || session.status === 'completed') {
-      session.status = 'in_progress';
-      if (!session.interviewState) session.interviewState = {};
-      session.interviewState.status = 'in_progress';
-      session.interviewState.isEndedByUser = false;
-      session.interviewState.startedAt = new Date();
+      return res.status(400).json({
+        success: false,
+        isComplete: true,
+        message: 'This interview session has already concluded and cannot be restarted.',
+      });
+    }
+
+    if (req.user?._id && !session.userId) {
+      session.userId = req.user._id;
     }
 
     // If session already started and has an opening question in chatMessages, return it (resume friendly)
@@ -1072,7 +1079,7 @@ exports.submitLiveAnswer = async (req, res) => {
       }
     }
 
-    const isComplete = Boolean(action === 'END_INTERVIEW' && (progressRatio >= 0.85 || isAbsoluteMaxReached));
+    const isComplete = Boolean(action === 'END_INTERVIEW' || isAbsoluteMaxReached);
 
     // Update covered topics
     if (session.interviewState.currentTopic && !session.interviewState.coveredTopics.includes(session.interviewState.currentTopic)) {
@@ -1147,10 +1154,12 @@ exports.submitLiveAnswer = async (req, res) => {
     session.interviewState.isProcessing = false;
 
     // Handle completion
+    let demoAccessUpdate = null;
     if (isComplete) {
       session.status = 'completed';
       session.interviewState.status = 'completed';
       session.interviewState.endedAt = new Date();
+      demoAccessUpdate = await recordCompletedDemoInterview(session, req.user?._id || req);
     }
 
     // Generate audio if voice mode is active
@@ -1193,6 +1202,7 @@ exports.submitLiveAnswer = async (req, res) => {
       stage: session.interviewState.currentStageName,
       topic: session.interviewState.currentTopic,
       isComplete,
+      demoAccess: demoAccessUpdate,
       interviewState: session.interviewState,
       chatMessages: session.chatMessages,
     });
@@ -1220,6 +1230,10 @@ exports.manualEndLiveInterview = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Interview session not found.' });
     }
 
+    if (req.user?._id && !session.userId) {
+      session.userId = req.user._id;
+    }
+
     if (session.userId && req.user?._id && session.userId.toString() !== req.user._id.toString()) {
       console.warn(`[Interview Controller] User mismatch on end session ${sessionId}: ${session.userId} vs ${req.user._id}. Permitting session closure.`);
     }
@@ -1245,10 +1259,13 @@ exports.manualEndLiveInterview = async (req, res) => {
     }
 
     await session.save();
+    const demoAccessUpdate = await recordCompletedDemoInterview(session, req.user?._id || req);
 
     return res.status(200).json({
       success: true,
       status: 'ended_by_user',
+      isComplete: true,
+      demoAccess: demoAccessUpdate,
       message: 'Interview concluded successfully.',
       interviewState: session.interviewState,
       chatMessages: session.chatMessages,
@@ -1424,10 +1441,12 @@ exports.getOrGenerateEvaluation = async (req, res) => {
     // Persist evaluation
     session.evaluation = evaluationData;
     await session.save();
+    const demoAccessUpdate = await recordCompletedDemoInterview(session, req.user?._id || req);
 
     return res.status(200).json({
       success: true,
       evaluation: session.evaluation,
+      demoAccess: demoAccessUpdate,
       session: {
         sessionId: session.sessionId,
         targetRole,

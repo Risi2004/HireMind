@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { getClientUrl } = require('../config/clientConfig');
 
 const getTransporter = () => {
   const host = process.env.SMTP_HOST;
@@ -29,7 +30,7 @@ const getTransporter = () => {
  * @param {string} firstName
  */
 const sendOtpEmail = async (email, otp, firstName = 'Candidate') => {
-  const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const clientUrl = getClientUrl();
   const supportEmail = process.env.SUPPORT_EMAIL || 'support@hiremind.com';
   const transporter = getTransporter();
 
@@ -47,6 +48,8 @@ const sendOtpEmail = async (email, otp, firstName = 'Candidate') => {
           .otp-box { background: #0f172a; border: 1px solid rgba(96,165,250,0.3); border-radius: 12px; padding: 18px 24px; text-align: center; margin-bottom: 24px; }
           .otp-code { font-family: 'Courier New', Courier, monospace; font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #38bdf8; }
           .notice { font-size: 12px; color: #64748b; margin-top: 10px; }
+          .btn-container { text-align: center; margin: 28px 0 20px; }
+          .btn { display: inline-block; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #ffffff !important; text-decoration: none; font-weight: 600; font-size: 14px; padding: 13px 30px; border-radius: 9px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); }
           .footer { font-size: 12px; color: #475569; text-align: center; margin-top: 32px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
         </style>
       </head>
@@ -59,6 +62,9 @@ const sendOtpEmail = async (email, otp, firstName = 'Candidate') => {
           <div class="otp-box">
             <div class="otp-code">${otp}</div>
             <div class="notice">This code expires in 10 minutes. Do not share this code with anyone.</div>
+          </div>
+          <div class="btn-container">
+            <a href="${clientUrl}/login" class="btn">Open HireMind to Verify &rarr;</a>
           </div>
           <p class="text">If you didn't create an account with HireMind, you can safely ignore this email.</p>
           <div class="footer">
@@ -89,13 +95,13 @@ const sendOtpEmail = async (email, otp, firstName = 'Candidate') => {
 
 /**
  * Sends an Onboarding Welcome Email immediately after account creation.
- * All CTA button links are constructed dynamically using process.env.CLIENT_URL.
+ * All CTA button links are constructed dynamically using getClientUrl().
  *
  * @param {string} email
  * @param {string} firstName
  */
 const sendOnboardingEmail = async (email, firstName = 'Candidate') => {
-  const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const clientUrl = getClientUrl();
   const onboardingLink = `${clientUrl}/profile-setup`;
   const supportEmail = process.env.SUPPORT_EMAIL || 'support@hiremind.com';
   const transporter = getTransporter();
@@ -174,7 +180,8 @@ const sendOnboardingEmail = async (email, firstName = 'Candidate') => {
  * @param {string} firstName
  */
 const sendPasswordResetOtpEmail = async (email, otp, firstName = 'Candidate') => {
-  const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const clientUrl = getClientUrl();
+  const resetLink = `${clientUrl}/forgot-password`;
   const supportEmail = process.env.SUPPORT_EMAIL || 'support@hiremind.com';
   const transporter = getTransporter();
 
@@ -192,6 +199,8 @@ const sendPasswordResetOtpEmail = async (email, otp, firstName = 'Candidate') =>
           .otp-box { background: #0f172a; border: 1px solid rgba(244, 63, 94, 0.35); border-radius: 12px; padding: 18px 24px; text-align: center; margin-bottom: 24px; }
           .otp-code { font-family: 'Courier New', Courier, monospace; font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #f43f5e; }
           .notice { font-size: 12px; color: #64748b; margin-top: 10px; }
+          .btn-container { text-align: center; margin: 28px 0 20px; }
+          .btn { display: inline-block; background: linear-gradient(135deg, #f43f5e, #e11d48); color: #ffffff !important; text-decoration: none; font-weight: 600; font-size: 14px; padding: 13px 30px; border-radius: 9px; box-shadow: 0 4px 14px rgba(244, 63, 94, 0.4); }
           .footer { font-size: 12px; color: #475569; text-align: center; margin-top: 32px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
         </style>
       </head>
@@ -204,6 +213,9 @@ const sendPasswordResetOtpEmail = async (email, otp, firstName = 'Candidate') =>
           <div class="otp-box">
             <div class="otp-code">${otp}</div>
             <div class="notice">This code expires in 10 minutes. If you did not request a password reset, please secure your account immediately.</div>
+          </div>
+          <div class="btn-container">
+            <a href="${resetLink}" class="btn">Reset Password on HireMind &rarr;</a>
           </div>
           <p class="text">Need to return to login? <a href="${clientUrl}/login" style="color: #60a5fa;">Click here to sign in</a></p>
           <div class="footer">
@@ -239,7 +251,7 @@ const sendPasswordResetOtpEmail = async (email, otp, firstName = 'Candidate') =>
  * @param {string} firstName
  */
 const sendAccountDeletionEmail = async (email, firstName = 'Candidate') => {
-  const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/+$/, '');
+  const clientUrl = getClientUrl();
   const supportEmail = process.env.SUPPORT_EMAIL || 'support@hiremind.com';
   const transporter = getTransporter();
   const deletedAt = new Date().toUTCString();
@@ -260,7 +272,7 @@ const sendAccountDeletionEmail = async (email, firstName = 'Candidate') => {
           .item { font-size: 13px; color: #cbd5e1; margin-bottom: 8px; line-height: 1.5; }
           .item:last-child { margin-bottom: 0; }
           .item strong { color: #f8fafc; }
-          .cta-btn { display: inline-block; background: #334155; color: #f8fafc; text-decoration: none; font-size: 13px; font-weight: 600; padding: 10px 20px; border-radius: 8px; margin-top: 10px; }
+          .cta-btn { display: inline-block; background: #334155; color: #f8fafc !important; text-decoration: none; font-size: 13px; font-weight: 600; padding: 11px 24px; border-radius: 8px; }
           .footer { font-size: 12px; color: #475569; text-align: center; margin-top: 32px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
         </style>
       </head>
@@ -276,6 +288,10 @@ const sendAccountDeletionEmail = async (email, firstName = 'Candidate') => {
             <div class="item">&#10003; <strong>Credentials & Profile:</strong> All account credentials and personal profile details removed.</div>
             <div class="item">&#10003; <strong>Uploaded Files & Documents:</strong> Your profile photo and stored resume documents have been permanently purged.</div>
             <div class="item">&#10003; <strong>Interview History:</strong> AI mock interview transcripts, session scores, and evaluation logs have been deleted.</div>
+          </div>
+
+          <div style="text-align: center; margin: 24px 0 16px;">
+            <a href="${clientUrl}/signup" class="cta-btn">Join HireMind Again &rarr;</a>
           </div>
 
           <p class="text">If you did not make this request or believe this was done in error, please contact our security team immediately at <a href="mailto:${supportEmail}" style="color: #60a5fa;">${supportEmail}</a>.</p>
@@ -310,10 +326,130 @@ const sendAccountDeletionEmail = async (email, firstName = 'Candidate') => {
   return true;
 };
 
+/**
+ * Sends an email notifying a candidate that they have been granted Demo Access to the AI Mock Interview.
+ * Includes how many interviews they can attempt and a direct CTA button with the deployed link.
+ *
+ * @param {string} email
+ * @param {string} firstName
+ * @param {number} allowedInterviews
+ * @param {string} notes
+ * @param {boolean} isRefresh
+ */
+const sendDemoAccessGrantedEmail = async (
+  email,
+  firstName = 'Candidate',
+  allowedInterviews = 3,
+  notes = '',
+  isRefresh = false
+) => {
+  const clientUrl = getClientUrl();
+  const interviewLink = `${clientUrl}/new-interview`;
+  const supportEmail = process.env.SUPPORT_EMAIL || 'support@hiremind.com';
+  const transporter = getTransporter();
+
+  const title = isRefresh
+    ? 'Your Demo Interview Quota Has Been Refreshed! 🎯'
+    : "You've Been Granted Demo Access to AI Mock Interview! 🎯";
+
+  const intro = isRefresh
+    ? `Great news! An administrator has refreshed your demo interview quota on HireMind. You now have <strong>${allowedInterviews} mock interview attempt(s)</strong> available.`
+    : `Congratulations! An administrator has authorized your account for private demo access to the HireMind AI Mock Interview platform. You can now conduct <strong>${allowedInterviews} personalized mock interview attempt(s)</strong>.`;
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 40px 20px; }
+          .container { max-width: 560px; margin: 0 auto; background: #1e293b; border-radius: 16px; border: 1px solid rgba(56, 189, 248, 0.25); padding: 36px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+          .logo { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; color: #38bdf8; margin-bottom: 20px; display: inline-block; }
+          .badge { display: inline-block; background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 4px 10px; border-radius: 6px; margin-bottom: 16px; }
+          .title { font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 12px; }
+          .text { font-size: 14px; line-height: 1.6; color: #94a3b8; margin-bottom: 20px; }
+          .quota-card { background: #0f172a; border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 12px; padding: 20px 24px; margin: 24px 0; text-align: center; }
+          .quota-label { font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+          .quota-num { font-size: 36px; font-weight: 800; color: #38bdf8; letter-spacing: -0.5px; }
+          .quota-sub { font-size: 13px; color: #94a3b8; margin-top: 4px; }
+          .feature-box { background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 16px; margin-bottom: 24px; text-align: left; }
+          .feature-title { font-size: 13px; font-weight: 700; color: #cbd5e1; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+          .feature-item { font-size: 13px; color: #94a3b8; margin-bottom: 6px; line-height: 1.5; }
+          .feature-item:last-child { margin-bottom: 0; }
+          .btn-container { text-align: center; margin: 30px 0 24px; }
+          .btn { display: inline-block; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #ffffff !important; text-decoration: none; font-weight: 600; font-size: 15px; padding: 14px 34px; border-radius: 10px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); }
+          .footer { font-size: 12px; color: #475569; text-align: center; margin-top: 32px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">HireMind</div>
+          <div><span class="badge">Demo Access Authorized</span></div>
+          <div class="title">${title}</div>
+          <p class="text">Hi ${firstName},</p>
+          <p class="text">${intro}</p>
+
+          <div class="quota-card">
+            <div class="quota-label">Your Interview Quota</div>
+            <div class="quota-num">${allowedInterviews} ${allowedInterviews === 1 ? 'Interview' : 'Interviews'}</div>
+            <div class="quota-sub">Full access to adaptive technical, theory, coding & case study rounds</div>
+          </div>
+
+          <div class="feature-box">
+            <div class="feature-title">What you have unlocked:</div>
+            <div class="feature-item">&#10003; <strong>Adaptive AI Interviewer:</strong> Questions calibrated to your resume, projects, and target role.</div>
+            <div class="feature-item">&#10003; <strong>Voice Mode:</strong> Real-time Whisper V3 transcription and natural interviewer voice speech.</div>
+            <div class="feature-item">&#10003; <strong>Live Code Sandbox:</strong> Hands-on technical challenges with automated test suite and execution.</div>
+            <div class="feature-item">&#10003; <strong>Executive Evaluation:</strong> Radar scoring, STAR methodology metrics, and tailored improvement roadmaps.</div>
+          </div>
+
+          <div class="btn-container">
+            <a href="${interviewLink}" class="btn">Start Your Demo Mock Interview &rarr;</a>
+          </div>
+
+          <p class="text" style="font-size: 13px; color: #64748b; text-align: center;">
+            Direct link: <br/><a href="${interviewLink}" style="color: #60a5fa; word-break: break-all;">${interviewLink}</a>
+          </p>
+
+          <div class="footer">
+            &copy; ${new Date().getFullYear()} HireMind. All rights reserved. <br/>
+            Have questions? Contact our support team at <a href="mailto:${supportEmail}" style="color: #60a5fa;">${supportEmail}</a>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  if (!transporter) {
+    console.log('\n=============================================');
+    console.log(`[HireMind Email] (Dev Mock Mode) Demo Access Granted sent to ${email} with ${allowedInterviews} interviews`);
+    console.log(`[HireMind Email] CTA Link: ${interviewLink}`);
+    console.log('=============================================\n');
+    return true;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || '"HireMind Demo" <noreply@hiremind.com>',
+      to: email,
+      subject: isRefresh
+        ? `HireMind: Your AI Interview Quota Was Refreshed (${allowedInterviews} attempts)`
+        : `HireMind: You've Been Granted Demo Access (${allowedInterviews} attempts)`,
+      html: htmlContent,
+    });
+  } catch (err) {
+    console.error('[Email Service] Failed to send demo access email:', err.message);
+  }
+
+  return true;
+};
+
 module.exports = {
   sendOtpEmail,
   sendOnboardingEmail,
   sendPasswordResetOtpEmail,
   sendAccountDeletionEmail,
+  sendDemoAccessGrantedEmail,
 };
+
 

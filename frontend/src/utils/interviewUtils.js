@@ -7,6 +7,7 @@
 
 import company1Icon from '../assets/icons/company1.svg'
 import company2Icon from '../assets/icons/company2.svg'
+import { getApiUrl } from '../config/api'
 
 const STORAGE_KEY = 'hiremind_user_interviews'
 
@@ -199,7 +200,7 @@ export async function deleteInterviewSession(id) {
     // 3. Delete from backend MongoDB
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      await fetch(`http://localhost:5000/api/interview/${id}`, {
+      await fetch(getApiUrl(`/api/interview/${id}`), {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',

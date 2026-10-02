@@ -10,12 +10,22 @@ import tick2Icon from '../assets/icons/tick2.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
 import { useAuth } from '../context/AuthContext'
 import { generateInterviewId, getInterviewSession, saveInterviewSession } from '../utils/interviewUtils'
+import { getApiUrl } from '../config/api'
 import './NewInterview.css'
 
 export default function NewInterview() {
   const navigate = useNavigate()
   const { id } = useParams()
-  const { user: authUser, token: authToken, connectUserGithub } = useAuth()
+  const {
+    user: authUser,
+    token: authToken,
+    connectUserGithub,
+    canAccessInterview,
+    hasDemoAccess,
+    remainingInterviews,
+    allowedInterviews,
+    isAdmin,
+  } = useAuth()
 
   // Profile-level GitHub status
   const userGithub = authUser?.github
@@ -185,7 +195,7 @@ export default function NewInterview() {
     }
 
     // Attempt to fetch from backend MongoDB as primary source of truth
-    fetch(`http://localhost:5000/api/interview/${id}`)
+    fetch(getApiUrl(`/api/interview/${id}`))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && data.success && data.session) {
@@ -245,7 +255,7 @@ export default function NewInterview() {
     const syncTimer = setTimeout(() => {
       try {
         const activeToken = authToken || localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-        fetch(`http://localhost:5000/api/interview/${id}`, {
+        fetch(getApiUrl(`/api/interview/${id}`), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -318,7 +328,7 @@ export default function NewInterview() {
 
     try {
       const activeToken = authToken || localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/plan`, {
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/plan`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -380,7 +390,7 @@ export default function NewInterview() {
 
     try {
       const activeToken = authToken || localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      fetch(`http://localhost:5000/api/interview/${interviewId}`, {
+      fetch(getApiUrl(`/api/interview/${interviewId}`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -419,7 +429,7 @@ export default function NewInterview() {
       }
 
       const activeToken = authToken || localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const res = await fetch(`http://localhost:5000/api/interview/${id}/analyze-resume`, {
+      const res = await fetch(getApiUrl(`/api/interview/${id}/analyze-resume`), {
         method: 'POST',
         headers: {
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {})
@@ -468,10 +478,9 @@ export default function NewInterview() {
     }
 
     const separator = targetUrl.includes('?') ? '&' : '?'
-    const baseBackend = 'http://localhost:5000'
     const fullUrl = targetUrl.startsWith('http')
       ? targetUrl
-      : `${baseBackend}${targetUrl}${separator}token=${encodeURIComponent(activeToken || '')}`
+      : `${getApiUrl(targetUrl)}${separator}token=${encodeURIComponent(activeToken || '')}`
 
     window.open(fullUrl, '_blank', 'noopener,noreferrer')
   }
@@ -524,7 +533,7 @@ export default function NewInterview() {
 
     try {
       const activeToken = authToken || localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const response = await fetch(`http://localhost:5000/api/interview/${id}/analyze-jd`, {
+      const response = await fetch(getApiUrl(`/api/interview/${id}/analyze-jd`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -745,6 +754,17 @@ export default function NewInterview() {
               <path d="M4.75 7.6L8.25 5.4M4.75 9.4L8.25 11.6" stroke="#94A3B8" strokeWidth="1.5" />
             </svg>
           </button>
+
+          {/* Demo Access Quota Pill */}
+          {isAdmin ? (
+            <span style={{ fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.35)', color: '#60a5fa', padding: '4px 10px', borderRadius: '12px', fontWeight: 600 }}>
+              👑 Admin Session
+            </span>
+          ) : hasDemoAccess ? (
+            <span style={{ fontSize: '11px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.35)', color: '#34d399', padding: '4px 10px', borderRadius: '12px', fontWeight: 600 }}>
+              🎯 Demo Pass: {remainingInterviews} of {allowedInterviews} attempts left
+            </span>
+          ) : null}
 
           {/* User Profile Dropdown */}
           <ProfileDropdown />

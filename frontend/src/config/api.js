@@ -6,7 +6,7 @@
  * In Local Development: If VITE_API_URL is omitted or empty, relative /api paths are used via Vite's proxy.
  */
 
-const rawApiUrl = import.meta.env.VITE_API_URL || ''
+const rawApiUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : '')
 export const API_BASE_URL = typeof rawApiUrl === 'string' ? rawApiUrl.replace(/\/+$/, '') : ''
 
 /**

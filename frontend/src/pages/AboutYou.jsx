@@ -5,6 +5,7 @@ import aboutIcon from '../assets/icons/Background+Shadow.svg'
 import uploadIcon from '../assets/icons/Container.svg'
 import { useProfileSetup } from '../context/ProfileSetupContext'
 import { useAuth } from '../context/AuthContext'
+import { getApiUrl } from '../config/api'
 import './ProfileSetup.css'
 import './AboutYou.css'
 
@@ -79,7 +80,7 @@ export default function AboutYou() {
         targetUrl = `/api/profile/resume/${encodeURIComponent(cleanFilename || 'view')}`
       }
       const separator = targetUrl.includes('?') ? '&' : '?'
-      const fullUrl = `http://localhost:5000${targetUrl}${separator}token=${encodeURIComponent(token || '')}`
+      const fullUrl = `${getApiUrl(targetUrl)}${separator}token=${encodeURIComponent(token || '')}`
       window.open(fullUrl, '_blank', 'noopener,noreferrer')
     }
   }

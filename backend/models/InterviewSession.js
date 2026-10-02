@@ -102,6 +102,10 @@ const interviewSessionSchema = new mongoose.Schema(
       enum: ['setup', 'analyzing_resume', 'ready', 'planned', 'in_progress', 'completed', 'ended_by_user'],
       default: 'setup',
     },
+    isDemoCounted: {
+      type: Boolean,
+      default: false,
+    },
     interviewState: {
       status: {
         type: String,

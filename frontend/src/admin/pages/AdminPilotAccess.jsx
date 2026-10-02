@@ -1,907 +1,923 @@
-import { useState } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   PilotAccessIcon,
   UsersIcon,
   InterviewsIcon,
-  FeedbackIcon,
   SearchIcon,
   CloseIcon,
   SparklesIcon,
   CheckCircleIcon,
   ClockIcon,
 } from '../AdminIcons'
+import { getApiUrl } from '../../config/api'
 import './AdminPage.css'
 import './AdminPilotAccess.css'
 
 export default function AdminPilotAccess() {
-  // Summary counts
-  const pilotTarget = 15
-  const demoAccounts = 12
-  const interviewsCompleted = 9
-  const feedbackReceived = 8
-  const progressPercent = Math.round((interviewsCompleted / pilotTarget) * 100) // 60%
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  // ========================================================================
-  // PARTICIPANTS DATASET
-  // ========================================================================
-  const [participants, setParticipants] = useState([
-    {
-      id: 'PLT-01',
-      name: 'Elena Rostova',
-      email: 'elena.r@databricks.com',
-      avatar: 'E',
-      company: 'Databricks',
-      role: 'Distributed Systems Lead',
-      demoStatus: 'Active',
-      startDate: '2025-02-01',
-      expiryDate: '2025-03-03',
-      interviewsCount: '3 / 5',
-      interviewStatus: 'Completed',
-      feedback: 'Submitted',
-      notes: 'Evaluating for campus engineering recruitment batch of 150 grads.',
-      durationLimit: '45 min',
-      feedbackScore: '5/5 (NPS: 10)',
-      feedbackComment:
-        'The Spring Boot distributed cache follow-ups felt authentic and deep. Very impressed with low audio latency.',
-      timeline: [
-        { title: 'Demo Access Granted', desc: 'Provisioned 5 mock interview passes', time: 'Feb 01, 2025' },
-        { title: 'Completed Technical Round', desc: 'Evaluated for Distributed Systems Lead (Score: 91%)', time: 'Feb 10, 2025' },
-        { title: 'Feedback Survey Submitted', desc: 'Rated 5/5 Stars with qualitative review', time: 'Feb 12, 2025' },
-      ],
-    },
-    {
-      id: 'PLT-02',
-      name: 'Marcus Sterling',
-      email: 'marcus.s@snowflake.com',
-      avatar: 'M',
-      company: 'Snowflake',
-      role: 'Data Platform Architect',
-      demoStatus: 'Active',
-      startDate: '2025-02-05',
-      expiryDate: '2025-03-07',
-      interviewsCount: '2 / 5',
-      interviewStatus: 'Completed',
-      feedback: 'Submitted',
-      notes: 'Testing customized SQL & System Design mock interview scoring.',
-      durationLimit: '45 min',
-      feedbackScore: '4.8/5 (NPS: 9)',
-      feedbackComment:
-        'Great technical rigor on SQL query plans. Will recommend to our engineering directors.',
-      timeline: [
-        { title: 'Demo Access Granted', desc: 'Enterprise pilot trial activated', time: 'Feb 05, 2025' },
-        { title: 'Interview Completed', desc: 'Evaluated for Data Platform Lead (Score: 89%)', time: 'Feb 14, 2025' },
-        { title: 'Feedback Submitted', desc: 'Provided recruiter evaluation checklist', time: 'Feb 16, 2025' },
-      ],
-    },
-    {
-      id: 'PLT-03',
-      name: 'Chloe Vance',
-      email: 'chloe@stripe.com',
-      avatar: 'C',
-      company: 'Stripe',
-      role: 'Payments Infrastructure Engineer',
-      demoStatus: 'Active',
-      startDate: '2025-02-10',
-      expiryDate: '2025-03-12',
-      interviewsCount: '2 / 5',
-      interviewStatus: 'Completed',
-      feedback: 'Submitted',
-      notes: 'Integration with internal recruiter ATS portal in progress.',
-      durationLimit: '45 min',
-      feedbackScore: '5/5 (NPS: 10)',
-      feedbackComment:
-        'Accurately questioned webhook retry storms. Candidate score breakdown was thorough.',
-      timeline: [
-        { title: 'Demo Provisioned', desc: 'Invited by Stripe Talent Team', time: 'Feb 10, 2025' },
-        { title: 'Interview Completed', desc: 'Payments Infrastructure round (Score: 90%)', time: 'Feb 18, 2025' },
-        { title: 'Feedback Logged', desc: 'Positive validation on ATS integration', time: 'Feb 19, 2025' },
-      ],
-    },
-    {
-      id: 'PLT-04',
-      name: 'Liam O’Connor',
-      email: 'liam@atlassian.com',
-      avatar: 'L',
-      company: 'Atlassian',
-      role: 'Principal Architect',
-      demoStatus: 'Active',
-      startDate: '2025-02-12',
-      expiryDate: '2025-03-14',
-      interviewsCount: '1 / 5',
-      interviewStatus: 'Completed',
-      feedback: 'Submitted',
-      notes: 'Approved pilot for Sydney & Bengaluru engineering hubs.',
-      durationLimit: '60 min',
-      feedbackScore: '5/5 (NPS: 10)',
-      feedbackComment:
-        'The candidate grounding in verified GitHub repos makes HireMind stand out.',
-      timeline: [
-        { title: 'Trial Access Issued', desc: 'Granted 60-minute duration sessions', time: 'Feb 12, 2025' },
-        { title: 'Interview Session Done', desc: 'Principal Architect round (Score: 94%)', time: 'Feb 19, 2025' },
-      ],
-    },
-    {
-      id: 'PLT-05',
-      name: 'Sophia Martin',
-      email: 'smartin@databricks.com',
-      avatar: 'S',
-      company: 'Databricks',
-      role: 'Engineering Director',
-      demoStatus: 'Active',
-      startDate: '2025-02-15',
-      expiryDate: '2025-03-17',
-      interviewsCount: '1 / 5',
-      interviewStatus: 'Pending',
-      feedback: 'Pending',
-      notes: 'Reviewing pilot team results before quarterly procurement review.',
-      durationLimit: '45 min',
-      feedbackScore: 'Pending',
-      feedbackComment: 'Waiting for round completion.',
-      timeline: [
-        { title: 'Trial Pass Provisioned', desc: 'Active for 30 days', time: 'Feb 15, 2025' },
-        { title: 'Interview Scheduled', desc: 'Technical trial session in progress', time: 'Feb 21, 2025' },
-      ],
-    },
-    {
-      id: 'PLT-06',
-      name: 'Alexander Chen',
-      email: 'alex.chen@tech.org',
-      avatar: 'A',
-      company: 'Google Cloud (Pilot)',
-      role: 'Staff Infrastructure Architect',
-      demoStatus: 'Active',
-      startDate: '2025-01-20',
-      expiryDate: '2025-03-22',
-      interviewsCount: '4 / 5',
-      interviewStatus: 'Completed',
-      feedback: 'Submitted',
-      notes: 'Multi-region Kubernetes latency and microservices assessment.',
-      durationLimit: '45 min',
-      feedbackScore: '5/5 (NPS: 10)',
-      feedbackComment:
-        'Hands down the most realistic AI interviewer I have tested. Probed Paxos vs Raft nicely.',
-      timeline: [
-        { title: 'Pilot Activated', desc: 'VIP enterprise demo granted', time: 'Jan 20, 2025' },
-        { title: 'Interviews Completed', desc: '4 complex rounds finished', time: 'Feb 15, 2025' },
-      ],
-    },
-    {
-      id: 'PLT-07',
-      name: 'Devon Miles',
-      email: 'devon.m@stanford.edu',
-      avatar: 'D',
-      company: 'Stanford University (Pilot Lab)',
-      role: 'Computer Science Research Fellow',
-      demoStatus: 'Active',
-      startDate: '2025-02-18',
-      expiryDate: '2025-03-20',
-      interviewsCount: '0 / 5',
-      interviewStatus: 'Not Started',
-      feedback: 'Pending',
-      notes: 'Testing benchmark accuracy for graduate research cohort.',
-      durationLimit: '30 min',
-      feedbackScore: 'Pending',
-      feedbackComment: 'Session not started yet.',
-      timeline: [{ title: 'Demo Key Issued', desc: 'Welcome email and OTP sent', time: 'Feb 18, 2025' }],
-    },
-    {
-      id: 'PLT-08',
-      name: 'Maya Patel',
-      email: 'mpatel@cloudflare.com',
-      avatar: 'M',
-      company: 'Cloudflare',
-      role: 'Senior SRE',
-      demoStatus: 'Expired',
-      startDate: '2025-01-10',
-      expiryDate: '2025-02-10',
-      interviewsCount: '3 / 3',
-      interviewStatus: 'Completed',
-      feedback: 'Submitted',
-      notes: 'Pilot completed. Upgraded to annual enterprise contract.',
-      durationLimit: '45 min',
-      feedbackScore: '4.9/5 (NPS: 10)',
-      feedbackComment:
-        'Edge network failure scenarios were handled accurately.',
-      timeline: [
-        { title: 'Demo Started', desc: '14-day evaluation window', time: 'Jan 10, 2025' },
-        { title: 'Demo Window Expired', desc: 'Trial completed successfully', time: 'Feb 10, 2025' },
-      ],
-    },
-    {
-      id: 'PLT-09',
-      name: 'Vikram Joshi',
-      email: 'vjoshi@uber.com',
-      avatar: 'V',
-      company: 'Uber',
-      role: 'Tech Lead Manager',
-      demoStatus: 'Revoked',
-      startDate: '2025-01-05',
-      expiryDate: '2025-01-20',
-      interviewsCount: '1 / 3',
-      interviewStatus: 'Pending',
-      feedback: 'Pending',
-      notes: 'Revoked on request due to team reorganization.',
-      durationLimit: '45 min',
-      feedbackScore: 'N/A',
-      feedbackComment: 'Access revoked early.',
-      timeline: [
-        { title: 'Demo Issued', desc: 'Uber pilot trial', time: 'Jan 05, 2025' },
-        { title: 'Demo Revoked', desc: 'Admin revoked privileges', time: 'Jan 18, 2025' },
-      ],
-    },
-  ])
+  // Dataset states from live backend
+  const [stats, setStats] = useState({
+    activeDemoCount: 0,
+    quotaReachedCount: 0,
+    cancelledCount: 0,
+    totalDemoAccounts: 0,
+    totalAllowedQuota: 0,
+    totalCompletedInterviews: 0,
+    totalCandidates: 0,
+  })
+  const [demoAccounts, setDemoAccounts] = useState([])
+  const [eligibleCandidates, setEligibleCandidates] = useState([])
 
-  // Mock candidates available for "Search User"
-  const candidatePool = [
-    { name: 'Jazeel K.', email: 'jazeel@example.com', avatar: 'J', account: 'Candidate Free' },
-    { name: 'Sarah Jenkins', email: 'sarah.j@outlook.com', avatar: 'S', account: 'Candidate Pro' },
-    { name: 'David Kim', email: 'dkim99@gmail.com', avatar: 'D', account: 'Candidate Free' },
-    { name: 'Priya Sharma', email: 'priya.s@design.io', avatar: 'P', account: 'Candidate Pro' },
-    { name: 'Marcus Brody', email: 'mbrody@berkeley.edu', avatar: 'M', account: 'Candidate Free' },
-    { name: 'Hannah Brooks', email: 'hannah.b@gmail.com', avatar: 'H', account: 'Candidate Free' },
-  ]
+  // Search & Filter
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('All')
 
-  // UI Modal State
-  const [showSearchModal, setShowSearchModal] = useState(false)
-  const [candidateSearchQuery, setCandidateSearchQuery] = useState('')
-  const [configModalUser, setConfigModalUser] = useState(null)
-  const [viewParticipantDetails, setViewParticipantDetails] = useState(null)
-  const [actionMenuId, setActionMenuId] = useState(null)
+  // Modals state
+  const [isGrantModalOpen, setIsGrantModalOpen] = useState(false)
+  const [grantSearchQuery, setGrantSearchQuery] = useState('')
+  const [selectedCandidate, setSelectedCandidate] = useState(null)
+  const [grantQuota, setGrantQuota] = useState(3)
+  const [grantNotes, setGrantNotes] = useState('')
+  const [grantSubmitting, setGrantSubmitting] = useState(false)
+
+  // Refresh Modal
+  const [refreshTargetUser, setRefreshTargetUser] = useState(null)
+  const [resetCountOption, setResetCountOption] = useState(true)
+  const [newQuotaValue, setNewQuotaValue] = useState('')
+  const [refreshSubmitting, setRefreshSubmitting] = useState(false)
+
+  // Revoke/Cancel Modal
+  const [cancelTargetUser, setCancelTargetUser] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelSubmitting, setCancelSubmitting] = useState(false)
+
+  // Toast feedback
   const [toastMessage, setToastMessage] = useState('')
 
-  // Configure Demo Form State
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    startDate: '2025-02-22',
-    expiryDate: '2025-03-24',
-    interviewLimit: '5',
-    maxDuration: '45 min',
-    notes: 'Enterprise pilot test pass for engineering team review.',
-  })
-
-  // Toast trigger helper
   const showToast = (msg) => {
     setToastMessage(msg)
-    setTimeout(() => setToastMessage(''), 2500)
+    setTimeout(() => setToastMessage(''), 4000)
   }
 
-  // Handle opening Upgrade to Demo form
-  const handleSelectCandidateToUpgrade = (candidate) => {
-    setConfigModalUser(candidate)
-    setFormData({
-      name: candidate.name,
-      email: candidate.email,
-      startDate: '2025-02-22',
-      expiryDate: '2025-03-24',
-      interviewLimit: '5',
-      maxDuration: '45 min',
-      notes: `Enterprise pilot access for ${candidate.name}.`,
-    })
-    setShowSearchModal(false)
-  }
-
-  // Confirm Demo Access UI action
-  const handleConfirmDemoAccess = (e) => {
-    e.preventDefault()
-
-    // Add or update participant
-    const newParticipant = {
-      id: `PLT-${String(participants.length + 1).padStart(2, '0')}`,
-      name: formData.name,
-      email: formData.email,
-      avatar: formData.name.charAt(0).toUpperCase(),
-      company: 'Enterprise Pilot Org',
-      role: 'Candidate Trial',
-      demoStatus: 'Active',
-      startDate: formData.startDate,
-      expiryDate: formData.expiryDate,
-      interviewsCount: `0 / ${formData.interviewLimit}`,
-      interviewStatus: 'Not Started',
-      feedback: 'Pending',
-      notes: formData.notes,
-      durationLimit: formData.maxDuration,
-      feedbackScore: 'Pending',
-      feedbackComment: 'Trial newly provisioned.',
-      timeline: [
-        {
-          title: 'Demo Access Granted',
-          desc: `Provisioned with ${formData.interviewLimit} passes until ${formData.expiryDate}`,
-          time: 'Just now',
+  // Fetch demo accounts data from backend
+  const fetchDemoData = async () => {
+    try {
+      setLoading(true)
+      const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(getApiUrl('/api/admin/demo-accounts'), {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
-      ],
+      })
+
+      if (!res.ok) {
+        throw new Error(`Failed to load demo accounts (${res.status})`)
+      }
+
+      const data = await res.json()
+      if (data.success) {
+        setStats(data.stats || {})
+        setDemoAccounts(data.demoAccounts || [])
+        setEligibleCandidates(data.eligibleCandidates || [])
+      }
+    } catch (err) {
+      console.error('[AdminPilotAccess] Error loading data:', err)
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchDemoData()
+  }, [])
+
+  // Filtered Demo Accounts list
+  const filteredDemoAccounts = useMemo(() => {
+    return demoAccounts.filter((acc) => {
+      const matchesSearch =
+        acc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        acc.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (acc.notes && acc.notes.toLowerCase().includes(searchQuery.toLowerCase()))
+
+      if (!matchesSearch) return false
+
+      if (statusFilter === 'All') return true
+      if (statusFilter === 'Active') return acc.demoStatus === 'Active'
+      if (statusFilter === 'Quota Reached') return acc.demoStatus === 'Quota Reached'
+      if (statusFilter === 'Revoked') return acc.demoStatus === 'Revoked'
+      return true
+    })
+  }, [demoAccounts, searchQuery, statusFilter])
+
+  // Filter candidates for the grant modal dropdown
+  const filteredCandidatesForGrant = useMemo(() => {
+    if (!grantSearchQuery.trim()) return eligibleCandidates.slice(0, 10)
+    const q = grantSearchQuery.toLowerCase()
+    return eligibleCandidates.filter(
+      (c) => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q)
+    )
+  }, [eligibleCandidates, grantSearchQuery])
+
+  // Action: Grant Demo Access
+  const handleGrantSubmit = async (e) => {
+    e.preventDefault()
+    if (!selectedCandidate) {
+      alert('Please select a candidate member')
+      return
     }
 
-    setParticipants((prev) => [newParticipant, ...prev])
-    setConfigModalUser(null)
-    showToast(`Demo access provisioned for ${formData.name}!`)
-  }
-
-  // Action: Extend Demo (adds 14 days)
-  const handleExtendDemo = (participant) => {
-    setParticipants((prev) =>
-      prev.map((p) => {
-        if (p.id === participant.id) {
-          return {
-            ...p,
-            demoStatus: 'Active',
-            expiryDate: '2025-04-10',
-            timeline: [
-              { title: 'Demo Extended', desc: 'Extended trial window by 14 days', time: 'Just now' },
-              ...p.timeline,
-            ],
-          }
-        }
-        return p
+    try {
+      setGrantSubmitting(true)
+      const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(getApiUrl('/api/admin/demo-accounts/grant'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: selectedCandidate._id,
+          allowedInterviews: Number(grantQuota) || 3,
+          notes: grantNotes,
+        }),
       })
-    )
-    setActionMenuId(null)
-    showToast(`Demo window extended for ${participant.name}!`)
-  }
 
-  // Action: Revoke Demo
-  const handleRevokeDemo = (participant) => {
-    setParticipants((prev) =>
-      prev.map((p) => {
-        if (p.id === participant.id) {
-          return {
-            ...p,
-            demoStatus: 'Revoked',
-            timeline: [
-              { title: 'Demo Revoked', desc: 'Admin revoked pilot privileges', time: 'Just now' },
-              ...p.timeline,
-            ],
-          }
+      const data = await res.json()
+      if (data.success) {
+        showToast(`✓ Demo access granted with ${grantQuota} interview(s) to ${selectedCandidate.name}`)
+        if (typeof window !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('hiremind_demo_sync')
+            bc.postMessage({ userId: selectedCandidate._id, action: 'grant', timestamp: Date.now() })
+            bc.close()
+          } catch (_) {}
+          localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: selectedCandidate._id, action: 'grant', timestamp: Date.now() }))
         }
-        return p
-      })
-    )
-    setActionMenuId(null)
-    showToast(`Demo access revoked for ${participant.name}`)
+        setIsGrantModalOpen(false)
+        setSelectedCandidate(null)
+        setGrantNotes('')
+        setGrantSearchQuery('')
+        await fetchDemoData()
+      } else {
+        alert(data.message || 'Failed to grant demo access')
+      }
+    } catch (err) {
+      alert(err.message || 'Network error')
+    } finally {
+      setGrantSubmitting(false)
+    }
   }
 
-  // Filtered candidate pool
-  const filteredCandidates = candidatePool.filter(
-    (c) =>
-      c.name.toLowerCase().includes(candidateSearchQuery.toLowerCase()) ||
-      c.email.toLowerCase().includes(candidateSearchQuery.toLowerCase())
-  )
+  // Action: Refresh Demo Quota / Reset Completed Count
+  const handleRefreshSubmit = async (e) => {
+    e.preventDefault()
+    if (!refreshTargetUser) return
+
+    try {
+      setRefreshSubmitting(true)
+      const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(getApiUrl('/api/admin/demo-accounts/refresh'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: refreshTargetUser._id,
+          resetCount: resetCountOption,
+          newAllowedInterviews: newQuotaValue ? Number(newQuotaValue) : undefined,
+        }),
+      })
+
+      const data = await res.json()
+      if (data.success) {
+        showToast(`✓ Quota refreshed for ${refreshTargetUser.name}!`)
+        if (typeof window !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('hiremind_demo_sync')
+            bc.postMessage({ userId: refreshTargetUser._id, action: 'refresh', timestamp: Date.now() })
+            bc.close()
+          } catch (_) {}
+          localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: refreshTargetUser._id, action: 'refresh', timestamp: Date.now() }))
+        }
+        setRefreshTargetUser(null)
+        setNewQuotaValue('')
+        await fetchDemoData()
+      } else {
+        alert(data.message || 'Failed to refresh demo quota')
+      }
+    } catch (err) {
+      alert(err.message || 'Network error')
+    } finally {
+      setRefreshSubmitting(false)
+    }
+  }
+
+  // Action: Cancel / Revoke Demo Access
+  const handleCancelSubmit = async (e) => {
+    e.preventDefault()
+    if (!cancelTargetUser) return
+
+    try {
+      setCancelSubmitting(true)
+      const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(getApiUrl('/api/admin/demo-accounts/cancel'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: cancelTargetUser._id,
+          reason: cancelReason || 'Revoked by administrator',
+        }),
+      })
+
+      const data = await res.json()
+      if (data.success) {
+        showToast(`✓ Demo access cancelled for ${cancelTargetUser.name}. User is now blocked.`)
+        if (typeof window !== 'undefined') {
+          try {
+            const bc = new BroadcastChannel('hiremind_demo_sync')
+            bc.postMessage({ userId: cancelTargetUser._id, action: 'cancel', timestamp: Date.now() })
+            bc.close()
+          } catch (_) {}
+          localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: cancelTargetUser._id, action: 'cancel', timestamp: Date.now() }))
+        }
+        setCancelTargetUser(null)
+        setCancelReason('')
+        await fetchDemoData()
+      } else {
+        alert(data.message || 'Failed to cancel demo access')
+      }
+    } catch (err) {
+      alert(err.message || 'Network error')
+    } finally {
+      setCancelSubmitting(false)
+    }
+  }
 
   return (
-    <div>
-      {/* ==================================================================
-          1. HEADER & ADD PARTICIPANT BUTTON
-          ================================================================== */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '1.5rem',
-          flexWrap: 'wrap',
-          gap: '1rem',
-        }}
-      >
+    <div className="admin-page">
+      {/* Toast Alert */}
+      {toastMessage && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '24px',
+            right: '24px',
+            background: 'linear-gradient(135deg, #10b981, #059669)',
+            color: '#ffffff',
+            padding: '12px 22px',
+            borderRadius: '10px',
+            fontWeight: 600,
+            fontSize: '14px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.4)',
+            zIndex: 9999,
+            animation: 'fadeIn 0.3s ease',
+          }}
+        >
+          {toastMessage}
+        </div>
+      )}
+
+      {/* Top Header & Grant Button */}
+      <div className="admin-page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0, color: 'var(--admin-text-primary)' }}>
-            Pilot / Demo Access
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--admin-text-muted)', margin: '3px 0 0' }}>
-            Manage participants and demo access for HireMind pilot testing.
+          <h1 className="admin-page-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span>Demo Accounts & Interview Quota</span>
+            <span style={{ fontSize: '12px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', padding: '3px 10px', borderRadius: '12px', fontWeight: 600 }}>
+              High-Security Access Control
+            </span>
+          </h1>
+          <p className="admin-page-subtitle">
+            Configure which candidate members can access the private AI Mock Interview preview, manage their allowed attempts, and monitor completed sessions in real time.
           </p>
         </div>
 
-        {/* Prominent Add Pilot Participant Button */}
         <button
-          type="button"
-          className="pilot-add-btn"
           onClick={() => {
-            setCandidateSearchQuery('')
-            setShowSearchModal(true)
+            setSelectedCandidate(null)
+            setGrantQuota(3)
+            setGrantNotes('')
+            setGrantSearchQuery('')
+            setIsGrantModalOpen(true)
+          }}
+          className="admin-btn-primary"
+          style={{
+            background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+            color: '#fff',
+            border: 'none',
+            padding: '11px 22px',
+            borderRadius: '9px',
+            fontWeight: 600,
+            fontSize: '14px',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
           }}
         >
           <SparklesIcon size={16} />
-          Add Pilot Participant
+          <span>+ Provision Demo Account</span>
         </button>
       </div>
 
-      {/* ==================================================================
-          2. SUMMARY CARDS & PROGRESS CARD
-          ================================================================== */}
+      {/* KPI Stats Grid */}
       <div className="pilot-summary-grid">
-        {/* Pilot Target */}
         <div className="pilot-stat-box">
           <div className="pilot-stat-box__top">
-            <span className="pilot-stat-box__label">Pilot Target</span>
-            <span className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--cyan">
-              <UsersIcon size={18} />
-            </span>
+            <span className="pilot-stat-box__label">Active Demo Accounts</span>
+            <div className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--emerald">
+              <PilotAccessIcon size={16} />
+            </div>
           </div>
-          <div className="pilot-stat-box__val">{pilotTarget}</div>
-          <span style={{ fontSize: '11.5px', color: 'var(--admin-text-muted)' }}>Cohort Goal</span>
+          <div className="pilot-stat-box__val" style={{ color: '#10b981' }}>
+            {stats.activeDemoCount}
+          </div>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>Members authorized to take interviews</span>
         </div>
 
-        {/* Demo Accounts */}
         <div className="pilot-stat-box">
           <div className="pilot-stat-box__top">
-            <span className="pilot-stat-box__label">Demo Accounts</span>
-            <span className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--purple">
-              <PilotAccessIcon size={18} />
-            </span>
+            <span className="pilot-stat-box__label">Completed Interviews</span>
+            <div className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--cyan">
+              <InterviewsIcon size={16} />
+            </div>
           </div>
-          <div className="pilot-stat-box__val" style={{ color: 'var(--admin-accent-purple)' }}>
-            {demoAccounts}
+          <div className="pilot-stat-box__val" style={{ color: '#38bdf8' }}>
+            {stats.totalCompletedInterviews}
           </div>
-          <span style={{ fontSize: '11.5px', color: 'var(--admin-text-muted)' }}>Active & Provisioned</span>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>Finished by demo participants</span>
         </div>
 
-        {/* Interviews Completed */}
         <div className="pilot-stat-box">
           <div className="pilot-stat-box__top">
-            <span className="pilot-stat-box__label">Interviews Completed</span>
-            <span className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--emerald">
-              <InterviewsIcon size={18} />
-            </span>
+            <span className="pilot-stat-box__label">Total Allocated Quota</span>
+            <div className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--purple">
+              <SparklesIcon size={16} />
+            </div>
           </div>
-          <div className="pilot-stat-box__val" style={{ color: 'var(--admin-accent-emerald)' }}>
-            {interviewsCompleted}
+          <div className="pilot-stat-box__val" style={{ color: '#a855f7' }}>
+            {stats.totalAllowedQuota}
           </div>
-          <span style={{ fontSize: '11.5px', color: 'var(--admin-text-muted)' }}>AI Sessions Evaluated</span>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>Total interview passes granted</span>
         </div>
 
-        {/* Feedback Received */}
         <div className="pilot-stat-box">
           <div className="pilot-stat-box__top">
-            <span className="pilot-stat-box__label">Feedback Received</span>
-            <span className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--amber">
-              <FeedbackIcon size={18} />
-            </span>
+            <span className="pilot-stat-box__label">Quota Reached / Revoked</span>
+            <div className="pilot-stat-box__icon-wrap pilot-stat-box__icon-wrap--amber">
+              <ClockIcon size={16} />
+            </div>
           </div>
-          <div className="pilot-stat-box__val" style={{ color: 'var(--admin-accent-amber)' }}>
-            {feedbackReceived}
+          <div className="pilot-stat-box__val" style={{ color: '#f59e0b' }}>
+            {stats.quotaReachedCount + stats.cancelledCount}
           </div>
-          <span style={{ fontSize: '11.5px', color: 'var(--admin-text-muted)' }}>NPS & Quality Surveys</span>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+            {stats.quotaReachedCount} finished all passes, {stats.cancelledCount} revoked
+          </span>
         </div>
       </div>
 
-      {/* Attractive Pilot Progress Card */}
-      <div className="pilot-hero-progress">
-        <div className="pilot-hero-progress__header">
-          <div className="pilot-hero-progress__title-group">
-            <h3 className="pilot-hero-progress__title">Pilot Testing Progress</h3>
-            <span className="pilot-hero-progress__sub">
-              {interviewsCompleted} / {pilotTarget} completed
-            </span>
+      {/* Security Rule Information Banner */}
+      <div
+        style={{
+          background: 'rgba(15, 23, 42, 0.7)',
+          border: '1px solid rgba(59, 130, 246, 0.25)',
+          borderRadius: '14px',
+          padding: '16px 20px',
+          marginBottom: '24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ fontSize: '24px' }}>🛡️</div>
+          <div>
+            <div style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc' }}>
+              Enforced Private Preview Policy
+            </div>
+            <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+              Newly registered candidates and members without an active demo pass are automatically blocked with a <strong>"Feature Coming Soon"</strong> preview screen and 403 API protection.
+            </div>
           </div>
-          <span className="admin-badge admin-badge--emerald">
-            {progressPercent}% Cohort Completion
-          </span>
         </div>
-
-        <div className="pilot-hero-progress__track">
-          <div
-            className="pilot-hero-progress__fill"
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
-
-        <div className="pilot-hero-progress__markers">
-          <span>0 (Start)</span>
-          <span>3 (20%)</span>
-          <span>6 (40%)</span>
-          <span style={{ color: 'var(--admin-accent-cyan)', fontWeight: 600 }}>9 (Current)</span>
-          <span>12 (80%)</span>
-          <span>15 (Cohort Target)</span>
+        <div style={{ fontSize: '12px', color: '#64748b' }}>
+          Total registered candidate pool: <strong>{stats.totalCandidates}</strong> members
         </div>
       </div>
 
-      {/* ==================================================================
-          3. PILOT PARTICIPANTS TABLE
-          ================================================================== */}
-      <div className="admin-card">
-        <div className="admin-card__header">
-          <div className="admin-card__title-group">
-            <h3 className="admin-card__title">Pilot Participants</h3>
-            <p className="admin-card__subtitle">Roster of candidates and enterprise trial users</p>
+      {/* Main Table Container */}
+      <div className="admin-table-container">
+        {/* Table Filters & Search */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '16px 20px',
+            borderBottom: '1px solid var(--admin-border-subtle)',
+            flexWrap: 'wrap',
+            gap: '14px',
+          }}
+        >
+          {/* Status Tabs */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {['All', 'Active', 'Quota Reached', 'Revoked'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setStatusFilter(tab)}
+                style={{
+                  background: statusFilter === tab ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                  border: statusFilter === tab ? '1px solid #38bdf8' : '1px solid transparent',
+                  color: statusFilter === tab ? '#38bdf8' : 'var(--admin-text-secondary)',
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                {tab}
+              </button>
+            ))}
           </div>
-          <span style={{ fontSize: '12px', color: 'var(--admin-text-muted)' }}>
-            Total Participants: <strong style={{ color: 'var(--admin-text-primary)' }}>{participants.length}</strong>
-          </span>
+
+          {/* Search Box */}
+          <div style={{ position: 'relative', width: '280px' }}>
+            <input
+              type="text"
+              placeholder="Search candidate or email..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                background: 'var(--admin-bg-input, #0b1120)',
+                border: '1px solid var(--admin-border-subtle, rgba(255,255,255,0.1))',
+                borderRadius: '8px',
+                padding: '8px 12px 8px 34px',
+                color: '#f8fafc',
+                fontSize: '13px',
+                outline: 'none',
+              }}
+            />
+            <span style={{ position: 'absolute', left: '10px', top: '9px', color: '#64748b' }}>
+              <SearchIcon size={15} />
+            </span>
+          </div>
         </div>
 
-        <div className="admin-table-container">
+        {/* Live Demo Users Table */}
+        <div style={{ overflowX: 'auto' }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Participant</th>
-                <th>Email</th>
-                <th>Demo Status</th>
-                <th>Start Date</th>
-                <th>Expiry Date</th>
-                <th>Interviews</th>
-                <th>Interview Status</th>
-                <th>Feedback</th>
+                <th>Candidate / Member</th>
+                <th>Status</th>
+                <th>Interview Attempts & Progress</th>
+                <th>Remaining</th>
+                <th>Configured Date</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {participants.map((p) => (
-                <tr key={p.id}>
-                  {/* Participant (Avatar + Name) */}
-                  <td>
-                    <div className="pilot-table-user">
-                      <div className="pilot-table-avatar">{p.avatar}</div>
-                      <div>
-                        <div style={{ fontWeight: 600, color: 'var(--admin-text-primary)' }}>
-                          {p.name}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--admin-text-muted)' }}>
-                          {p.company}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-
-                  {/* Email */}
-                  <td>
-                    <span style={{ fontSize: '12px', color: 'var(--admin-text-secondary)' }}>
-                      {p.email}
-                    </span>
-                  </td>
-
-                  {/* Demo Status (Active, Expired, Revoked) */}
-                  <td>
-                    <span
-                      className={`admin-badge ${
-                        p.demoStatus === 'Active'
-                          ? 'pilot-status-active'
-                          : p.demoStatus === 'Expired'
-                          ? 'pilot-status-expired'
-                          : 'pilot-status-revoked'
-                      }`}
-                    >
-                      {p.demoStatus}
-                    </span>
-                  </td>
-
-                  {/* Start Date */}
-                  <td style={{ fontSize: '12px', color: 'var(--admin-text-muted)' }}>
-                    {p.startDate}
-                  </td>
-
-                  {/* Expiry Date */}
-                  <td style={{ fontSize: '12px', color: 'var(--admin-text-muted)' }}>
-                    {p.expiryDate}
-                  </td>
-
-                  {/* Interviews Count */}
-                  <td>
-                    <span style={{ fontWeight: 600, color: 'var(--admin-text-primary)' }}>
-                      {p.interviewsCount}
-                    </span>
-                  </td>
-
-                  {/* Interview Status (Completed, Pending, Not Started) */}
-                  <td>
-                    <span
-                      className={`admin-badge ${
-                        p.interviewStatus === 'Completed'
-                          ? 'interview-status-completed'
-                          : p.interviewStatus === 'Pending'
-                          ? 'interview-status-pending'
-                          : 'interview-status-notstarted'
-                      }`}
-                    >
-                      {p.interviewStatus}
-                    </span>
-                  </td>
-
-                  {/* Feedback (Submitted, Pending) */}
-                  <td>
-                    <span
-                      className={`admin-badge ${
-                        p.feedback === 'Submitted'
-                          ? 'feedback-submitted'
-                          : 'feedback-pending'
-                      }`}
-                    >
-                      {p.feedback}
-                    </span>
-                  </td>
-
-                  {/* Actions Menu */}
-                  <td style={{ textAlign: 'right' }}>
-                    <div style={{ position: 'relative', display: 'inline-block' }}>
-                      <button
-                        type="button"
-                        className="user-action-trigger-btn"
-                        onClick={() => setActionMenuId((prev) => (prev === p.id ? null : p.id))}
-                        title="Actions"
-                      >
-                        •••
-                      </button>
-
-                      {actionMenuId === p.id && (
-                        <div className="user-action-menu">
-                          <button
-                            type="button"
-                            className="user-action-menu-item"
-                            onClick={() => {
-                              setViewParticipantDetails(p)
-                              setActionMenuId(null)
-                            }}
-                          >
-                            <UsersIcon size={14} />
-                            View Participant
-                          </button>
-
-                          <button
-                            type="button"
-                            className="user-action-menu-item"
-                            onClick={() => {
-                              setConfigModalUser(p)
-                              setFormData({
-                                name: p.name,
-                                email: p.email,
-                                startDate: p.startDate,
-                                expiryDate: p.expiryDate,
-                                interviewLimit: p.interviewsCount.split('/')[1]?.trim() || '5',
-                                maxDuration: p.durationLimit,
-                                notes: p.notes,
-                              })
-                              setActionMenuId(null)
-                            }}
-                          >
-                            <PilotAccessIcon size={14} />
-                            Edit Demo Access
-                          </button>
-
-                          <button
-                            type="button"
-                            className="user-action-menu-item"
-                            onClick={() => handleExtendDemo(p)}
-                          >
-                            <ClockIcon size={14} />
-                            Extend Demo
-                          </button>
-
-                          <button
-                            type="button"
-                            className="user-action-menu-item"
-                            style={{ color: 'var(--admin-accent-rose)' }}
-                            onClick={() => handleRevokeDemo(p)}
-                          >
-                            <CloseIcon size={14} />
-                            Revoke Demo
-                          </button>
-                        </div>
-                      )}
-                    </div>
+              {loading ? (
+                <tr>
+                  <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+                    Loading demo accounts...
                   </td>
                 </tr>
-              ))}
+              ) : filteredDemoAccounts.length === 0 ? (
+                <tr>
+                  <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+                    {searchQuery ? 'No demo accounts match your search filter.' : 'No demo accounts configured yet. Click "+ Provision Demo Account" above to authorize a candidate.'}
+                  </td>
+                </tr>
+              ) : (
+                filteredDemoAccounts.map((account) => {
+                  const percent =
+                    account.allowedInterviews > 0
+                      ? Math.min(100, Math.round((account.completedInterviews / account.allowedInterviews) * 100))
+                      : 0
+
+                  return (
+                    <tr key={account._id}>
+                      {/* Candidate info */}
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div
+                            style={{
+                              width: '36px',
+                              height: '36px',
+                              borderRadius: '50%',
+                              background: 'linear-gradient(135deg, #1e293b, #334155)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              color: '#60a5fa',
+                              fontSize: '14px',
+                            }}
+                          >
+                            {account.name.charAt(0) || 'C'}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, color: '#f8fafc', fontSize: '14px' }}>
+                              {account.name}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#94a3b8' }}>{account.email}</div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Status */}
+                      <td>
+                        {account.demoStatus === 'Active' ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }} />
+                            Active Demo
+                          </span>
+                        ) : account.demoStatus === 'Quota Reached' ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b' }} />
+                            Quota Reached
+                          </span>
+                        ) : (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(100, 116, 139, 0.15)', color: '#94a3b8', border: '1px solid rgba(100, 116, 139, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 600 }}>
+                            Revoked
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Progress */}
+                      <td>
+                        <div style={{ minWidth: '180px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
+                            <span style={{ fontWeight: 600, color: '#f1f5f9' }}>
+                              {account.completedInterviews} of {account.allowedInterviews} Completed
+                            </span>
+                            <span style={{ color: '#94a3b8' }}>{percent}%</span>
+                          </div>
+                          <div style={{ width: '100%', height: '7px', background: 'rgba(255,255,255,0.08)', borderRadius: '4px', overflow: 'hidden' }}>
+                            <div
+                              style={{
+                                width: `${percent}%`,
+                                height: '100%',
+                                background: percent >= 100 ? '#f59e0b' : 'linear-gradient(90deg, #3b82f6, #10b981)',
+                                borderRadius: '4px',
+                                transition: 'width 0.3s ease',
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Remaining Passes */}
+                      <td>
+                        <span
+                          style={{
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            color: account.remainingInterviews > 0 ? '#38bdf8' : '#64748b',
+                          }}
+                        >
+                          {account.remainingInterviews} left
+                        </span>
+                      </td>
+
+                      {/* Date Granted */}
+                      <td>
+                        <div style={{ fontSize: '12px', color: '#cbd5e1' }}>
+                          {account.grantedAt ? new Date(account.grantedAt).toLocaleDateString() : 'Initial'}
+                        </div>
+                        {account.lastRefreshedAt && (
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>
+                            Refreshed: {new Date(account.lastRefreshedAt).toLocaleDateString()}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Actions */}
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
+                          <button
+                            title="Refresh Interview Count or Quota"
+                            onClick={() => {
+                              setRefreshTargetUser(account)
+                              setResetCountOption(true)
+                              setNewQuotaValue(String(account.allowedInterviews))
+                            }}
+                            style={{
+                              background: 'rgba(56, 189, 248, 0.1)',
+                              border: '1px solid rgba(56, 189, 248, 0.25)',
+                              color: '#38bdf8',
+                              padding: '5px 12px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ↻ Refresh Count
+                          </button>
+
+                          {account.enabled ? (
+                            <button
+                              title="Cancel / Revoke Demo Access"
+                              onClick={() => {
+                                setCancelTargetUser(account)
+                                setCancelReason('')
+                              }}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                color: '#f87171',
+                                padding: '5px 10px',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Cancel Access
+                            </button>
+                          ) : (
+                            <button
+                              title="Re-enable Demo Access"
+                              onClick={() => {
+                                setRefreshTargetUser(account)
+                                setResetCountOption(true)
+                                setNewQuotaValue(String(account.allowedInterviews || 3))
+                              }}
+                              style={{
+                                background: 'rgba(16, 185, 129, 0.1)',
+                                border: '1px solid rgba(16, 185, 129, 0.25)',
+                                color: '#34d399',
+                                padding: '5px 10px',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Re-enable
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* ==================================================================
-          MODAL 1: SEARCH USER TO ADD PILOT PARTICIPANT
-          ================================================================== */}
-      {showSearchModal && (
-        <div className="modal-overlay" onClick={() => setShowSearchModal(false)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-box__header">
-              <h3 className="modal-box__title">Search User for Pilot Access</h3>
-              <button
-                type="button"
-                className="admin-sidebar__collapse-btn"
-                onClick={() => setShowSearchModal(false)}
-              >
-                <CloseIcon size={16} />
-              </button>
-            </div>
-
-            <div className="modal-box__body">
-              {/* Search Box */}
-              <div className="users-search-box" style={{ maxWidth: '100%' }}>
-                <span className="users-search-box__icon">
-                  <SearchIcon size={15} />
-                </span>
-                <input
-                  type="text"
-                  className="users-search-input"
-                  placeholder="Search User by name or email..."
-                  value={candidateSearchQuery}
-                  onChange={(e) => setCandidateSearchQuery(e.target.value)}
-                  autoFocus
-                />
-              </div>
-
-              {/* Search Results List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                {filteredCandidates.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '1.5rem', color: 'var(--admin-text-muted)', fontSize: '13px' }}>
-                    No users matching "{candidateSearchQuery}"
-                  </div>
-                ) : (
-                  filteredCandidates.map((c, idx) => (
-                    <div key={idx} className="search-candidate-row">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div className="pilot-table-avatar">{c.avatar}</div>
-                        <div>
-                          <div style={{ fontWeight: 600, color: 'var(--admin-text-primary)', fontSize: '13.5px' }}>
-                            {c.name}
-                          </div>
-                          <div style={{ fontSize: '11.5px', color: 'var(--admin-text-muted)' }}>
-                            {c.email}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span className="admin-badge admin-badge--gray">{c.account}</span>
-                        <button
-                          type="button"
-                          className="admin-btn admin-btn--primary admin-btn--sm"
-                          onClick={() => handleSelectCandidateToUpgrade(c)}
-                        >
-                          Upgrade to Demo
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="modal-box__footer">
-              <button
-                type="button"
-                className="admin-btn admin-btn--secondary admin-btn--sm"
-                onClick={() => setShowSearchModal(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ==================================================================
-          MODAL 2: CONFIGURE DEMO ACCESS
-          ================================================================== */}
-      {configModalUser && (
-        <div className="modal-overlay" onClick={() => setConfigModalUser(null)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-box__header">
-              <h3 className="modal-box__title">Configure Demo Access</h3>
-              <button
-                type="button"
-                className="admin-sidebar__collapse-btn"
-                onClick={() => setConfigModalUser(null)}
-              >
-                <CloseIcon size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleConfirmDemoAccess}>
-              <div className="modal-box__body">
-                {/* Participant Name */}
+      {/* ========================================================================= */}
+      {/* MODAL 1: PROVISION / GRANT DEMO ACCOUNT POPUP */}
+      {/* ========================================================================= */}
+      {isGrantModalOpen && (
+        <div className="admin-modal-overlay" onClick={() => setIsGrantModalOpen(false)}>
+          <div className="admin-modal" style={{ maxWidth: '600px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal__header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <SparklesIcon size={18} />
+                </div>
                 <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-text-primary)', display: 'block', marginBottom: '5px' }}>
-                    Participant Name
+                  <h3 className="admin-modal__title">Provision Demo Account Access</h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                    Select a candidate member and configure their allowed mock interview attempts.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsGrantModalOpen(false)}
+                className="admin-modal__close"
+                title="Close popup"
+              >
+                <CloseIcon size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleGrantSubmit}>
+              <div className="admin-modal__body">
+                {/* 1. Candidate Selection */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>
+                    1. Select Candidate Member *
                   </label>
                   <input
                     type="text"
-                    className="admin-input"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    required
+                    placeholder="Search candidate by name or email..."
+                    value={grantSearchQuery}
+                    onChange={(e) => setGrantSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(11, 17, 32, 0.85)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '10px',
+                      padding: '10px 14px',
+                      color: '#f8fafc',
+                      fontSize: '13px',
+                      marginBottom: '10px',
+                      outline: 'none',
+                    }}
                   />
+
+                  {/* Candidate selector list */}
+                  <div
+                    style={{
+                      maxHeight: '190px',
+                      overflowY: 'auto',
+                      background: 'rgba(11, 17, 32, 0.6)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '10px',
+                      padding: '6px',
+                    }}
+                  >
+                    {filteredCandidatesForGrant.length === 0 ? (
+                      <div style={{ padding: '24px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>
+                        {grantSearchQuery
+                          ? `No candidate accounts found matching "${grantSearchQuery}".`
+                          : 'No candidate members found in system.'}
+                      </div>
+                    ) : (
+                      filteredCandidatesForGrant.map((c) => {
+                        const isSelected = selectedCandidate?._id === c._id
+                        return (
+                          <div
+                            key={c._id}
+                            onClick={() => setSelectedCandidate(c)}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: '8px',
+                              background: isSelected ? 'rgba(56, 189, 248, 0.16)' : 'transparent',
+                              border: isSelected ? '1px solid #38bdf8' : '1px solid transparent',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              cursor: 'pointer',
+                              marginBottom: '4px',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <div
+                                style={{
+                                  width: '32px',
+                                  height: '32px',
+                                  borderRadius: '50%',
+                                  background: 'linear-gradient(135deg, #1e293b, #334155)',
+                                  color: '#38bdf8',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '13px',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {c.name ? c.name.charAt(0).toUpperCase() : 'C'}
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>
+                                  {c.name}
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#94a3b8' }}>{c.email}</div>
+                              </div>
+                            </div>
+                            <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '6px', fontWeight: 600, background: c.hasDemoAccess ? 'rgba(16, 185, 129, 0.15)' : 'rgba(100, 116, 139, 0.15)', color: c.hasDemoAccess ? '#34d399' : '#94a3b8' }}>
+                              {c.hasDemoAccess ? `Active (${c.completedInterviews}/${c.allowedInterviews})` : 'Standard Account'}
+                            </span>
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
                 </div>
 
-                {/* Email */}
+                {/* 2. Configure Allowed Attempts */}
                 <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-text-primary)', display: 'block', marginBottom: '5px' }}>
-                    Email Address
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>
+                    2. Configured Interview Attempts (Quota) *
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                    {[1, 2, 3, 5, 10].map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => setGrantQuota(num)}
+                        style={{
+                          flex: '1 0 70px',
+                          padding: '9px 0',
+                          borderRadius: '8px',
+                          background: grantQuota === num ? 'rgba(56, 189, 248, 0.22)' : 'rgba(30, 41, 59, 0.6)',
+                          border: grantQuota === num ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.08)',
+                          color: grantQuota === num ? '#38bdf8' : '#cbd5e1',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          boxShadow: grantQuota === num ? '0 0 14px rgba(56, 189, 248, 0.3)' : 'none',
+                        }}
+                      >
+                        {num} {num === 1 ? 'pass' : 'passes'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>Or custom count:</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={grantQuota}
+                      onChange={(e) => setGrantQuota(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      style={{
+                        width: '90px',
+                        background: 'rgba(11, 17, 32, 0.85)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '8px',
+                        padding: '7px 12px',
+                        color: '#f8fafc',
+                        fontSize: '13px',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Optional Admin Notes */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#e2e8f0', marginBottom: '8px' }}>
+                    3. Admin Note (Optional)
                   </label>
                   <input
-                    type="email"
-                    className="admin-input"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    required
-                  />
-                </div>
-
-                {/* Dates Split */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-                  <div>
-                    <label style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-text-primary)', display: 'block', marginBottom: '5px' }}>
-                      Demo Start Date
-                    </label>
-                    <input
-                      type="date"
-                      className="admin-input"
-                      value={formData.startDate}
-                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-text-primary)', display: 'block', marginBottom: '5px' }}>
-                      Demo Expiry Date
-                    </label>
-                    <input
-                      type="date"
-                      className="admin-input"
-                      value={formData.expiryDate}
-                      onChange={(e) => setFormData({ ...formData, expiryDate: e.target.value })}
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Interview Limits Split */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
-                  <div>
-                    <label style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-text-primary)', display: 'block', marginBottom: '5px' }}>
-                      Interview Limit
-                    </label>
-                    <select
-                      className="admin-select"
-                      style={{ width: '100%' }}
-                      value={formData.interviewLimit}
-                      onChange={(e) => setFormData({ ...formData, interviewLimit: e.target.value })}
-                    >
-                      <option value="3">3 Mock Rounds</option>
-                      <option value="5">5 Mock Rounds (Recommended)</option>
-                      <option value="10">10 Mock Rounds</option>
-                      <option value="Unlimited">Unlimited Evaluation</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-text-primary)', display: 'block', marginBottom: '5px' }}>
-                      Maximum Interview Duration
-                    </label>
-                    <select
-                      className="admin-select"
-                      style={{ width: '100%' }}
-                      value={formData.maxDuration}
-                      onChange={(e) => setFormData({ ...formData, maxDuration: e.target.value })}
-                    >
-                      <option value="30 min">30 Minutes</option>
-                      <option value="45 min">45 Minutes (Standard)</option>
-                      <option value="60 min">60 Minutes</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-text-primary)', display: 'block', marginBottom: '5px' }}>
-                    Notes / Pilot Objective
-                  </label>
-                  <textarea
-                    className="admin-input"
-                    style={{ height: '75px', padding: '0.65rem 0.85rem', resize: 'none' }}
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    type="text"
+                    placeholder="e.g. VIP Candidate Pilot, Campus Evaluation..."
+                    value={grantNotes}
+                    onChange={(e) => setGrantNotes(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(11, 17, 32, 0.85)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '10px',
+                      padding: '10px 14px',
+                      color: '#f8fafc',
+                      fontSize: '13px',
+                      outline: 'none',
+                    }}
                   />
                 </div>
               </div>
 
-              <div className="modal-box__footer">
+              <div className="admin-modal__footer">
                 <button
                   type="button"
-                  className="admin-btn admin-btn--secondary admin-btn--sm"
-                  onClick={() => setConfigModalUser(null)}
+                  onClick={() => setIsGrantModalOpen(false)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    color: '#cbd5e1',
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                  }}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="admin-btn admin-btn--primary admin-btn--sm">
-                  Confirm Demo Access
+                <button
+                  type="submit"
+                  disabled={!selectedCandidate || grantSubmitting}
+                  style={{
+                    background: selectedCandidate ? 'linear-gradient(135deg, #2563eb, #1d4ed8)' : '#334155',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '9px 24px',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '14px',
+                    cursor: selectedCandidate ? 'pointer' : 'not-allowed',
+                    boxShadow: selectedCandidate ? '0 4px 14px rgba(37, 99, 235, 0.4)' : 'none',
+                  }}
+                >
+                  {grantSubmitting ? 'Granting...' : `Grant Demo Pass (${grantQuota} attempts)`}
                 </button>
               </div>
             </form>
@@ -909,173 +925,189 @@ export default function AdminPilotAccess() {
         </div>
       )}
 
-      {/* ==================================================================
-          MODAL 3: PARTICIPANT DETAILS PANEL / MODAL
-          ================================================================== */}
-      {viewParticipantDetails && (
-        <div className="modal-overlay" onClick={() => setViewParticipantDetails(null)}>
-          <div className="modal-box details-panel-wide" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-box__header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--admin-accent-cyan)' }}>
-                  Participant Details
-                </span>
-                <span
-                  className={`admin-badge ${
-                    viewParticipantDetails.demoStatus === 'Active'
-                      ? 'pilot-status-active'
-                      : viewParticipantDetails.demoStatus === 'Expired'
-                      ? 'pilot-status-expired'
-                      : 'pilot-status-revoked'
-                  }`}
-                >
-                  {viewParticipantDetails.demoStatus} Demo
-                </span>
-              </div>
-
+      {/* ========================================================================= */}
+      {/* MODAL 2: REFRESH DEMO QUOTA POPUP */}
+      {/* ========================================================================= */}
+      {refreshTargetUser && (
+        <div className="admin-modal-overlay" onClick={() => setRefreshTargetUser(null)}>
+          <div className="admin-modal" style={{ maxWidth: '500px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal__header">
+              <h3 className="admin-modal__title">Refresh Interview Quota</h3>
               <button
                 type="button"
-                className="admin-sidebar__collapse-btn"
-                onClick={() => setViewParticipantDetails(null)}
+                onClick={() => setRefreshTargetUser(null)}
+                className="admin-modal__close"
+                title="Close popup"
               >
-                <CloseIcon size={16} />
+                <CloseIcon size={18} />
               </button>
             </div>
 
-            <div className="modal-box__body">
-              {/* Profile Hero */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div className="pilot-table-avatar" style={{ width: '50px', height: '50px', fontSize: '19px' }}>
-                  {viewParticipantDetails.avatar}
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '18px', fontWeight: 700, margin: 0, color: 'var(--admin-text-primary)' }}>
-                    {viewParticipantDetails.name}
-                  </h3>
-                  <div style={{ fontSize: '12.5px', color: 'var(--admin-text-muted)', marginTop: '2px' }}>
-                    {viewParticipantDetails.email} • {viewParticipantDetails.role} @ {viewParticipantDetails.company}
+            <form onSubmit={handleRefreshSubmit}>
+              <div className="admin-modal__body">
+                <div style={{ background: 'rgba(11, 17, 32, 0.85)', padding: '14px 18px', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc' }}>
+                    {refreshTargetUser.name}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>{refreshTargetUser.email}</div>
+                  <div style={{ marginTop: '10px', fontSize: '13px', color: '#38bdf8' }}>
+                    Current usage: <strong>{refreshTargetUser.completedInterviews} completed</strong> / {refreshTargetUser.allowedInterviews} total allowed
                   </div>
                 </div>
-              </div>
 
-              {/* Demo Access Information Grid */}
-              <div className="user-details-grid-meta">
-                <div className="user-details-meta-item">
-                  <span className="user-details-meta-item__label">Start Date</span>
-                  <span className="user-details-meta-item__val">{viewParticipantDetails.startDate}</span>
-                </div>
-                <div className="user-details-meta-item">
-                  <span className="user-details-meta-item__label">Expiry Date</span>
-                  <span className="user-details-meta-item__val">{viewParticipantDetails.expiryDate}</span>
-                </div>
-                <div className="user-details-meta-item">
-                  <span className="user-details-meta-item__label">Interview Quota</span>
-                  <span className="user-details-meta-item__val" style={{ color: 'var(--admin-accent-cyan)' }}>
-                    {viewParticipantDetails.interviewsCount}
-                  </span>
-                </div>
-                <div className="user-details-meta-item">
-                  <span className="user-details-meta-item__label">Max Duration</span>
-                  <span className="user-details-meta-item__val">{viewParticipantDetails.durationLimit}</span>
-                </div>
-                <div className="user-details-meta-item">
-                  <span className="user-details-meta-item__label">Interview Status</span>
-                  <span className="user-details-meta-item__val" style={{ color: 'var(--admin-accent-emerald)' }}>
-                    {viewParticipantDetails.interviewStatus}
-                  </span>
-                </div>
-                <div className="user-details-meta-item">
-                  <span className="user-details-meta-item__label">Feedback Status</span>
-                  <span className="user-details-meta-item__val">{viewParticipantDetails.feedback}</span>
-                </div>
-              </div>
+                {/* Reset Count Checkbox */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', fontSize: '13px', color: '#e2e8f0', background: 'rgba(56, 189, 248, 0.06)', padding: '12px 14px', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
+                  <input
+                    type="checkbox"
+                    checked={resetCountOption}
+                    onChange={(e) => setResetCountOption(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: '#2563eb' }}
+                  />
+                  <span>Reset completed count back to <strong>0</strong> (Give full attempts again)</span>
+                </label>
 
-              {/* Notes */}
-              <div style={{ background: 'var(--admin-bg-card-subtle)', padding: '0.85rem', borderRadius: '8px', border: '1px solid var(--admin-border-subtle)' }}>
-                <div style={{ fontSize: '11px', color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Pilot Objectives / Recruiter Notes
-                </div>
-                <div style={{ fontSize: '12.5px', color: 'var(--admin-text-secondary)', marginTop: '4px', lineHeight: 1.4 }}>
-                  {viewParticipantDetails.notes}
+                {/* New Allowed Limit */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#e2e8f0', marginBottom: '6px' }}>
+                    Adjust Allowed Interview Limit (Total Quota):
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={newQuotaValue}
+                    onChange={(e) => setNewQuotaValue(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(11, 17, 32, 0.85)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '8px',
+                      padding: '9px 12px',
+                      color: '#f8fafc',
+                      fontSize: '13px',
+                      outline: 'none',
+                    }}
+                  />
                 </div>
               </div>
 
-              {/* Feedback Survey Block */}
-              {viewParticipantDetails.feedback === 'Submitted' && (
-                <div
+              <div className="admin-modal__footer">
+                <button
+                  type="button"
+                  onClick={() => setRefreshTargetUser(null)}
+                  style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.12)', color: '#cbd5e1', padding: '9px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={refreshSubmitting}
                   style={{
-                    background: 'rgba(16, 185, 129, 0.06)',
-                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    background: 'linear-gradient(135deg, #10b981, #059669)',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '9px 22px',
                     borderRadius: '8px',
-                    padding: '0.85rem 1rem',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--admin-accent-emerald)' }}>
-                      ✓ Feedback Submitted ({viewParticipantDetails.feedbackScore})
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '12px', color: '#cbd5e1', margin: 0, fontStyle: 'italic', lineHeight: 1.4 }}>
-                    "{viewParticipantDetails.feedbackComment}"
-                  </p>
-                </div>
-              )}
-
-              {/* Pilot Activity Timeline */}
-              <div>
-                <h4 style={{ fontSize: '13.5px', fontWeight: 700, margin: '0 0 10px', color: 'var(--admin-text-primary)' }}>
-                  Pilot Activity Timeline
-                </h4>
-                <div className="timeline-feed">
-                  {viewParticipantDetails.timeline?.map((entry, idx) => (
-                    <div key={idx} className="timeline-entry">
-                      <span className="timeline-entry__title">{entry.title}</span>
-                      <span className="timeline-entry__desc">{entry.desc}</span>
-                      <span className="timeline-entry__time">{entry.time}</span>
-                    </div>
-                  ))}
-                </div>
+                  {refreshSubmitting ? 'Refreshing...' : 'Confirm Refresh'}
+                </button>
               </div>
-            </div>
-
-            <div className="modal-box__footer">
-              <button
-                type="button"
-                className="admin-btn admin-btn--primary admin-btn--sm"
-                onClick={() => setViewParticipantDetails(null)}
-              >
-                Close Details
-              </button>
-            </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Global Feedback Toast */}
-      {toastMessage && (
-        <div
-          style={{
-            position: 'fixed',
-            bottom: '24px',
-            right: '24px',
-            background: '#0f172a',
-            border: '1px solid rgba(56, 189, 248, 0.5)',
-            color: '#f8fafc',
-            padding: '12px 18px',
-            borderRadius: '10px',
-            boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
-            zIndex: 9999,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '13px',
-            fontWeight: 500,
-          }}
-        >
-          <span style={{ color: 'var(--admin-accent-emerald)' }}>✓</span>
-          {toastMessage}
+      {/* ========================================================================= */}
+      {/* MODAL 3: CANCEL / REVOKE DEMO ACCESS POPUP */}
+      {/* ========================================================================= */}
+      {cancelTargetUser && (
+        <div className="admin-modal-overlay" onClick={() => setCancelTargetUser(null)}>
+          <div className="admin-modal" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="admin-modal__header">
+              <h3 className="admin-modal__title" style={{ color: '#ef4444' }}>
+                Revoke Demo Interview Access
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCancelTargetUser(null)}
+                className="admin-modal__close"
+                title="Close popup"
+              >
+                <CloseIcon size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCancelSubmit}>
+              <div className="admin-modal__body">
+                <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: 1.6, margin: 0 }}>
+                  Are you sure you want to cancel demo interview access for{' '}
+                  <strong style={{ color: '#f8fafc' }}>{cancelTargetUser.name}</strong> ({cancelTargetUser.email})?
+                </p>
+
+                <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '10px', padding: '14px', fontSize: '12.5px', color: '#fca5a5', lineHeight: 1.5 }}>
+                  ⚠️ This candidate will be immediately blocked from all AI interview routes and will see the private preview "Feature Coming Soon" page.
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>
+                    Reason for cancellation (optional):
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Trial period completed, Evaluation ended"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(11, 17, 32, 0.85)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '8px',
+                      padding: '9px 12px',
+                      color: '#f8fafc',
+                      fontSize: '13px',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="admin-modal__footer">
+                <button
+                  type="button"
+                  onClick={() => setCancelTargetUser(null)}
+                  style={{ background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.12)', color: '#cbd5e1', padding: '9px 18px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px' }}
+                >
+                  Keep Access
+                </button>
+                <button
+                  type="submit"
+                  disabled={cancelSubmitting}
+                  style={{
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '9px 22px',
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(220, 38, 38, 0.4)',
+                  }}
+                >
+                  {cancelSubmitting ? 'Revoking...' : 'Yes, Revoke Access'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
   )
 }
+
+

@@ -19,11 +19,12 @@ import './Dashboard.css'
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, canAccessInterview, hasDemoAccess, remainingInterviews, allowedInterviews, isAdmin } = useAuth()
 
   // Delete modal state
   const [sessionToDelete, setSessionToDelete] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [realtimeNotification, setRealtimeNotification] = useState(null)
 
   // If authenticated user hasn't completed profile setup, navigate to profile setup
   useEffect(() => {
@@ -31,6 +32,24 @@ export default function Dashboard() {
       navigate('/profile-setup')
     }
   }, [user, navigate])
+
+  // Listen for Real-Time Demo Access events pushed from Admin
+  useEffect(() => {
+    const handleLiveDemoUpdate = (e) => {
+      const detail = e.detail || {}
+      if (detail.action === 'grant' || detail.action === 'refresh') {
+        const attempts = detail.demoAccess?.allowedInterviews || remainingInterviews || 1
+        setRealtimeNotification(`🎉 Live Update: Demo Access Activated! You have ${attempts} interview attempt(s) ready to start.`)
+      } else if (detail.action === 'cancel') {
+        setRealtimeNotification(`⚠️ Demo access has been revoked by an administrator.`)
+      }
+    }
+
+    window.addEventListener('hiremind_demo_access_live_updated', handleLiveDemoUpdate)
+    return () => {
+      window.removeEventListener('hiremind_demo_access_live_updated', handleLiveDemoUpdate)
+    }
+  }, [remainingInterviews])
 
   const candidateFullName = (() => {
     if (!user) return 'Jazeel Jaufer'
@@ -288,6 +307,45 @@ export default function Dashboard() {
             </p>
           </div>
 
+          {/* Real-time Demo Notification Banner */}
+          {realtimeNotification && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 20px',
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(59, 130, 246, 0.18))',
+                border: '1px solid rgba(16, 185, 129, 0.5)',
+                borderRadius: '12px',
+                marginBottom: '20px',
+                color: '#34d399',
+                fontSize: '14px',
+                fontWeight: 600,
+                boxShadow: '0 4px 24px rgba(16, 185, 129, 0.2)',
+                animation: 'fadeIn 0.3s ease-in-out',
+              }}
+            >
+              <span>{realtimeNotification}</span>
+              <button
+                type="button"
+                onClick={() => setRealtimeNotification(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  fontSize: '20px',
+                  lineHeight: '1',
+                  padding: '0 6px',
+                }}
+                title="Dismiss"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
           {/* Hero Simulation Banner Card */}
           <div className="dash-hero-card">
             <div className="dash-hero-card__glow" aria-hidden="true" />
@@ -301,7 +359,7 @@ export default function Dashboard() {
                 Create a personalized interview simulation using your profile, target role, company, and specific job requirements.
               </p>
 
-              <div className="dash-hero-card__actions">
+              <div className="dash-hero-card__actions" style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className="dash-hero-btn"
@@ -313,6 +371,19 @@ export default function Dashboard() {
                   START NEW INTERVIEW
                   <img src={arrowIcon} alt="" className="dash-btn-arrow" aria-hidden="true" />
                 </button>
+                {isAdmin ? (
+                  <span style={{ fontSize: '12px', background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#60a5fa', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    👑 Admin Full Access
+                  </span>
+                ) : hasDemoAccess ? (
+                  <span style={{ fontSize: '12px', background: remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)', border: `1px solid ${remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`, color: remainingInterviews > 0 ? '#34d399' : '#fbbf24', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    {remainingInterviews > 0 ? `🎯 Demo Pass: ${remainingInterviews} of ${allowedInterviews} attempts left` : `⚠️ Demo Limit Reached (${allowedInterviews}/${allowedInterviews})`}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    🔒 Private Preview (Coming Soon)
+                  </span>
+                )}
               </div>
             </div>
           </div>

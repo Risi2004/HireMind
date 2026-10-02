@@ -125,6 +125,32 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    demoAccess: {
+      enabled: {
+        type: Boolean,
+        default: false, // Regular candidates and newly signed up users are blocked by default
+      },
+      allowedInterviews: {
+        type: Number,
+        default: 0, // Configured by admin (e.g. 1, 3, 5)
+      },
+      completedInterviews: {
+        type: Number,
+        default: 0, // Incremented when candidate finishes an interview
+      },
+      grantedAt: {
+        type: Date,
+        default: null,
+      },
+      lastRefreshedAt: {
+        type: Date,
+        default: null,
+      },
+      notes: {
+        type: String,
+        default: '',
+      },
+    },
     github: {
       connected: {
         type: Boolean,
