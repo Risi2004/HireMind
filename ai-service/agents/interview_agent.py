@@ -473,6 +473,19 @@ class InterviewAgent:
                 f"- Only continue if completing an active scenario, finishing a valuable follow-up, or addressing candidate questions.\n"
                 f"- Do NOT start new low-priority topics. Transition naturally to END_INTERVIEW."
             )
+        # Format candidate projects from CV
+        raw_projects = candidate.get("projects", [])
+        formatted_projects = []
+        for p in raw_projects[:3]:
+            p_title = p.get("title") or p.get("name") or "Project"
+            tech_items = p.get("tech_stack", [])
+            p_tech = ", ".join(tech_items) if isinstance(tech_items, list) else str(tech_items)
+            p_desc = p.get("description", "")
+            formatted_projects.append(f"- {p_title} (Stack: {p_tech}): {p_desc}")
+        projects_text = "\n".join(formatted_projects) if formatted_projects else "No specific projects listed in CV."
+
+        # Stage question count cap
+        stage_target_q = curr_stage.get('targetQuestionCount', 2)
 
         prompt = (
             f"TARGET ROLE: {role} at {company}\n"
@@ -481,11 +494,13 @@ class InterviewAgent:
             f"AUTHORITATIVE CLOCK: Elapsed {timing.elapsedMinutes:.1f} min / Target {timing.targetDurationMinutes} min (Max {timing.absoluteMaximumMinutes} min, {progress_pct}% of Target)\n"
             f"CURRENT PACING PHASE: {timing_phase}\n"
             f"{phase_directives}\n\n"
+            f"CANDIDATE CV PROJECTS (EXTRACTED FROM RESUME):\n"
+            f"{projects_text}\n\n"
             f"CURRENT STAGE: {curr_stage.get('name', 'Current Stage')} (ID: {curr_stage.get('id')})\n"
             f"Stage Objectives: {'; '.join(stage_objectives)}\n"
             f"Stage Topics: {'; '.join(stage_topics)}\n"
             f"Stage Question Intents: {'; '.join(stage_intents)}\n"
-            f"Questions Asked in Stage: {state.stageQuestionsAsked} (Planning Guidance: {curr_stage.get('targetQuestionCount', 2)})\n"
+            f"Questions Asked in Stage: {state.stageQuestionsAsked} (Planning Target: {stage_target_q})\n"
             f"Total Questions Asked: {state.questionsAsked}\n"
             f"Current Topic: {state.currentTopic or (stage_topics[0] if stage_topics else 'General')}\n"
             f"Follow-up Depth on Current Topic: {state.followUpDepth} (Max 2)\n"
@@ -496,28 +511,35 @@ class InterviewAgent:
             f"{history_text}\n\n"
             f"LATEST CANDIDATE ANSWER:\n"
             f"\"{latest_answer}\"\n\n"
+            f"STAGE-SPECIFIC QUESTION ARCHETYPES (CRITICAL - ALWAYS ADHERE TO THE ACTIVE STAGE):\n"
+            f"1. IF IN PROJECT DEEP DIVE STAGE ('stage_experience' or 'Project' in stage name):\n"
+            f"   - NEVER ask generically 'what projects have you worked on?' or 'tell me about a project'.\n"
+            f"   - DIRECTLY NAME one of the candidate's actual projects from the CV above (e.g. 'I see on your resume that you built [Project Title] with [Stack]...').\n"
+            f"   - Ask about its architecture, data flow, how they solved the biggest technical bottleneck, or a design trade-off.\n"
+            f"2. IF IN THEORY / PRINCIPLES STAGE ('stage_theory' or 'Theory' or 'Skills' in stage name):\n"
+            f"   - DO NOT ask about past projects. Pivot completely to foundational technical concepts, architecture principles, memory/concurrency, or database mechanisms (e.g. database indexing, event loop, immutability, caching invalidation, or API idempotency).\n"
+            f"3. IF IN SCENARIO / CASE STUDY STAGE ('stage_scenario' or 'Scenario' in stage name):\n"
+            f"   - Present a concrete, realistic production or operational dilemma (e.g. sudden latency spike under traffic, database deadlock, or data inconsistency) and ask how they isolate, debug, and resolve it.\n"
+            f"4. IF IN CODING / PROBLEM SOLVING STAGE ('stage_coding' or 'Coding' in stage name):\n"
+            f"   - Present a clear, self-contained coding problem (e.g. algorithm, data structure manipulation, rate limiter, or parsing logic) with expected inputs, outputs, and constraints.\n"
+            f"   - Tell the candidate: 'You can write and run your solution directly in the Code Editor on your screen, and submit it when ready.'\n"
+            f"   - If the candidate just submitted code in their answer, evaluate their code: highlight its time/space complexity (Big-O), correctness, and any edge-case considerations, then transition to the next stage.\n"
+            f"5. IF IN GK / INDUSTRY TRENDS / BEHAVIORAL STAGE ('stage_gk_behavioral' or 'GK' in stage name):\n"
+            f"   - Ask about modern industry trends, technology ecosystem evolution (e.g. microservices vs modular monoliths, AI integration into development workflows), or a team collaboration dilemma.\n\n"
             f"PACING & PROGRESSION DECISION RULES (Follow in priority order):\n"
-            f"1. ANALYZE LATEST ANSWER:\n"
-            f"   - Did the candidate share specific technical choices, trade-offs, architecture layers, metrics, or outcomes?\n"
-            f"   - Is the answer too short, vague, or purely theoretical without concrete evidence?\n"
-            f"   - Did they mention a tool or experience that connects to something they said earlier (see Memory)?\n"
-            f"2. CHOOSE NEXT ACTION & REASON:\n"
-            f"   - If answer is short, vague, or missing reasoning AND followUpDepth < 2: choose CLARIFY with reasonCode='ANSWER_TOO_VAGUE' or 'ANSWER_INCOMPLETE'. Probe the specific root cause or mechanism.\n"
-            f"   - If answer introduces a valuable technical detail, decision, or trade-off AND followUpDepth < 2: choose FOLLOW_UP or DEEPEN with reasonCode='VALUABLE_DETAIL_FOUND' or 'RELEVANT_DEPTH'. Probe the design decision, trade-off, or challenge.\n"
-            f"   - If answer is purely theoretical: choose CLARIFY with reasonCode='CLAIM_NEEDS_EXAMPLE'. Ask for a concrete situation where they applied it.\n"
-            f"   - If sufficient evidence gathered on current topic OR followUpDepth >= 2: choose NEXT_TOPIC with reasonCode='TOPIC_SUFFICIENT' or 'FOLLOWUP_LIMIT_REACHED'.\n"
-            f"   - If current stage topics covered OR target questions reached:\n"
-            f"     * IF substantial target time remains ({progress_pct}% < 88%): DO NOT END. Choose NEXT_STAGE to explore next core areas, OR choose DEEPEN on a critical architectural trade-off or scenario.\n"
-            f"     * IF approaching/at target duration ({progress_pct}% >= 90%): choose NEXT_STAGE to transition toward closing.\n"
-            f"   - If in closing/wrap-up AND candidate asked questions or has none AND elapsed time is >= 90% of target duration: choose END_INTERVIEW with reasonCode='INTERVIEW_COMPLETE'.\n"
-            f"   - STRICT EARLY-COMPLETION PROHIBITION: If elapsed time < 88% of target duration ({0.88 * target_mins:.1f}m), you MUST NOT select END_INTERVIEW. Selected duration is a target experience; use remaining time to increase interview depth.\n"
+            f"1. STAGE PROGRESSION MANDATE:\n"
+            f"   - If questions asked in current stage >= {stage_target_q} OR followUpDepth >= 2:\n"
+            f"     You MUST select action='NEXT_STAGE' to keep the interview dynamic and well-rounded across all stages.\n"
+            f"     Do NOT stay in the same stage or loop on the same project.\n"
+            f"2. ACTION SELECTION:\n"
+            f"   - If questions asked in stage < {stage_target_q} and followUpDepth < 2:\n"
+            f"     * If answer is vague or incomplete: choose CLARIFY with reasonCode='ANSWER_TOO_VAGUE'.\n"
+            f"     * If answer has valuable details: choose FOLLOW_UP with reasonCode='VALUABLE_DETAIL_FOUND'.\n"
+            f"   - Otherwise: choose NEXT_STAGE with reasonCode='STAGE_COMPLETE'.\n"
+            f"   - If in closing/wrap-up AND elapsed time >= 90% of target duration: choose END_INTERVIEW with reasonCode='INTERVIEW_COMPLETE'.\n"
             f"3. CRAFT THE ONE QUESTION:\n"
             f"   - Natural, human interviewer language. Strictly ONE question (1-2 sentences max).\n"
-            f"   - CONVERSATION REFERENCE SAFETY: Before referencing 'that implementation', 'that project', 'that issue', 'that approach', 'it', or 'this situation', ensure the subject is unambiguous. If multiple projects, scenarios, technologies, or problems have recently been discussed, EXPLICITLY NAME THE SUBJECT INSTEAD (e.g. 'In the React project you described earlier...', 'For the intermittent API failure scenario...'). Avoid asking the candidate to repeat an experience already sufficiently discussed unless exploring a distinctly different aspect.\n"
-            f"   - NO ROBOTIC PHRASES: NEVER say 'Regarding [Topic], could you describe your hands-on experience and typical workflow in this area?'.\n"
-            f"   - NO ROBOTIC STAGE LABELS: Do not say 'Let's move to our next section: Scenario & Problem Solving'. Say 'Let's move into problem solving. Tell me about a situation where...'.\n"
-            f"   - REDUCE PRAISE: Do not praise every answer. Use varied neutral acknowledgments ('Understood.', 'That makes sense.', 'Thanks.') or ask the question directly.\n"
-            f"   - IF CLOSING: Conclude warmly and professionally as an interview simulation. Do NOT promise real hiring decisions, employment, or company follow-up.\n"
+            f"   - Avoid robotic transitions. Provide smooth, professional conversational shifts.\n"
             f"Respond ONLY in valid JSON."
         )
 

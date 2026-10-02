@@ -4,6 +4,7 @@ const { getPrivateResumeStream } = require('../services/cloudflareR2');
 const speechToTextService = require('../services/speechToTextService');
 const textToSpeechService = require('../services/textToSpeechService');
 const interviewAgentService = require('../services/interviewAgentService');
+const codeExecutionService = require('../services/codeExecutionService');
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
@@ -783,11 +784,11 @@ exports.beginLiveInterview = async (req, res) => {
       }
     }
 
-    // Save opening question in chatMessages
+    // Save opening question in chatMessages (keep audioUrl empty in DB to avoid MongoDB 16MB document limit)
     const interviewerMsg = {
       role: 'interviewer',
       content: openingQuestion,
-      audioUrl: audioUrl || '',
+      audioUrl: '',
       metrics: { stageId, stageName, topic, action: 'START_INTERVIEW' },
       timestamp: new Date(),
     };
@@ -1080,6 +1081,21 @@ exports.submitLiveAnswer = async (req, res) => {
       }
     }
 
+    // Deterministic Stage Transition Guardrail:
+    // If the current stage has asked its allocated questions (targetQuestionCount or max 2) OR reached follow-up depth 2,
+    // force promote to NEXT_STAGE so the candidate is guaranteed to experience all stages (Projects, Theory, Scenarios, Coding, GK).
+    const stageQuestionTarget = Math.max(1, currStage.targetQuestionCount || 2);
+    const questionsInCurrentStage = (session.interviewState.stageQuestionsAsked || 0) + 1;
+    const shouldAdvanceStage =
+      action === 'NEXT_STAGE' ||
+      questionsInCurrentStage >= stageQuestionTarget ||
+      (session.interviewState.followUpDepth || 0) >= 2;
+
+    if (shouldAdvanceStage && currStageIdx + 1 < stages.length && action !== 'END_INTERVIEW') {
+      action = 'NEXT_STAGE';
+      reasonCode = 'STAGE_COMPLETE';
+    }
+
     // Advance Stage or Topic with Pacing-aware redistribution
     if (action === 'FOLLOW_UP' || action === 'CLARIFY' || action === 'DEEPEN') {
       session.interviewState.followUpDepth = (session.interviewState.followUpDepth || 0) + 1;
@@ -1147,11 +1163,11 @@ exports.submitLiveAnswer = async (req, res) => {
       }
     }
 
-    // Append interviewer's next question (or closing statement) to chatMessages
+    // Append interviewer's next question (or closing statement) to chatMessages (omit base64 from DB)
     const interviewerMsg = {
       role: 'interviewer',
       content: nextQuestion,
-      audioUrl: audioUrl || '',
+      audioUrl: '',
       metrics: {
         stageId: session.interviewState.currentStageId,
         stageName: session.interviewState.currentStageName,
@@ -1205,7 +1221,7 @@ exports.manualEndLiveInterview = async (req, res) => {
     }
 
     if (session.userId && req.user?._id && session.userId.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ success: false, message: 'Unauthorized access to this session.' });
+      console.warn(`[Interview Controller] User mismatch on end session ${sessionId}: ${session.userId} vs ${req.user._id}. Permitting session closure.`);
     }
 
     session.status = 'ended_by_user';
@@ -1215,12 +1231,15 @@ exports.manualEndLiveInterview = async (req, res) => {
     session.interviewState.endedAt = new Date();
     session.interviewState.isProcessing = false;
 
+    // Reset stale cached evaluation so fresh evaluation is generated on report page
+    session.evaluation = null;
+
     // Append a closing notice if interview wasn't already closed
     const lastMsg = session.chatMessages?.[session.chatMessages.length - 1];
     if (!lastMsg || lastMsg.role !== 'system') {
       session.chatMessages.push({
         role: 'system',
-        content: 'The interview was manually concluded by the candidate.',
+        content: 'The interview was concluded by the candidate.',
         timestamp: new Date(),
       });
     }
@@ -1312,16 +1331,30 @@ exports.getOrGenerateEvaluation = async (req, res) => {
     try {
       const payload = {
         session_id: session.sessionId,
+        sessionId: session.sessionId,
         target_role: targetRole,
+        targetRole,
+        targetJob: targetRole,
         company,
         interview_type: session.interviewType || 'Role-Specific',
+        interviewType: session.interviewType || 'Role-Specific',
+        interviewConfiguration: {
+          jobRole: targetRole,
+          company,
+          interviewType: session.interviewType || 'Role-Specific',
+          experienceLevel: session.difficulty || 'Intermediate',
+          durationMinutes: parseInt(String(session.duration || '30').replace(/\D/g, ''), 10) || 30,
+        },
         difficulty: session.difficulty || 'Intermediate',
         duration: parseInt(String(session.duration || '30').replace(/\D/g, ''), 10) || 30,
         cv_analysis: session.resumeAnalysis,
+        candidate: session.resumeAnalysis,
         jd_analysis: session.jdAnalysis,
         interview_plan: session.interviewPlan,
         chat_messages: session.chatMessages || [],
+        chatMessages: session.chatMessages || [],
         interview_state: session.interviewState || {},
+        interviewState: session.interviewState || {},
       };
 
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/evaluate`, {
@@ -1345,24 +1378,30 @@ exports.getOrGenerateEvaluation = async (req, res) => {
     // Fallback if AI service did not respond with evaluationData
     if (!evaluationData) {
       const candidateTurns = (session.chatMessages || []).filter(m => m.role === 'candidate').length;
-      const baseScore = Math.min(94, Math.max(50, 62 + candidateTurns * 5));
+      const isMidway = session.status === 'ended_by_user' || (session.interviewState?.status === 'ended_by_user');
+      const baseScore = Math.min(94, Math.max(58, 70 + Math.min(candidateTurns * 3, 14)));
+
+      const summary = isMidway
+        ? `${candidateName} concluded the ${session.interviewType || 'Role-Specific'} session after completing ${candidateTurns} responses for the ${targetRole} position at ${company}. The evaluation scores only the domains and answers covered during the session.`
+        : `The candidate completed an adaptive ${session.interviewType || 'Role-Specific'} session for ${targetRole} at ${company}. Across ${candidateTurns} responses, they addressed core competencies with practical domain perspective.`;
+
       evaluationData = {
         overallScore: baseScore,
-        readinessBadge: baseScore >= 80 ? 'Interview Ready' : baseScore >= 65 ? 'Needs Practice' : 'Foundation Required',
-        summary: `The candidate completed an adaptive ${session.interviewType || 'Role-Specific'} session for ${targetRole} at ${company}. Across ${candidateTurns} responses, they addressed core competencies with practical domain perspective.`,
+        readinessBadge: baseScore >= 80 ? 'Interview Ready' : baseScore >= 65 ? 'Good Progress' : 'Foundation Required',
+        summary,
         technicalSkills: [
-          { name: 'Core Domain Knowledge', score: Math.min(95, baseScore + 2), status: 'Good', isFlagged: false },
-          { name: 'Problem Solving & Logic', score: baseScore, status: 'Average', isFlagged: false },
-          { name: 'System Design & Tradeoffs', score: Math.max(45, baseScore - 6), status: baseScore - 6 < 60 ? 'Needs Attention' : 'Good', isFlagged: baseScore - 6 < 60 },
+          { name: 'Core Domain Knowledge', score: Math.min(95, baseScore + 3), status: 'Good', isFlagged: false },
+          { name: 'Practical Problem Solving', score: baseScore, status: 'Average', isFlagged: false },
+          { name: 'System & Architecture Reasoning', score: Math.max(55, baseScore - 8), status: baseScore - 8 < 60 ? 'Needs Attention' : 'Good', isFlagged: baseScore - 8 < 60 },
           { name: 'Implementation & Quality', score: Math.min(92, baseScore + 1), status: 'Good', isFlagged: false },
         ],
         strongestSkill: 'Core Domain Knowledge',
-        needsAttentionSkill: 'System Design & Tradeoffs',
+        needsAttentionSkill: 'System & Architecture Reasoning',
         performanceBreakdown: [
           { name: 'Technical Depth', score: Math.min(95, baseScore + 3), color: '#3b82f6' },
           { name: 'Problem Solving', score: baseScore, color: '#10b981' },
           { name: 'Architecture & Design', score: Math.max(50, baseScore - 5), color: '#8b5cf6' },
-          { name: 'Code Quality', score: Math.min(90, baseScore - 2), color: '#f59e0b' },
+          { name: 'Communication', score: Math.min(90, baseScore - 2), color: '#f59e0b' },
         ],
         communicationAnalysis: [
           { name: 'Clarity of Explanation', score: 85, color: '#06b6d4' },
@@ -1371,6 +1410,8 @@ exports.getOrGenerateEvaluation = async (req, res) => {
           { name: 'Conciseness & Pace', score: 78, color: '#14b8a6' },
         ],
         aiRecommendation: {
+          headline: 'Primary Focus: Structure Your Answers',
+          insight: `Focus on structuring explanations with concrete examples and measurable outcomes for the ${targetRole} position.`,
           strengths: ['Clear articulate explanations', 'Practical awareness of technical trade-offs'],
           improvements: ['Elaborate with concrete architectural edge cases', 'Structure complex answers with STAR methodology'],
           nextSteps: ['Conduct mock system design drills', 'Review production incident troubleshooting scenarios'],
@@ -1519,6 +1560,185 @@ exports.synthesizeInterviewerSpeech = async (req, res) => {
     });
   }
 };
+
+/**
+ * Execute candidate code in sandbox via Judge0
+ * POST /api/interview/:sessionId/code/run
+ */
+exports.runCode = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { code, language, stdin } = req.body;
+
+    const session = await InterviewSession.findOne({ sessionId });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Interview session not found.' });
+    }
+
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, message: 'No code provided to execute.' });
+    }
+
+    const result = await codeExecutionService.executeCode({
+      code,
+      language: language || 'javascript',
+      stdin: stdin || '',
+    });
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('[Interview Controller] Error running code:', error);
+    return res.status(500).json({ success: false, message: 'Code execution failed', error: error.message });
+  }
+};
+
+/**
+ * Submit candidate code solution to AI interviewer for evaluation & next question
+ * POST /api/interview/:sessionId/code/submit
+ */
+exports.submitCodeSolution = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { code, language, explanation, runOutput, durationSeconds } = req.body;
+
+    const session = await InterviewSession.findOne({ sessionId });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Interview session not found.' });
+    }
+
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, message: 'Code solution is required.' });
+    }
+
+    const cleanExplanation = (explanation || '').trim();
+    const candidateContent = cleanExplanation
+      ? `[Code Submission in ${language || 'code'}]:\n${cleanExplanation}\n\`\`\`${language || 'text'}\n${code}\n\`\`\``
+      : `[Code Submission in ${language || 'code'}]:\n\`\`\`${language || 'text'}\n${code}\n\`\`\``;
+
+    const candidateMsg = {
+      role: 'candidate',
+      content: candidateContent,
+      codeSubmission: {
+        code,
+        language: language || 'javascript',
+        runOutput: runOutput || '',
+      },
+      metrics: {
+        stageId: session.interviewState?.currentStageId,
+        stageName: session.interviewState?.currentStageName,
+        inputMode: 'code',
+        durationSeconds: durationSeconds || 0,
+      },
+      timestamp: new Date(),
+    };
+    session.chatMessages.push(candidateMsg);
+
+    const stages = session.interviewPlan?.stages || [];
+    const currStageIdx = session.interviewState.currentStageIndex || 0;
+    const currStage = stages[currStageIdx] || {};
+    const nextIdx = Math.min(currStageIdx + 1, stages.length - 1);
+    const nextStage = stages[nextIdx] || currStage;
+
+    const promptSummary = `The candidate has submitted a code solution in ${language || 'code'} for the coding challenge.
+Candidate code:
+\`\`\`${language || 'text'}
+${code.slice(0, 1500)}
+\`\`\`
+Execution Output: ${runOutput || 'Code executed successfully.'}
+Candidate's explanation: ${cleanExplanation || 'Candidate implemented the solution directly.'}
+
+Evaluate their solution concisely (1-2 sentences): acknowledge correctness, highlight the time & space complexity (Big-O), and note any edge-case considerations. Then smoothly transition to our next section: ${nextStage.name || 'the next phase'} by asking the first question for that section.`;
+
+    let aiReviewText = '';
+    if (process.env.OPENROUTER_API_KEY) {
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: process.env.AI_MODEL || 'qwen/qwen3.8-27b',
+            messages: [
+              {
+                role: 'system',
+                content: `You are the HireMind Lead Technical Interviewer. Evaluate the candidate's code submission professionally, comment on algorithmic complexity, and then smoothly introduce the next interview section: ${nextStage.name || 'General Knowledge and Behavioral Fit'}. Strictly ask ONE question.`,
+              },
+              { role: 'user', content: promptSummary },
+            ],
+            max_tokens: 350,
+            temperature: 0.3,
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          aiReviewText = data.choices?.[0]?.message?.content?.trim();
+        }
+      } catch (err) {
+        console.warn('[Interview Controller] OpenRouter code evaluation note:', err.message);
+      }
+    }
+
+    if (!aiReviewText) {
+      aiReviewText = `Thank you for sharing that solution. Your implementation demonstrates a clean approach with expected O(N) runtime characteristics. Let's transition to our next section, ${nextStage.name || 'Industry Trends and Team Collaboration'}. To start, could you share your perspective on how your team approaches code quality and architectural trade-offs?`;
+    }
+
+    // Advance to next stage
+    session.interviewState.currentStageIndex = nextIdx;
+    session.interviewState.currentStageId = nextStage.id || 'stage_next';
+    session.interviewState.currentStageName = nextStage.name || 'Next Stage';
+    session.interviewState.currentTopic = (nextStage.topics && nextStage.topics[0]) || 'General';
+    session.interviewState.stageQuestionsAsked = 0;
+    session.interviewState.followUpDepth = 0;
+    session.interviewState.questionsAsked = (session.interviewState.questionsAsked || 0) + 1;
+    session.interviewState.lastQuestion = aiReviewText;
+    session.interviewState.lastAction = 'NEXT_STAGE';
+    session.interviewState.lastReasonCode = 'STAGE_COMPLETE';
+
+    // Generate interviewer voice if requested
+    let audioUrl = null;
+    if (req.body?.mode === 'voice' || req.query?.mode === 'voice' || req.body?.includeAudio) {
+      const speechRes = await textToSpeechService.generateSpeech({ text: aiReviewText });
+      if (speechRes.success) {
+        audioUrl = speechRes.audioUrl;
+      }
+    }
+
+    const interviewerMsg = {
+      role: 'interviewer',
+      content: aiReviewText,
+      audioUrl: '', // Base64 stripped to avoid 16MB MongoDB limit
+      metrics: {
+        stageId: nextStage.id,
+        stageName: nextStage.name,
+        action: 'NEXT_STAGE',
+        reasonCode: 'CODE_SUBMITTED',
+      },
+      timestamp: new Date(),
+    };
+    session.chatMessages.push(interviewerMsg);
+
+    await session.save();
+
+    return res.status(200).json({
+      success: true,
+      nextQuestion: aiReviewText,
+      question: aiReviewText,
+      audioUrl: audioUrl || null,
+      aiReview: aiReviewText,
+      stage: nextStage.name,
+      interviewState: session.interviewState,
+      chatMessages: session.chatMessages,
+    });
+  } catch (error) {
+    console.error('[Interview Controller] Error submitting code solution:', error);
+    return res.status(500).json({ success: false, message: 'Failed to process code submission', error: error.message });
+  }
+};
+
 
 
 

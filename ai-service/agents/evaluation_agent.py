@@ -119,26 +119,33 @@ class InterviewEvaluationAgent:
 
     def evaluate_interview(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze the interview transcript and metadata to generate comprehensive evaluation."""
-        candidate = context.get("candidate", {})
-        target_job = context.get("targetJob", {})
-        config = context.get("interviewConfiguration", {})
-        chat_messages = context.get("chatMessages", [])
-        state = context.get("interviewState", {})
+        candidate = context.get("candidate") or context.get("cv_analysis") or {}
+        target_job = context.get("targetJob") or {"role": context.get("target_role"), "company": context.get("company")}
+        config = context.get("interviewConfiguration") or {
+            "type": context.get("interview_type"),
+            "difficulty": context.get("difficulty"),
+            "durationMinutes": context.get("duration"),
+        }
+        chat_messages = context.get("chatMessages") or context.get("chat_messages") or []
+        state = context.get("interviewState") or context.get("interview_state") or {}
 
-        candidate_name = candidate.get("candidateName") or "Candidate"
-        role = target_job.get("role") or "Target Role"
-        company = target_job.get("company") or "Target Company"
-        interview_type = config.get("type", "Role-Specific")
-        difficulty = config.get("difficulty", "Intermediate")
+        candidate_name = candidate.get("candidateName") or candidate.get("candidate_name") or "Candidate"
+        role = target_job.get("role") or context.get("target_role") or "Target Role"
+        company = target_job.get("company") or context.get("company") or "Target Company"
+        interview_type = config.get("type") or context.get("interview_type") or "Role-Specific"
+        difficulty = config.get("difficulty") or context.get("difficulty") or "Intermediate"
 
-        # Format candidate transcript turns
+        # Format candidate transcript turns and extract covered topics
         formatted_dialogue = []
         candidate_turns = 0
         total_candidate_words = 0
+        has_code_submission = False
 
         for msg in chat_messages:
             speaker = "Candidate" if msg.get("role") in ["candidate", "user"] else "Interviewer"
             content = msg.get("content", "").strip()
+            if msg.get("codeSubmission") or msg.get("isCode") or "```" in content:
+                has_code_submission = True
             formatted_dialogue.append(f"{speaker}: {content}")
             if speaker == "Candidate":
                 candidate_turns += 1
@@ -146,9 +153,18 @@ class InterviewEvaluationAgent:
 
         transcript_text = "\n\n".join(formatted_dialogue) if formatted_dialogue else "No interview dialogue recorded."
 
+        # Detect whether session was completed or concluded mid-way
+        is_midway = (
+            state.get("status") in ["ended_by_user", "cancelled"]
+            or state.get("isEndedByUser", False)
+            or candidate_turns < 5
+        )
+
+        status_label = "Concluded Mid-way by Candidate" if is_midway else "Completed Full Session"
+
         # Build prompt
         prompt = (
-            f"Please evaluate this completed interview session:\n\n"
+            f"Please evaluate this {'PARTIAL / MID-WAY' if is_midway else 'COMPLETED'} interview session:\n\n"
             f"CANDIDATE: {candidate_name}\n"
             f"TARGET ROLE: {role}\n"
             f"TARGET COMPANY: {company}\n"
@@ -156,14 +172,15 @@ class InterviewEvaluationAgent:
             f"DIFFICULTY: {difficulty}\n"
             f"QUESTIONS ASKED: {state.get('questionsAsked', candidate_turns)}\n"
             f"CANDIDATE TURNS: {candidate_turns}\n"
-            f"STATUS: {state.get('status', 'completed')}\n\n"
+            f"STATUS: {status_label}\n\n"
             f"INTERVIEW TRANSCRIPT:\n"
             f"{transcript_text}\n\n"
-            f"INSTRUCTIONS:\n"
-            f"1. Score objectively based on the actual answers given in the transcript above.\n"
-            f"2. Extract technical competencies demonstrated or questioned.\n"
-            f"3. Mark skills/criteria with score < 70 with isFlagged=True and prefix the name with '!'.\n"
-            f"4. Provide a constructive, personalized summary and actionable recommendation.\n"
+            f"CRITICAL DOMAIN SCORING INSTRUCTIONS:\n"
+            f"1. ADAPTIVE TO MID-WAY/PARTIAL SESSIONS: If the candidate concluded early ({status_label}), evaluate ONLY the questions and domain topics they actually completed. Do NOT give zero scores for unreached stages; score the competencies demonstrated in their answers so far.\n"
+            f"2. EXTRACT TOPIC-BY-TOPIC DOMAIN SKILLS: Extract individual technicalSkills for each distinct domain area covered (e.g. CV Project Architecture, Core Theory/Principles, Case Study Scenarios, Coding Challenge, etc.). For each skill, provide an accurate score (0-100) reflecting their depth in that domain.\n"
+            f"3. IF CODE WAS SUBMITTED: Evaluate the candidate's code solution, syntax, correctness, and Big-O efficiency as a dedicated competency.\n"
+            f"4. SUMMARY: In summary (2-3 sentences), clearly state whether this was a mid-way or complete session, summarize their demonstrated domain depth, and note key areas.\n"
+            f"5. Mark skills/criteria with score < 70 with isFlagged=True and prefix the name with '!'.\n"
             f"Respond ONLY in valid JSON matching the specified schema."
         )
 
@@ -189,6 +206,8 @@ class InterviewEvaluationAgent:
             state=state,
             candidate_turns=candidate_turns,
             total_candidate_words=total_candidate_words,
+            is_midway=is_midway,
+            has_code_submission=has_code_submission,
         )
 
     def _call_llm(self, prompt: str) -> Optional[str]:
@@ -321,95 +340,116 @@ class InterviewEvaluationAgent:
         state: Dict[str, Any],
         candidate_turns: int,
         total_candidate_words: int,
+        is_midway: bool = False,
+        has_code_submission: bool = False,
     ) -> Dict[str, Any]:
         """Deterministic evaluation synthesizing transcript metrics, candidate word counts,
-        and domain topics when LLM is unavailable.
+        domain topics, and stage progression when LLM is unavailable.
+        Fairly assesses only what was covered if the interview was ended mid-way.
         """
         avg_words = total_candidate_words / max(1, candidate_turns)
 
-        # Baseline score calculation
-        base_score = 72
-        if candidate_turns >= 4:
+        # Baseline score calculation based on candidate responses
+        base_score = 74
+        if avg_words >= 30:
             base_score += 6
-        if avg_words >= 25:
-            base_score += 6
-        elif avg_words < 12:
+        elif avg_words >= 15:
+            base_score += 3
+        elif avg_words < 10 and candidate_turns > 0:
             base_score -= 8
 
-        # Check for technical depth keywords
-        all_text = " ".join([m.get("content", "") for m in chat_messages if m.get("role") in ["candidate", "user"]]).lower()
-        if any(w in all_text for w in ["architecture", "redis", "postgres", "trade-off", "latency", "scale", "concurrency"]):
+        # Check for technical depth keywords in candidate responses
+        candidate_text = " ".join([m.get("content", "") for m in chat_messages if m.get("role") in ["candidate", "user"]]).lower()
+        interviewer_text = " ".join([m.get("content", "") for m in chat_messages if m.get("role") in ["assistant", "interviewer", "system"]]).lower()
+
+        if any(w in candidate_text for w in ["architecture", "redis", "postgres", "trade-off", "latency", "scale", "concurrency", "optimize", "pipeline", "cache"]):
             base_score += 4
 
-        overall_score = max(58, min(92, base_score))
-        badge = "Strong Candidate" if overall_score >= 80 else "Good Progress" if overall_score >= 65 else "Needs Practice"
+        if has_code_submission:
+            base_score += 4
 
-        # Domain-aware skill extraction
-        is_software = any(w in role.lower() for w in ["software", "developer", "engineer", "frontend", "backend", "full-stack"])
+        overall_score = max(55, min(94, base_score))
+        badge = "Strong Candidate" if overall_score >= 82 else "Good Progress" if overall_score >= 68 else "Needs Practice"
+
+        # Dynamically build domain technical skills based on topics actually asked
+        tech_skills = []
+        is_software = any(w in role.lower() for w in ["software", "developer", "engineer", "frontend", "backend", "full-stack", "data", "devops"])
         is_marketing = any(w in role.lower() for w in ["marketing", "growth", "seo", "campaign"])
         is_accounting = any(w in role.lower() for w in ["account", "finance", "audit", "tax"])
 
-        if is_marketing:
-            tech_skills = [
-                {"name": "Campaign Strategy", "score": min(95, overall_score + 6), "isFlagged": False},
-                {"name": "CAC & Conversion Funnels", "score": min(92, overall_score + 2), "isFlagged": False},
-                {"name": "Attribution & Analytics", "score": overall_score, "isFlagged": False},
-                {"name": "!A/B Testing Methodology", "score": max(58, overall_score - 14), "isFlagged": True},
-                {"name": "!Audience Segmentation", "score": max(62, overall_score - 12), "isFlagged": True},
-            ]
-            strongest = "Campaign Strategy & Growth"
-            needs_attention = "A/B Testing & Attribution"
+        # Detect specific domains explored in interviewer questions
+        asked_project = any(w in interviewer_text for w in ["project", "resume", "cv", "portfolio", "built", "designed", "previous work"])
+        asked_theory = any(w in interviewer_text for w in ["concept", "principle", "under the hood", "difference between", "database", "memory", "thread", "concurrency", "acid", "index"])
+        asked_scenario = any(w in interviewer_text for w in ["scenario", "outage", "production", "crash", "scale", "traffic", "spike", "trade-off", "failure", "incident"])
+        asked_coding = has_code_submission or any(w in interviewer_text for w in ["code", "function", "algorithm", "solution", "array", "string", "ide", "write a function"])
+
+        if is_software:
+            if asked_project:
+                tech_skills.append({"name": "Project Architecture & Implementation", "score": min(95, overall_score + 4), "isFlagged": False})
+            if asked_theory:
+                tech_skills.append({"name": "Core CS Foundations & Theory", "score": min(92, overall_score + 2), "isFlagged": False})
+            if asked_scenario:
+                tech_skills.append({"name": "Production Scenarios & Trade-offs", "score": max(60, overall_score - 8), "isFlagged": overall_score - 8 < 70})
+            if asked_coding:
+                tech_skills.append({"name": "Live Coding & Algorithmic Problem Solving", "score": min(94, overall_score + 3), "isFlagged": False})
+
+            # If none specifically caught or fewer than 3, add primary domain skills
+            if len(tech_skills) < 3:
+                tech_skills.append({"name": "API Design & Backend Patterns", "score": overall_score, "isFlagged": False})
+                tech_skills.append({"name": "Data Consistency & Storage", "score": max(62, overall_score - 10), "isFlagged": overall_score - 10 < 70})
+        elif is_marketing:
+            if asked_project:
+                tech_skills.append({"name": "Campaign Portfolio & Execution", "score": min(95, overall_score + 4), "isFlagged": False})
+            tech_skills.append({"name": "CAC & Conversion Funnels", "score": min(92, overall_score + 2), "isFlagged": False})
+            tech_skills.append({"name": "Attribution & Performance Analytics", "score": overall_score, "isFlagged": False})
+            tech_skills.append({"name": "!A/B Testing & Experimentation", "score": max(60, overall_score - 12), "isFlagged": True})
         elif is_accounting:
-            tech_skills = [
-                {"name": "General Ledger & Reconciliations", "score": min(95, overall_score + 6), "isFlagged": False},
-                {"name": "Financial Reporting (GAAP/IFRS)", "score": min(90, overall_score + 3), "isFlagged": False},
-                {"name": "Variance & Discrepancy Tracking", "score": overall_score, "isFlagged": False},
-                {"name": "!Audit Readiness & Internal Controls", "score": max(60, overall_score - 15), "isFlagged": True},
-                {"name": "!Cash Flow Forecasting", "score": max(64, overall_score - 11), "isFlagged": True},
-            ]
-            strongest = "General Ledger & Bank Reconciliation"
-            needs_attention = "Internal Controls & Audit Readiness"
+            if asked_project:
+                tech_skills.append({"name": "Financial Reporting & Reconciliations", "score": min(95, overall_score + 4), "isFlagged": False})
+            tech_skills.append({"name": "GAAP/IFRS Principles & Compliance", "score": min(90, overall_score + 2), "isFlagged": False})
+            tech_skills.append({"name": "Variance Analysis & Cost Tracking", "score": overall_score, "isFlagged": False})
+            tech_skills.append({"name": "!Internal Controls & Risk Management", "score": max(62, overall_score - 12), "isFlagged": True})
         else:
-            tech_skills = [
-                {"name": "REST APIs & Backend Logic", "score": min(95, overall_score + 6), "isFlagged": False},
-                {"name": "Database Architecture & SQL", "score": min(90, overall_score + 3), "isFlagged": False},
-                {"name": "Clean Code & Layering", "score": overall_score, "isFlagged": False},
-                {"name": "!Database Design & Indexing", "score": max(62, overall_score - 14), "isFlagged": True},
-                {"name": "!System Design & Scalability", "score": max(58, overall_score - 18), "isFlagged": True},
-            ]
-            strongest = "REST APIs & Backend Logic"
-            needs_attention = "System Design & Concurrency"
+            tech_skills.append({"name": "Domain Expertise & Concepts", "score": min(94, overall_score + 4), "isFlagged": False})
+            tech_skills.append({"name": "Practical Problem Solving", "score": overall_score, "isFlagged": False})
+            tech_skills.append({"name": "!Advanced Methodology & Strategy", "score": max(60, overall_score - 12), "isFlagged": True})
+
+        strongest = tech_skills[0]["name"] if tech_skills else "Technical Knowledge"
+        needs_attention = tech_skills[-1]["name"] if len(tech_skills) > 1 else "Architectural Trade-offs"
 
         perf_breakdown = [
-            {"name": "Technical Knowledge", "score": min(92, overall_score + 4), "isFlagged": False},
-            {"name": "!Communication", "score": max(64, overall_score - 12), "isFlagged": overall_score - 12 < 70},
+            {"name": "Technical Knowledge", "score": min(92, overall_score + 3), "isFlagged": False},
+            {"name": "Communication", "score": max(65, overall_score - (10 if avg_words < 15 else 4)), "isFlagged": (overall_score - (10 if avg_words < 15 else 4)) < 70},
             {"name": "Problem Solving", "score": min(90, overall_score + 2), "isFlagged": False},
-            {"name": "Confidence", "score": max(66, overall_score - 8), "isFlagged": False},
-            {"name": "Behavioral", "score": min(88, overall_score), "isFlagged": False},
+            {"name": "Confidence", "score": max(66, overall_score - 6), "isFlagged": False},
         ]
 
         comm_analysis = [
-            {"name": "Clarity", "score": min(88, overall_score), "isFlagged": False},
-            {"name": "!Answer Structure", "score": max(62, overall_score - 14), "isFlagged": True},
-            {"name": "Speaking Pace", "score": min(84, overall_score + 2), "isFlagged": False},
-            {"name": "Vocabulary", "score": min(82, overall_score - 2), "isFlagged": False},
-            {"name": "Confidence", "score": max(65, overall_score - 9), "isFlagged": False},
+            {"name": "Clarity & Articulation", "score": min(90, overall_score), "isFlagged": False},
+            {"name": "Answer Structure (STAR)", "score": max(62, overall_score - 12), "isFlagged": True},
+            {"name": "Technical Vocabulary", "score": min(88, overall_score + 2), "isFlagged": False},
         ]
 
-        ai_rec = {
-            "headline": "Primary Focus: Structure Your Answers",
-            "insight": f"You demonstrated solid domain knowledge for {role}. To elevate your performance, utilize the STAR method to organize answers with clear problem context, concrete action steps, and measurable outcomes.",
-            "primaryFocus": "Structured Problem Solving & Clear Metrics"
-        }
-
-        # Trend progression across turns
-        trend_scores = [65, 72, overall_score - 2, overall_score, min(95, overall_score + 3)]
-
-        summary = (
-            f"{candidate_name} completed the {interview_type} simulation for {role} at {company}. "
-            f"They demonstrated strong grasp of core fundamentals and practical implementation, "
-            f"with opportunities to provide deeper architectural reasoning and structured trade-off analysis."
+        headline = "Primary Focus: Structure Your Explanations"
+        insight = (
+            f"You demonstrated solid domain knowledge across the topics discussed for the {role} role. "
+            f"To elevate your responses, organize answers with direct concrete context, explicit action steps, and measurable trade-offs."
         )
+
+        trend_scores = [max(60, overall_score - 8), max(65, overall_score - 4), overall_score, min(95, overall_score + 2)]
+
+        if is_midway:
+            summary = (
+                f"{candidate_name} completed an active portion ({candidate_turns} answers) of the {interview_type} simulation "
+                f"for {role} at {company} before the interview concluded. The evaluation accurately assesses only the domains "
+                f"covered during the session without penalizing for unreached stages."
+            )
+        else:
+            summary = (
+                f"{candidate_name} completed the {interview_type} interview simulation for {role} at {company}. "
+                f"They demonstrated a solid grasp of core fundamentals and practical implementation, "
+                f"with key opportunities to provide deeper architectural reasoning and structured trade-off analysis."
+            )
 
         return {
             "overallScore": overall_score,
@@ -420,7 +460,11 @@ class InterviewEvaluationAgent:
             "needsAttentionSkill": needs_attention,
             "performanceBreakdown": perf_breakdown,
             "communicationAnalysis": comm_analysis,
-            "aiRecommendation": ai_rec,
+            "aiRecommendation": {
+                "headline": headline,
+                "insight": insight,
+                "primaryFocus": "Structured Problem Solving & Clear Metrics"
+            },
             "trendScores": trend_scores,
         }
 

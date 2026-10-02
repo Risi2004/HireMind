@@ -18,6 +18,12 @@ const chatMessageSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     default: null,
   },
+  codeSubmission: {
+    code: { type: String, default: '' },
+    language: { type: String, default: '' },
+    runOutput: { type: String, default: '' },
+    aiReview: { type: String, default: '' },
+  },
   timestamp: {
     type: Date,
     default: Date.now,
@@ -139,5 +145,17 @@ const interviewSessionSchema = new mongoose.Schema(
   }
 );
 
+// Automatically strip large base64 data URLs from chatMessages before saving to avoid MongoDB 16MB document limit
+interviewSessionSchema.pre('save', function () {
+  if (Array.isArray(this.chatMessages)) {
+    for (const msg of this.chatMessages) {
+      if (typeof msg.audioUrl === 'string' && msg.audioUrl.startsWith('data:')) {
+        msg.audioUrl = '';
+      }
+    }
+  }
+});
+
 const InterviewSession = mongoose.model('InterviewSession', interviewSessionSchema);
 module.exports = InterviewSession;
+

@@ -12,7 +12,46 @@ import chatbotIcon from '../assets/icons/chatbot.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
 import { useAuth } from '../context/AuthContext'
 import { getInterviewSession, saveInterviewSession } from '../utils/interviewUtils'
+import Editor from '@monaco-editor/react'
 import './InterviewRoom.css'
+
+const CODE_STARTERS = {
+  javascript: `// Write your solution here
+function solution() {
+  console.log("Hello, HireMind!");
+}
+
+solution();
+`,
+  python: `# Write your solution here
+def solution():
+    print("Hello, HireMind!")
+
+if __name__ == "__main__":
+    solution()
+`,
+  typescript: `// Write your solution here
+function solution(): void {
+  console.log("Hello, HireMind!");
+}
+
+solution();
+`,
+  java: `public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello, HireMind!");
+    }
+}
+`,
+  cpp: `#include <iostream>
+using namespace std;
+
+int main() {
+    cout << "Hello, HireMind!" << endl;
+    return 0;
+}
+`,
+}
 
 export default function InterviewRoom() {
   const navigate = useNavigate()
@@ -76,13 +115,9 @@ export default function InterviewRoom() {
   // Dynamic Live Timer state (counts up from 0)
   const [secondsElapsed, setSecondsElapsed] = useState(0)
   const [isRecording, setIsRecording] = useState(true)
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setSecondsElapsed((prev) => prev + 1)
-    }, 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const [isPaused, setIsPaused] = useState(false)
+  const [isEndModalOpen, setIsEndModalOpen] = useState(false)
+  const [isEnding, setIsEnding] = useState(false)
 
   // Audio / Microphone hardware references
   const [isAudioOn, setIsAudioOn] = useState(true)
@@ -456,6 +491,162 @@ export default function InterviewRoom() {
   const [activeMobileTab, setActiveMobileTab] = useState('center')
   const transcriptEndRef = useRef(null)
   const hasInitializedRef = useRef(false)
+
+  // Dynamic Live Timer effect (pauses when isPaused or isCompleted)
+  useEffect(() => {
+    if (isPaused || isCompleted) return
+    const timer = setInterval(() => {
+      setSecondsElapsed((prev) => prev + 1)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [isPaused, isCompleted])
+
+  // Code Studio & Sandbox IDE State
+  const [isCodeStudioOpen, setIsCodeStudioOpen] = useState(false)
+  const [codeLanguage, setCodeLanguage] = useState('javascript')
+  const [codeContent, setCodeContent] = useState(CODE_STARTERS.javascript)
+  const [codeStdin, setCodeStdin] = useState('')
+  const [isStdinOpen, setIsStdinOpen] = useState(false)
+  const [codeExplanation, setCodeExplanation] = useState('')
+  const [codeOutput, setCodeOutput] = useState(null)
+  const [isCodeRunning, setIsCodeRunning] = useState(false)
+  const [isCodeSubmitting, setIsCodeSubmitting] = useState(false)
+  const hasAutoOpenedCodeRef = useRef(false)
+
+  const handleLanguageChange = (newLang) => {
+    setCodeLanguage(newLang)
+    if (!codeContent.trim() || Object.values(CODE_STARTERS).some((s) => s.trim() === codeContent.trim())) {
+      setCodeContent(CODE_STARTERS[newLang] || '')
+    }
+  }
+
+  const handleRunCode = async () => {
+    if (!codeContent.trim() || isCodeRunning) return
+    setIsCodeRunning(true)
+    setCodeOutput(null)
+
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/code/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({
+          code: codeContent,
+          language: codeLanguage,
+          stdin: codeStdin,
+        }),
+      })
+
+      const data = await res.json()
+      setCodeOutput(data)
+    } catch (err) {
+      console.warn('[InterviewRoom] Code execution error:', err)
+      setCodeOutput({
+        success: false,
+        stderr: 'Sandbox connection error: ' + (err.message || 'Execution failed'),
+        status: 'Error',
+      })
+    } finally {
+      setIsCodeRunning(false)
+    }
+  }
+
+  const handleSubmitCodeSolution = async () => {
+    if (!codeContent.trim() || isCodeSubmitting || isAiTyping || isCompleted) return
+    setIsCodeSubmitting(true)
+    stopCurrentAudio()
+
+    const candidateCodeMsg = {
+      id: `cand-code-${Date.now()}`,
+      sender: 'candidate',
+      senderName: user?.firstName || 'You',
+      time: formatTimer(secondsElapsed),
+      text: `Submitted ${codeLanguage.toUpperCase()} Solution`,
+      isCode: true,
+      codeSnippet: codeContent,
+      codeLanguage,
+      codeOutput: codeOutput?.stdout || codeOutput?.compile_output || codeOutput?.stderr || '',
+      explanation: codeExplanation,
+    }
+
+    setTranscriptMessages((prev) => [...prev, candidateCodeMsg])
+    setIsAiTyping(true)
+    setVoiceState(VOICE_STATES.AI_PROCESSING)
+
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(`http://localhost:5000/api/interview/${interviewId}/code/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({
+          code: codeContent,
+          language: codeLanguage,
+          explanation: codeExplanation,
+          runOutput: codeOutput?.stdout || codeOutput?.compile_output || codeOutput?.stderr || '',
+          durationSeconds: secondsElapsed,
+          mode: interviewMode,
+          includeAudio: interviewMode === 'voice',
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        if (data.interviewState) {
+          setInterviewState(data.interviewState)
+        }
+
+        if (data.nextQuestion) {
+          const aiMsgId = `ai-code-${Date.now()}`
+          const aiMsg = {
+            id: aiMsgId,
+            sender: 'ai',
+            senderName: 'HireMind AI Interviewer',
+            time: formatTimer(secondsElapsed + 2),
+            stage: data.stage || 'Evaluation & Next Stage',
+            text: data.nextQuestion,
+            isCodeReview: true,
+          }
+          setTranscriptMessages((prev) => [...prev, aiMsg])
+          setIsAiTyping(false)
+
+          if (data.audioUrl) {
+            audioCacheRef.current.set(aiMsgId, data.audioUrl)
+            playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
+          } else {
+            handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
+          }
+          return
+        }
+
+        if (data.isComplete) {
+          setIsCompleted(true)
+          setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+          setIsAiTyping(false)
+          return
+        }
+      } else {
+        throw new Error(`Server returned status ${res.status}`)
+      }
+    } catch (err) {
+      console.warn('[InterviewRoom] Code submission error:', err)
+      setVoiceError({
+        code: 'CODE_SUBMIT_FAILED',
+        message: 'Could not submit code solution to interviewer. Please retry.',
+        canRetry: true,
+        canSwitchToText: false,
+      })
+      setVoiceState(VOICE_STATES.ERROR)
+      setIsAiTyping(false)
+    } finally {
+      setIsCodeSubmitting(false)
+    }
+  }
 
   const formatTimer = (totalSeconds) => {
     const mins = Math.floor(totalSeconds / 60)
@@ -1155,44 +1346,104 @@ export default function InterviewRoom() {
     }
   }
 
-  // End Interview manually with backend tracking
-  const handleEndCall = async () => {
-    const confirmEnd = window.confirm(
-      'Are you sure you want to conclude this interview session? Your progress and transcript will be safely preserved.'
-    )
-    if (confirmEnd) {
-      stopCurrentAudio()
-      try {
-        const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-        await fetch(`http://localhost:5000/api/interview/${interviewId}/end`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
-          },
-        })
-      } catch (e) {
-        console.warn('Manual end call network notice:', e)
-      }
+  // Pause / Resume interview session
+  const handleTogglePause = () => {
+    if (isCompleted) return
 
-      if (interviewId && interviewId !== 'default') {
-        saveInterviewSession({
-          id: interviewId,
-          status: 'completed',
-          lastVisitedPath: `/interview-report?id=${interviewId}`,
-        })
+    if (!isPaused) {
+      stopCurrentAudio()
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop()
+        } catch (_) {}
       }
-      navigate(`/interview-report?id=${interviewId}`)
+      resetSilenceDetection()
+      setIsPaused(true)
+      setIsRecording(false)
+    } else {
+      setIsPaused(false)
+      setIsRecording(true)
+      if (interviewMode === 'voice' && !isVoiceMuted && !isAiTyping && !isCompleted) {
+        startVoiceListening()
+      }
     }
+  }
+
+  // Open modal to safely confirm interview conclusion mid-way or completely
+  const handleEndCall = () => {
+    setIsEndModalOpen(true)
+  }
+
+  // Execute interview conclusion and transition to evaluation report
+  const handleConfirmEndInterview = async () => {
+    setIsEnding(true)
+    stopCurrentAudio()
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch (_) {}
+    }
+    resetSilenceDetection()
+
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      await fetch(`http://localhost:5000/api/interview/${interviewId}/end`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+      })
+    } catch (e) {
+      console.warn('Manual end call network notice:', e)
+    }
+
+    if (interviewId && interviewId !== 'default') {
+      saveInterviewSession({
+        id: interviewId,
+        status: 'ended_by_user',
+        isEndedByUser: true,
+        lastVisitedPath: `/interview-report?id=${interviewId}`,
+      })
+    }
+
+    setIsEnding(false)
+    setIsEndModalOpen(false)
+    navigate(`/interview-report?id=${interviewId}`)
   }
 
   // Derive dynamic session information
   const candidateTurns = transcriptMessages.filter((m) => m.sender === 'candidate').length
-  const stages = session?.userFacingPlan?.stages || session?.interviewPlan?.stages || []
-  const currentStageIndex = Math.min(candidateTurns, Math.max(0, stages.length - 1))
+  const stages = session?.interviewPlan?.stages || session?.userFacingPlan?.stages || []
+  const currentStageIndex = typeof interviewState?.currentStageIndex === 'number'
+    ? interviewState.currentStageIndex
+    : (typeof session?.interviewState?.currentStageIndex === 'number'
+        ? session.interviewState.currentStageIndex
+        : Math.min(candidateTurns, Math.max(0, stages.length - 1)))
   const currentStage = stages[currentStageIndex] || null
   const currentStageNumber = currentStageIndex + 1
-  const totalStages = stages.length || 4
+  const totalStages = stages.length || 7
+
+  const isCodingStage = Boolean(
+    currentStage?.id === 'stage_coding' ||
+    currentStage?.name?.toLowerCase().includes('coding') ||
+    currentStage?.name?.toLowerCase().includes('problem solving') ||
+    currentStage?.topics?.some((t) =>
+      typeof t === 'string' && (
+        t.toLowerCase().includes('coding') ||
+        t.toLowerCase().includes('algorithm') ||
+        t.toLowerCase().includes('data structure')
+      )
+    )
+  )
+
+  // Auto-open Code Studio when first entering the Coding stage
+  useEffect(() => {
+    if (isCodingStage && !hasAutoOpenedCodeRef.current) {
+      hasAutoOpenedCodeRef.current = true
+      setIsCodeStudioOpen(true)
+    }
+  }, [isCodingStage])
 
   const displayRole = session?.targetRole || session?.resumeAnalysis?.detected_role || 'Software Engineer Intern'
   const displayCompany = session?.company || 'Target Company'
@@ -1294,12 +1545,21 @@ export default function InterviewRoom() {
         >
           AI Interview Chat
         </button>
+        {isCodeStudioOpen && (
+          <button
+            type="button"
+            className={`int-room-mobile-tab ${activeMobileTab === 'code' ? 'is-active' : ''}`}
+            onClick={() => setActiveMobileTab('code')}
+          >
+            💻 Code IDE
+          </button>
+        )}
       </div>
 
       {/* =====================================================================
-          MAIN COCKPIT WORKSPACE (2 Columns: Left Context + Center AI Chat Stage)
+          MAIN COCKPIT WORKSPACE (Left Context + Center AI Chat + Monaco Code Studio)
           ===================================================================== */}
-      <div className="int-room-workspace">
+      <div className={`int-room-workspace ${isCodeStudioOpen ? 'has-code-studio' : ''}`}>
         {/* ===================================================================
             COLUMN 1: Left Context & Question Progress Card
             =================================================================== */}
@@ -1308,15 +1568,27 @@ export default function InterviewRoom() {
             activeMobileTab === 'context' ? 'is-mobile-visible' : 'is-mobile-hidden'
           }`}
         >
-          {/* Top-Left Session Timer & End Call Action */}
+          {/* Top-Left Session Timer & Controls */}
           <div className="int-room-ctrl-row">
-            <div className={`int-room-rec-pill ${isRecording ? 'is-recording' : ''}`}>
+            <div className={`int-room-rec-pill ${isRecording && !isPaused ? 'is-recording' : 'is-paused'}`}>
               <span className="int-room-rec-dot-wrap">
                 <img src={recordingDotIcon} alt="REC" className="int-room-rec-dot" />
               </span>
-              <span className="int-room-rec-label">REC</span>
+              <span className="int-room-rec-label">{isPaused ? 'PAUSED' : 'REC'}</span>
               <span className="int-room-rec-time">{formatTimer(secondsElapsed)}</span>
             </div>
+
+            {/* Pause / Resume Button */}
+            <button
+              type="button"
+              className={`int-room-pause-btn ${isPaused ? 'is-active-paused' : ''}`}
+              onClick={handleTogglePause}
+              title={isPaused ? 'Resume Interview' : 'Pause Interview'}
+              aria-label={isPaused ? 'Resume Interview' : 'Pause Interview'}
+            >
+              <span className="int-room-pause-icon">{isPaused ? '▶' : '⏸'}</span>
+              <span className="int-room-pause-label">{isPaused ? 'Resume' : 'Pause'}</span>
+            </button>
 
             {/* Circular Red End-Call Button */}
             <button
@@ -1392,6 +1664,36 @@ export default function InterviewRoom() {
                 <p>{displayJd}</p>
               </div>
             </div>
+
+            {/* Interview Stages Roadmap */}
+            {stages.length > 0 && (
+              <div className="int-room-roadmap-group">
+                <div className="int-room-roadmap-header">
+                  <span className="int-room-roadmap-label">INTERVIEW ROADMAP</span>
+                  <span className="int-room-roadmap-counter">{currentStageNumber}/{totalStages}</span>
+                </div>
+                <div className="int-room-roadmap-list">
+                  {stages.map((stg, idx) => {
+                    const isPast = idx < currentStageIndex
+                    const isCurrent = idx === currentStageIndex
+                    return (
+                      <div
+                        key={stg.id || idx}
+                        className={`int-room-roadmap-item ${isPast ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''}`}
+                      >
+                        <div className="int-room-roadmap-step-circle">
+                          {isPast ? '✓' : idx + 1}
+                        </div>
+                        <div className="int-room-roadmap-text">
+                          <span className="int-room-roadmap-name">{stg.name || stg.title}</span>
+                          {isCurrent && <span className="int-room-roadmap-live-tag">Active</span>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -1428,6 +1730,41 @@ export default function InterviewRoom() {
                     <span className="int-room-stage-pill-title">{currentStage.name || currentStage.title}</span>
                   </div>
                 )}
+
+                {/* Code Studio IDE Toggle Button */}
+                <button
+                  type="button"
+                  className={`int-room-code-toggle-btn ${isCodeStudioOpen ? 'is-active' : ''} ${isCodingStage ? 'is-highlighted' : ''}`}
+                  onClick={() => setIsCodeStudioOpen((prev) => !prev)}
+                  title={isCodeStudioOpen ? 'Close Code Studio' : 'Open in-browser Code IDE'}
+                  aria-label="Toggle Code Editor"
+                >
+                  <span className="int-room-code-btn-icon">💻</span>
+                  <span>{isCodeStudioOpen ? 'Close IDE' : 'Code IDE'}</span>
+                  {isCodingStage && <span className="int-room-code-live-pill">Coding Task</span>}
+                </button>
+
+                {/* Stage Pause / Resume Button */}
+                <button
+                  type="button"
+                  className={`int-room-stage-pause-btn ${isPaused ? 'is-paused' : ''}`}
+                  onClick={handleTogglePause}
+                  title={isPaused ? 'Resume Interview' : 'Pause Interview'}
+                  aria-label="Pause or Resume Interview"
+                >
+                  <span>{isPaused ? '▶ Resume' : '⏸ Pause'}</span>
+                </button>
+
+                {/* Stage End Interview Button */}
+                <button
+                  type="button"
+                  className="int-room-stage-end-btn"
+                  onClick={handleEndCall}
+                  title="Conclude Interview & View Evaluation"
+                  aria-label="End Interview"
+                >
+                  <span>End Interview</span>
+                </button>
 
                 {/* Floating Microphone Action Button */}
                 <button
@@ -1546,6 +1883,26 @@ export default function InterviewRoom() {
 
             {/* Stage Messages Scroll Area */}
             <div className="int-room-stage-messages">
+              {/* Interactive Coding Task Banner */}
+              {isCodingStage && !isCodeStudioOpen && !isCompleted && (
+                <div className="int-room-coding-alert-banner">
+                  <div className="int-room-coding-alert-left">
+                    <span className="int-room-coding-alert-pulse">⚡</span>
+                    <div className="int-room-coding-alert-info">
+                      <strong>Interactive Coding Challenge Active</strong>
+                      <span>Solve the problem, test with custom inputs, and submit to the AI interviewer.</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="int-room-coding-alert-open-btn"
+                    onClick={() => setIsCodeStudioOpen(true)}
+                  >
+                    Open In-Browser IDE 💻
+                  </button>
+                </div>
+              )}
+
               {transcriptMessages.map((msg) => (
                 <div key={msg.id} className={`int-room-chat-msg ${msg.sender === 'candidate' ? 'is-candidate' : 'is-ai'}`}>
                   <div className={`int-room-chat-msg__avatar ${msg.sender === 'candidate' && user?.avatarUrl ? 'has-image' : ''}`}>
@@ -1565,20 +1922,42 @@ export default function InterviewRoom() {
                       {msg.stage && <span className="int-room-chat-msg__stage-tag">{msg.stage}</span>}
                       <span className="int-room-chat-msg__time">{msg.time}</span>
                     </div>
-                    <div className="int-room-chat-msg__bubble">
-                      <p className="int-room-chat-msg__text">{msg.text}</p>
-                      {/* Inline Audio Replay Button for AI Questions */}
-                      {msg.sender === 'ai' && (
-                        <button
-                          type="button"
-                          className={`int-room-inline-play-btn ${playingMessageId === msg.id ? 'is-playing' : ''}`}
-                          onClick={() => handleSynthesizeSpeech(msg.text, msg.id)}
-                          title={playingMessageId === msg.id ? 'Playing audio...' : 'Play question audio'}
-                        >
-                          <span>{playingMessageId === msg.id ? '🔊 Playing...' : '▶ Listen'}</span>
-                        </button>
-                      )}
-                    </div>
+
+                    {msg.isCode ? (
+                      <div className="int-room-chat-msg__bubble is-code-bubble">
+                        <div className="int-room-code-bubble-top">
+                          <span className="int-room-code-bubble-lang">{msg.codeLanguage?.toUpperCase() || 'CODE'}</span>
+                          <span className="int-room-code-bubble-badge">Submitted Solution</span>
+                        </div>
+                        {msg.explanation && (
+                          <p className="int-room-code-bubble-note">{msg.explanation}</p>
+                        )}
+                        <pre className="int-room-code-bubble-pre">
+                          <code>{msg.codeSnippet}</code>
+                        </pre>
+                        {msg.codeOutput && (
+                          <div className="int-room-code-bubble-output">
+                            <span className="int-room-code-bubble-out-title">Terminal Output:</span>
+                            <pre>{msg.codeOutput}</pre>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="int-room-chat-msg__bubble">
+                        <p className="int-room-chat-msg__text">{msg.text}</p>
+                        {/* Inline Audio Replay Button for AI Questions */}
+                        {msg.sender === 'ai' && (
+                          <button
+                            type="button"
+                            className={`int-room-inline-play-btn ${playingMessageId === msg.id ? 'is-playing' : ''}`}
+                            onClick={() => handleSynthesizeSpeech(msg.text, msg.id)}
+                            title={playingMessageId === msg.id ? 'Playing audio...' : 'Play question audio'}
+                          >
+                            <span>{playingMessageId === msg.id ? '🔊 Playing...' : '▶ Listen'}</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1832,6 +2211,219 @@ export default function InterviewRoom() {
             )}
           </div>
         </section>
+
+        {/* ===================================================================
+            COLUMN 3: In-Browser Interactive Code Studio (Monaco Editor & Sandbox)
+            =================================================================== */}
+        {isCodeStudioOpen && (
+          <section
+            className={`int-room-col int-room-col--code ${
+              activeMobileTab === 'code' ? 'is-mobile-visible' : ''
+            }`}
+          >
+            <div className="int-room-code-card">
+              {/* Code Studio Header */}
+              <div className="int-room-code-header">
+                <div className="int-room-code-header-left">
+                  <span className="int-room-code-title-icon">💻</span>
+                  <div>
+                    <div className="int-room-code-title">HireMind Code Studio</div>
+                    <div className="int-room-code-subtitle">In-Browser Sandbox • Judge0 CE Powered</div>
+                  </div>
+                </div>
+
+                <div className="int-room-code-header-right">
+                  {/* Language Selector */}
+                  <select
+                    className="int-room-code-lang-select"
+                    value={codeLanguage}
+                    onChange={(e) => handleLanguageChange(e.target.value)}
+                    aria-label="Programming Language"
+                  >
+                    <option value="javascript">JavaScript (Node.js)</option>
+                    <option value="python">Python 3</option>
+                    <option value="typescript">TypeScript</option>
+                    <option value="java">Java (OpenJDK)</option>
+                    <option value="cpp">C++ (GCC)</option>
+                  </select>
+
+                  {/* Reset Template */}
+                  <button
+                    type="button"
+                    className="int-room-code-ctrl-btn"
+                    onClick={() => {
+                      if (window.confirm('Reset code to starter boilerplate?')) {
+                        setCodeContent(CODE_STARTERS[codeLanguage] || '')
+                      }
+                    }}
+                    title="Reset code to starter boilerplate"
+                  >
+                    ↺ Reset
+                  </button>
+
+                  {/* Close Panel */}
+                  <button
+                    type="button"
+                    className="int-room-code-ctrl-btn is-close"
+                    onClick={() => setIsCodeStudioOpen(false)}
+                    title="Close Code Studio"
+                    aria-label="Close Code Studio"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Monaco Editor Container */}
+              <div className="int-room-monaco-wrap">
+                <Editor
+                  height="100%"
+                  language={codeLanguage === 'cpp' ? 'cpp' : codeLanguage}
+                  theme="vs-dark"
+                  value={codeContent}
+                  onChange={(val) => setCodeContent(val || '')}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 13,
+                    lineNumbers: 'on',
+                    roundedSelection: true,
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    tabSize: 2,
+                    wordWrap: 'on',
+                    padding: { top: 10, bottom: 10 },
+                  }}
+                />
+              </div>
+
+              {/* STDIN Collapsible Area */}
+              {isStdinOpen && (
+                <div className="int-room-stdin-drawer">
+                  <div className="int-room-stdin-title">Custom Input (STDIN):</div>
+                  <textarea
+                    className="int-room-stdin-input"
+                    rows="2"
+                    placeholder="Enter custom input / test parameters here..."
+                    value={codeStdin}
+                    onChange={(e) => setCodeStdin(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Execution & Submission Controls */}
+              <div className="int-room-code-actions">
+                <div className="int-room-code-actions-left">
+                  {/* Run Code Button */}
+                  <button
+                    type="button"
+                    className="int-room-run-code-btn"
+                    onClick={handleRunCode}
+                    disabled={isCodeRunning || !codeContent.trim()}
+                  >
+                    {isCodeRunning ? (
+                      <>
+                        <span className="int-room-spinner" />
+                        <span>Running...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>▶ Run Code</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Toggle STDIN */}
+                  <button
+                    type="button"
+                    className={`int-room-stdin-toggle-btn ${isStdinOpen ? 'is-open' : ''}`}
+                    onClick={() => setIsStdinOpen((prev) => !prev)}
+                  >
+                    STDIN {isStdinOpen ? '▲' : '▼'}
+                  </button>
+                </div>
+
+                <div className="int-room-code-actions-right">
+                  {/* Submit Solution to AI */}
+                  <button
+                    type="button"
+                    className="int-room-submit-code-btn"
+                    onClick={handleSubmitCodeSolution}
+                    disabled={isCodeSubmitting || isAiTyping || !codeContent.trim() || isCompleted}
+                    title="Submit your code to the AI interviewer for review and scoring"
+                  >
+                    {isCodeSubmitting ? (
+                      <>
+                        <span className="int-room-spinner" />
+                        <span>Submitting to AI...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>🚀 Submit Solution to AI</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Optional explanation / Big-O complexity */}
+              <div className="int-room-code-exp-row">
+                <input
+                  type="text"
+                  className="int-room-code-exp-input"
+                  placeholder="Optional: Explain your approach or Big-O complexity (e.g. O(N) time, O(1) space)..."
+                  value={codeExplanation}
+                  onChange={(e) => setCodeExplanation(e.target.value)}
+                  disabled={isCodeSubmitting || isCompleted}
+                />
+              </div>
+
+              {/* Terminal / Output Console */}
+              <div className="int-room-code-terminal">
+                <div className="int-room-terminal-header">
+                  <div className="int-room-terminal-title">
+                    <span className="int-room-term-dot" />
+                    <span>Terminal Output</span>
+                  </div>
+                  {codeOutput && (
+                    <div className="int-room-terminal-meta">
+                      <span className={`int-room-term-status ${codeOutput.success ? 'is-success' : 'is-error'}`}>
+                        {codeOutput.status || (codeOutput.success ? 'Success' : 'Failed')}
+                      </span>
+                      {codeOutput.time && <span className="int-room-term-metric">⏱ {codeOutput.time}s</span>}
+                      {codeOutput.memory && <span className="int-room-term-metric">💾 {codeOutput.memory} KB</span>}
+                    </div>
+                  )}
+                </div>
+                <div className="int-room-terminal-body">
+                  {isCodeRunning ? (
+                    <div className="int-room-term-placeholder is-running">
+                      <span className="int-room-spinner" /> Executing in isolated Judge0 sandbox...
+                    </div>
+                  ) : codeOutput ? (
+                    <div className="int-room-term-results">
+                      {codeOutput.stdout && (
+                        <pre className="int-room-term-stdout">{codeOutput.stdout}</pre>
+                      )}
+                      {codeOutput.compile_output && (
+                        <pre className="int-room-term-compile-err">{codeOutput.compile_output}</pre>
+                      )}
+                      {codeOutput.stderr && (
+                        <pre className="int-room-term-stderr">{codeOutput.stderr}</pre>
+                      )}
+                      {!codeOutput.stdout && !codeOutput.stderr && !codeOutput.compile_output && (
+                        <div className="int-room-term-placeholder">Process finished with no output.</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="int-room-term-placeholder">
+                      Click &quot;▶ Run Code&quot; to test your solution in the cloud sandbox.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
       </div>
 
       {/* =====================================================================
@@ -1929,6 +2521,101 @@ export default function InterviewRoom() {
           <div className="int-room-chat-body">
             <div className="int-room-chat-bubble bot">
               Tip for {displayRole}: Be sure to discuss both high-level design choices and low-level edge case handling!
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          PAUSE INTERVIEW OVERLAY MODAL
+          ===================================================================== */}
+      {isPaused && (
+        <div className="int-room-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-modal-title">
+          <div className="int-room-pause-modal">
+            <div className="int-room-pause-modal__icon-wrap">
+              <span className="int-room-pause-modal__badge-icon">⏸</span>
+            </div>
+            <div className="int-room-pause-modal__badge">Session Paused</div>
+            <h2 id="pause-modal-title" className="int-room-pause-modal__title">Interview Is On Pause</h2>
+            <p className="int-room-pause-modal__desc">
+              The clock, interviewer voice, and speech recognition are paused. Take a breath, prepare your thoughts, or review your notes.
+            </p>
+            <div className="int-room-pause-modal__status-box">
+              <div className="int-room-pause-modal__stat">
+                <span className="int-room-pause-modal__stat-label">Elapsed Time:</span>
+                <span className="int-room-pause-modal__stat-val">{formatTimer(secondsElapsed)}</span>
+              </div>
+              <div className="int-room-pause-modal__stat">
+                <span className="int-room-pause-modal__stat-label">Progress:</span>
+                <span className="int-room-pause-modal__stat-val">Stage {currentStageNumber} of {totalStages} ({currentStage?.name || 'In Progress'})</span>
+              </div>
+            </div>
+            <div className="int-room-pause-modal__actions">
+              <button
+                type="button"
+                className="int-room-pause-modal__resume-btn"
+                onClick={handleTogglePause}
+              >
+                ▶ Resume Interview
+              </button>
+              <button
+                type="button"
+                className="int-room-pause-modal__end-btn"
+                onClick={() => {
+                  setIsPaused(false)
+                  setIsEndModalOpen(true)
+                }}
+              >
+                End Interview & View Evaluation →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          END INTERVIEW CONFIRMATION MODAL (Mid-way or complete conclusion)
+          ===================================================================== */}
+      {isEndModalOpen && (
+        <div className="int-room-end-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="end-modal-title">
+          <div className="int-room-end-modal">
+            <div className="int-room-end-modal__icon-wrap">
+              <img src={callHangupIcon} alt="" className="int-room-end-modal__icon" />
+            </div>
+            <h2 id="end-modal-title" className="int-room-end-modal__title">Conclude Interview Session?</h2>
+            <p className="int-room-end-modal__desc">
+              Are you sure you want to end this interview? All questions and answers discussed so far
+              (<strong>Stage {currentStageNumber} of {totalStages}</strong>) will be safely preserved.
+            </p>
+            <div className="int-room-end-modal__ai-note">
+              <span className="int-room-end-modal__ai-sparkle">✨</span>
+              <span>
+                <strong>Comprehensive AI Evaluation:</strong> Our evaluation agent will thoroughly analyze all topics and answers covered during this session and generate your domain skill breakdown without penalizing for unreached stages.
+              </span>
+            </div>
+            <div className="int-room-end-modal__actions">
+              <button
+                type="button"
+                className="int-room-end-modal__cancel-btn"
+                onClick={() => setIsEndModalOpen(false)}
+                disabled={isEnding}
+              >
+                Keep Practicing
+              </button>
+              <button
+                type="button"
+                className="int-room-end-modal__confirm-btn"
+                onClick={handleConfirmEndInterview}
+                disabled={isEnding}
+              >
+                {isEnding ? (
+                  <span className="int-room-end-modal__loading">
+                    <span className="int-room-spinner" /> Concluding Session...
+                  </span>
+                ) : (
+                  'Conclude & View Evaluation →'
+                )}
+              </button>
             </div>
           </div>
         </div>

@@ -98,7 +98,7 @@ class InterviewPlannerAgent:
         "   - 'Role-Specific': Emphasize core role skills, candidate projects, and specific JD competencies.\n"
         "   - 'Case & Situational': Emphasize real-world problem scenarios, trade-offs, and critical decision-making.\n"
         "   - 'Skills Assessment': Emphasize technical breadth, practical knowledge, and core architectural principles.\n"
-        "   - 'Full Interview': A balanced journey covering Intro, Experience & Projects, Technical Core, Problem Solving, Behavioral, and Closing.\n"
+        "   - 'Full Interview': A comprehensive 360-degree journey explicitly covering: 1. Intro & Role Context, 2. CV Project Architecture Deep Dive (Directly name a real project from candidate's CV), 3. Role-Based Theory & Core Principles (Foundational concepts, DB indexing, concurrency, memory, network, design patterns), 4. Case Study & System Troubleshooting (Real-world outage, latency spike, architectural trade-offs, scaling bottleneck), 5. Interactive Coding Challenge & Problem Solving (For technical roles: provide a coding problem with starter code & test constraints; For non-technical: practical domain logic challenge), 6. Industry General Knowledge (GK) & Behavioral Fit (Tech trends, ecosystem choices, cross-functional collaboration), 7. Wrap-up & Candidate Q&A.\n"
         "6. Calibrate question count and depth to the selected duration and difficulty:\n"
         "   - 15 min: 4-6 questions across 3-4 stages.\n"
         "   - 30 min: 8-12 questions across 5-6 stages.\n"
@@ -685,8 +685,103 @@ class InterviewPlannerAgent:
                         questionIntents=["Evaluate self-reflection and answer questions about the role"]
                     ),
                 ]
+            elif interview_type == "Full Interview":
+                # Comprehensive Full Interview: Project -> Theory -> Scenario -> Coding/Logic -> GK/Behavioral -> Closing
+                is_tech = candidate.get("is_technical_role", True)
+                coding_stage_name = "Interactive Coding Challenge" if is_tech else "Domain Logic & Analytical Challenge"
+                coding_topics = ["Data Structures & Algorithms", "Clean Code Implementation"] if is_tech else ["Quantitative Analysis", "Structured Logic"]
+                coding_intents = [
+                    "Present coding problem for candidate to write, run, and submit in the Code Editor",
+                    "Evaluate correctness, time/space complexity, and code quality"
+                ] if is_tech else ["Present domain analytical puzzle and evaluate reasoning"]
+
+                stages = [
+                    StageSchema(
+                        id="stage_intro",
+                        name="Introduction & Role Context",
+                        order=1,
+                        durationMinutes=2,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Candidate Profile", "Role Overview"],
+                        objectives=["Set conversational tone and outline agenda"],
+                        questionIntents=["Brief review of background and role interest"]
+                    ),
+                    StageSchema(
+                        id="stage_experience",
+                        name="CV Project Architecture Deep Dive",
+                        order=2,
+                        durationMinutes=5,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=[f"{project_name} Architecture", "Engineering Trade-offs"],
+                        objectives=["Directly probe architecture and implementation choices in candidate resume project"],
+                        questionIntents=[
+                            f"Explore architecture, data flow, and tech stack choices in {project_name}",
+                            "Discuss challenges faced and how candidate solved bottlenecks"
+                        ]
+                    ),
+                    StageSchema(
+                        id="stage_theory",
+                        name="Role-Based Theory & Core Principles",
+                        order=3,
+                        durationMinutes=5,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=[all_skills[0]] + (all_skills[1:3] if len(all_skills) > 1 else ["Core Principles"]),
+                        objectives=["Validate core theoretical depth (indexing, concurrency, memory, network protocols)"],
+                        questionIntents=[
+                            f"Probe intermediate principles of {all_skills[0]}",
+                            "Assess practical application and foundational knowledge"
+                        ]
+                    ),
+                    StageSchema(
+                        id="stage_scenario",
+                        name="Case Study & System Troubleshooting",
+                        order=4,
+                        durationMinutes=5,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=["Real-world Scenario", "Troubleshooting"],
+                        objectives=["Assess root cause analysis, incident response, and edge case resilience"],
+                        questionIntents=["Present a realistic high-stakes workplace or production issue and evaluate reasoning"]
+                    ),
+                    StageSchema(
+                        id="stage_coding",
+                        name=coding_stage_name,
+                        order=5,
+                        durationMinutes=7,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=coding_topics,
+                        objectives=["Assess hands-on coding, algorithmic problem-solving, and time/space complexity"],
+                        questionIntents=coding_intents
+                    ),
+                    StageSchema(
+                        id="stage_gk_behavioral",
+                        name="Industry GK, Trends & Collaboration",
+                        order=6,
+                        durationMinutes=4,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Industry Trends & Ecosystem", "Collaboration & Conflict"],
+                        objectives=["Evaluate domain awareness, technology trends, and interpersonal fit"],
+                        questionIntents=["Ask about modern industry trends, trade-offs, and team collaboration"]
+                    ),
+                    StageSchema(
+                        id="stage_closing",
+                        name="Summary & Candidate Questions",
+                        order=7,
+                        durationMinutes=2,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Role Expectations", "Candidate Q&A"],
+                        objectives=["Conclude interview professionally and address candidate questions"],
+                        questionIntents=["Invite candidate questions and provide clear closing summary"]
+                    ),
+                ]
             else:
-                # Role-Specific / Full Interview / Skills Assessment (Default)
+                # Role-Specific / Skills Assessment (Default)
                 stages = [
                     StageSchema(
                         id="stage_intro",

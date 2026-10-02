@@ -17,6 +17,8 @@ const {
   getOrGenerateEvaluation,
   transcribeCandidateVoice,
   synthesizeInterviewerSpeech,
+  runCode,
+  submitCodeSolution,
 } = require('../controllers/interviewController');
 
 // Multer memory storage configuration for PDF / DOCX files up to 10MB
@@ -80,6 +82,8 @@ router.post('/:sessionId/begin', optionalProtect, beginLiveInterview);
 router.post('/:sessionId/answer', optionalProtect, submitLiveAnswer);
 router.post('/:sessionId/voice/transcribe', optionalProtect, audioUpload.single('audio'), transcribeCandidateVoice);
 router.post('/:sessionId/voice/speech', optionalProtect, synthesizeInterviewerSpeech);
+router.post('/:sessionId/code/run', optionalProtect, runCode);
+router.post('/:sessionId/code/submit', optionalProtect, submitCodeSolution);
 router.post('/:sessionId/end', optionalProtect, manualEndLiveInterview);
 router.post('/:sessionId/chat', optionalProtect, sendChatMessage);
 router.get('/:sessionId/evaluation', optionalProtect, getOrGenerateEvaluation);
