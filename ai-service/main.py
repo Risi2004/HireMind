@@ -4,8 +4,11 @@ FastAPI Application hosting Google ADK Orchestrator
 
 import sys
 import os
+import logging
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger("HireMindAIService")
 
 # Automatically ensure the script runs inside the project's .venv virtual environment
 venv_dir = Path(__file__).resolve().parent / ".venv"
