@@ -41,6 +41,7 @@ export default function Navbar({
           onKeyDown={(e) => e.key === 'Enter' && navigate(logoRedirect)}
         >
           <img src={brandMarkImg} alt="HireMind" className="app-navbar__logo" />
+          <span className="app-navbar__version">v1.0.0</span>
         </div>
 
         {leftBadge && (

@@ -444,12 +444,108 @@ const sendDemoAccessGrantedEmail = async (
   return true;
 };
 
+/**
+ * Sends an email notification to candidate when their demo interview access is revoked/cancelled.
+ *
+ * @param {string} email
+ * @param {string} firstName
+ * @param {string} reason
+ */
+const sendDemoAccessRevokedEmail = async (email, firstName = 'Candidate', reason = '') => {
+  const clientUrl = getClientUrl();
+  const supportEmail = process.env.SUPPORT_EMAIL || 'support@hiremind.com';
+  const dashboardLink = `${clientUrl}/dashboard`;
+  const transporter = getTransporter();
+
+  const cleanReason = reason && reason !== 'Cancelled by administrator' && reason !== 'Revoked by administrator'
+    ? reason.trim()
+    : 'Your demo preview period has concluded or was updated by an administrator.';
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 40px 20px; }
+          .container { max-width: 560px; margin: 0 auto; background: #1e293b; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); padding: 38px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+          .logo { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; color: #60a5fa; margin-bottom: 20px; display: inline-block; }
+          .badge { display: inline-block; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+          .title { font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 14px; line-height: 1.3; }
+          .text { font-size: 14px; line-height: 1.6; color: #94a3b8; margin-bottom: 20px; }
+          .reason-card { background: #0f172a; border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 12px; padding: 20px; margin-bottom: 24px; text-align: left; }
+          .reason-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #ef4444; font-weight: 700; margin-bottom: 6px; }
+          .reason-text { font-size: 14px; color: #e2e8f0; line-height: 1.5; }
+          .info-box { background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 18px 20px; margin-bottom: 28px; }
+          .info-title { font-size: 13px; font-weight: 600; color: #cbd5e1; margin-bottom: 8px; }
+          .info-desc { font-size: 13px; color: #94a3b8; line-height: 1.5; margin: 0; }
+          .btn-container { text-align: center; margin: 28px 0 20px; }
+          .btn { display: inline-block; background: linear-gradient(135deg, #334155, #1e293b); color: #ffffff !important; border: 1px solid rgba(255,255,255,0.15); text-decoration: none; font-weight: 600; font-size: 14px; padding: 13px 30px; border-radius: 10px; }
+          .footer { font-size: 12px; color: #475569; text-align: center; margin-top: 32px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">HireMind</div>
+          <div><span class="badge">Demo Access Notice</span></div>
+          <div class="title">AI Mock Interview Demo Access Concluded</div>
+          <p class="text">Hi ${firstName},</p>
+          <p class="text">This notice is to inform you that your temporary demo account access for HireMind's AI Mock Interview has been concluded or revoked by an administrator.</p>
+
+          <div class="reason-card">
+            <div class="reason-label">Notice Details</div>
+            <div class="reason-text">${cleanReason}</div>
+          </div>
+
+          <div class="info-box">
+            <div class="info-title">What happens next?</div>
+            <p class="info-desc">
+              Your profile, saved resume, interview history, and past evaluation performance reports remain accessible on your candidate dashboard. Full platform access for AI Mock Interviews will be expanding soon.
+            </p>
+          </div>
+
+          <div class="btn-container">
+            <a href="${dashboardLink}" class="btn">Go to Candidate Dashboard &rarr;</a>
+          </div>
+
+          <div class="footer">
+            &copy; ${new Date().getFullYear()} HireMind. All rights reserved. <br/>
+            Need more information or wish to request renewed access? Contact an administrator or email <a href="mailto:${supportEmail}" style="color: #60a5fa;">${supportEmail}</a>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  if (!transporter) {
+    console.log('\n=============================================');
+    console.log(`[HireMind Email] (Dev Mock Mode) Demo Access Revoked sent to ${email}`);
+    console.log(`[HireMind Email] Reason: ${cleanReason}`);
+    console.log('=============================================\n');
+    return true;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || '"HireMind Support" <noreply@hiremind.com>',
+      to: email,
+      subject: 'HireMind: Update Regarding Your AI Interview Demo Access',
+      html: htmlContent,
+    });
+  } catch (err) {
+    console.error('[Email Service] Failed to send demo access revoked email:', err.message);
+  }
+
+  return true;
+};
+
 module.exports = {
   sendOtpEmail,
   sendOnboardingEmail,
   sendPasswordResetOtpEmail,
   sendAccountDeletionEmail,
   sendDemoAccessGrantedEmail,
+  sendDemoAccessRevokedEmail,
 };
 
 

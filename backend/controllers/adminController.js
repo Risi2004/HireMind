@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const InterviewSession = require('../models/InterviewSession');
-const { sendDemoAccessGrantedEmail } = require('../services/emailService');
+const { sendDemoAccessGrantedEmail, sendDemoAccessRevokedEmail } = require('../services/emailService');
 const realtimeService = require('../services/realtimeService');
 
 /**
@@ -311,6 +311,15 @@ const cancelDemoAccess = async (req, res) => {
         remainingInterviews: 0,
         notes: user.demoAccess?.notes,
       },
+    });
+
+    // Send demo access revoked notification email to candidate
+    sendDemoAccessRevokedEmail(
+      user.email,
+      user.firstName,
+      reason
+    ).catch((emailErr) => {
+      console.error('[Admin Controller] Error sending demo access revoked email:', emailErr.message);
     });
 
     return res.status(200).json({
