@@ -594,16 +594,24 @@ export function AuthProvider({ children }) {
         headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
       })
       const data = await res.json()
-      if (data.success && user) {
-        const curDemo = user.demoAccess || {}
-        const hasChanged =
-          Boolean(curDemo.enabled) !== Boolean(data.hasDemoAccess) ||
-          Number(curDemo.allowedInterviews || 0) !== Number(data.allowedInterviews || 0) ||
-          Number(curDemo.completedInterviews || 0) !== Number(data.completedInterviews || 0)
+      if (data.success) {
+        setUser((prev) => {
+          if (!prev) return prev
+          const curDemo = prev.demoAccess || {}
+          const hasChanged =
+            Boolean(curDemo.enabled) !== Boolean(data.hasDemoAccess) ||
+            Number(curDemo.allowedInterviews || 0) !== Number(data.allowedInterviews || 0) ||
+            Number(curDemo.completedInterviews || 0) !== Number(data.completedInterviews || 0) ||
+            (data.isProfileSetupCompleted !== undefined && Boolean(prev.isProfileSetupCompleted) !== Boolean(data.isProfileSetupCompleted))
 
-        if (hasChanged) {
+          if (!hasChanged) return prev
+
+          // Preserve completed profile setup flag (never revert to false on demo sync)
+          const isSetupDone = Boolean(data.isProfileSetupCompleted ?? prev.isProfileSetupCompleted)
+
           const updatedUser = {
-            ...user,
+            ...prev,
+            isProfileSetupCompleted: isSetupDone,
             demoAccess: {
               ...curDemo,
               enabled: Boolean(data.hasDemoAccess),
@@ -612,9 +620,9 @@ export function AuthProvider({ children }) {
               notes: data.notes || curDemo.notes || '',
             },
           }
-          setUser(updatedUser)
           localStorage.setItem('hiremind_user', JSON.stringify(updatedUser))
-        }
+          return updatedUser
+        })
       }
       return data
     } catch {
