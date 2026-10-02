@@ -17,23 +17,40 @@ export default function InterviewAccessGate({ children }) {
   } = useAuth()
 
   const navigate = useNavigate()
-  const [checking, setChecking] = useState(false)
+  // Only show checking state initially if the candidate is not yet recognized as authorized
+  const [checking, setChecking] = useState(() => !isAdmin && !canAccessInterview)
 
-  // Verify access with backend on initial navigation to interview routes
+  // Verify access with backend on initial navigation to interview routes (run ONCE on mount with safety timeout)
   useEffect(() => {
     let isMounted = true
-    if (user && !isAdmin) {
-      setChecking(true)
-      checkInterviewAccessStatus().finally(() => {
-        if (isMounted) setChecking(false)
-      })
+    // Safety timeout: Never leave user stuck on spinner if network is slow or sleeping
+    const timer = setTimeout(() => {
+      if (isMounted) setChecking(false)
+    }, 2500)
+
+    if (!isAdmin && !canAccessInterview) {
+      checkInterviewAccessStatus()
+        .catch(() => {})
+        .finally(() => {
+          if (isMounted) setChecking(false)
+        })
+    } else {
+      setChecking(false)
     }
+
     return () => {
       isMounted = false
+      clearTimeout(timer)
     }
-  }, [user, isAdmin])
+  }, []) // Empty dependency array: run once on mount
 
-  if (loading || checking) {
+  // 1. Authorized (Admin or Demo User with remaining quota) -> Render Interview Page Immediately
+  if (canAccessInterview) {
+    return children ? children : <Outlet />
+  }
+
+  // 2. Initial verification spinner with timeout guarantee
+  if (checking) {
     return (
       <div className="access-gate-container">
         <div style={{ textAlign: 'center', color: '#94a3b8' }}>
@@ -55,12 +72,7 @@ export default function InterviewAccessGate({ children }) {
     )
   }
 
-  // 1. Authorized (Admin or Demo User with remaining quota) -> Render Interview Page
-  if (canAccessInterview) {
-    return children ? children : <Outlet />
-  }
-
-  // 2. User has Demo Access enabled, but reached their interview attempt limit
+  // 3. User has Demo Access enabled, but reached their interview attempt limit
   const isQuotaReached = hasDemoAccess && remainingInterviews === 0
 
   return (

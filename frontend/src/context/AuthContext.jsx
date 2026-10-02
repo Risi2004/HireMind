@@ -595,20 +595,26 @@ export function AuthProvider({ children }) {
       })
       const data = await res.json()
       if (data.success && user) {
-        // Immediately sync local state so navigation gates block without delay
-        const updatedUser = {
-          ...user,
-          demoAccess: {
-            ...(user.demoAccess || {}),
-            enabled: typeof data.hasDemoAccess !== 'undefined' ? data.hasDemoAccess : user.demoAccess?.enabled,
-            allowedInterviews: typeof data.allowedInterviews !== 'undefined' ? data.allowedInterviews : user.demoAccess?.allowedInterviews,
-            completedInterviews: typeof data.completedInterviews !== 'undefined' ? data.completedInterviews : user.demoAccess?.completedInterviews,
-            notes: data.notes || user.demoAccess?.notes || '',
-          },
+        const curDemo = user.demoAccess || {}
+        const hasChanged =
+          Boolean(curDemo.enabled) !== Boolean(data.hasDemoAccess) ||
+          Number(curDemo.allowedInterviews || 0) !== Number(data.allowedInterviews || 0) ||
+          Number(curDemo.completedInterviews || 0) !== Number(data.completedInterviews || 0)
+
+        if (hasChanged) {
+          const updatedUser = {
+            ...user,
+            demoAccess: {
+              ...curDemo,
+              enabled: Boolean(data.hasDemoAccess),
+              allowedInterviews: Number(data.allowedInterviews) || 0,
+              completedInterviews: Number(data.completedInterviews) || 0,
+              notes: data.notes || curDemo.notes || '',
+            },
+          }
+          setUser(updatedUser)
+          localStorage.setItem('hiremind_user', JSON.stringify(updatedUser))
         }
-        setUser(updatedUser)
-        localStorage.setItem('hiremind_user', JSON.stringify(updatedUser))
-        refreshUser()
       }
       return data
     } catch {
