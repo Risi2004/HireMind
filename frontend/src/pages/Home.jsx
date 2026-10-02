@@ -303,7 +303,7 @@ export default function Home() {
         <div className="hm-navbar__inner">
           <div className="hm-navbar__brand" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
             <img src={logoDarkImg} alt="HireMind" className="hm-navbar__logo" />
-            <span className="hm-navbar__version">v1.0.0</span>
+            <span className="hm-navbar__version">v0.9.0</span>
           </div>
 
           <nav className="hm-navbar__nav" aria-label="Main Navigation">
