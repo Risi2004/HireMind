@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
-import { Link, useNavigate, Outlet } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useState, useEffect, useEffectEvent } from 'react'
+import { Link, Outlet } from 'react-router-dom'
+import { useAuth } from '../context/useAuth'
 import './InterviewAccessGate.css'
 
 export default function InterviewAccessGate({ children }) {
@@ -13,14 +13,18 @@ export default function InterviewAccessGate({ children }) {
     completedInterviews,
     remainingInterviews,
     checkInterviewAccessStatus,
-    loading,
   } = useAuth()
 
-  const navigate = useNavigate()
   // Only show checking state initially if the candidate is not yet recognized as authorized
   const [checking, setChecking] = useState(() => !isAdmin && !canAccessInterview)
 
-  // Verify access with backend on initial navigation to interview routes (run ONCE on mount with safety timeout)
+  // Reads the latest auth values without making the mount-only effect below re-run
+  const verifyAccess = useEffectEvent(async () => {
+    if (isAdmin || canAccessInterview) return
+    await checkInterviewAccessStatus()
+  })
+
+  // Verify access with backend on initial navigation to interview routes (once, with a safety timeout)
   useEffect(() => {
     let isMounted = true
     // Safety timeout: Never leave user stuck on spinner if network is slow or sleeping
@@ -28,21 +32,17 @@ export default function InterviewAccessGate({ children }) {
       if (isMounted) setChecking(false)
     }, 2500)
 
-    if (!isAdmin && !canAccessInterview) {
-      checkInterviewAccessStatus()
-        .catch(() => {})
-        .finally(() => {
-          if (isMounted) setChecking(false)
-        })
-    } else {
-      setChecking(false)
-    }
+    verifyAccess()
+      .catch(() => {})
+      .finally(() => {
+        if (isMounted) setChecking(false)
+      })
 
     return () => {
       isMounted = false
       clearTimeout(timer)
     }
-  }, []) // Empty dependency array: run once on mount
+  }, [])
 
   // 1. Authorized (Admin or Demo User with remaining quota) -> Render Interview Page Immediately
   if (canAccessInterview) {

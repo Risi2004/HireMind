@@ -1,10 +1,18 @@
-import { createContext, useContext, useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useEffectEvent, useMemo } from 'react'
+import { AuthContext } from './authContextObject'
 import { getApiUrl } from '../config/api'
 
 // Helper for making API calls with dynamic backend base URL (Method 2)
 const apiFetch = (endpoint, options) => fetch(getApiUrl(endpoint), options)
 
-const AuthContext = createContext(null)
+// Fetch the signed-in user's profile (no React state; callers apply the result)
+async function requestCurrentUser(token) {
+  const res = await apiFetch('/api/auth/me', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  const data = await res.json().catch(() => ({}))
+  return { ok: res.ok, status: res.status, user: data.user || null }
+}
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem('hiremind_token') || null)
@@ -163,7 +171,8 @@ export function AuthProvider({ children }) {
   }
 
   // Enable 2FA: verifies 6-digit TOTP code and configures frequency preference
-  const enable2FA = async (secret, code, frequency = 'always', customToken = null) => {
+  // `currentCode` is required by the server when 2FA is already on (reconfiguring a device)
+  const enable2FA = async (secret, code, frequency = 'always', customToken = null, currentCode = null) => {
     const activeToken = customToken || token
     if (!activeToken) {
       throw new Error('You must be signed in to activate two-factor authentication')
@@ -177,7 +186,7 @@ export function AuthProvider({ children }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${activeToken}`,
         },
-        body: JSON.stringify({ secret, code, frequency }),
+        body: JSON.stringify({ secret, code, frequency, ...(currentCode ? { currentCode } : {}) }),
       })
 
       const data = await res.json()
@@ -201,7 +210,8 @@ export function AuthProvider({ children }) {
   }
 
   // Disable 2FA: deactivates two-factor authentication for the account
-  const disable2FA = async () => {
+  // Disable 2FA requires a current 6-digit authenticator code (proves possession of the device)
+  const disable2FA = async (code) => {
     if (!token) {
       throw new Error('You must be signed in to disable two-factor authentication')
     }
@@ -214,6 +224,7 @@ export function AuthProvider({ children }) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({ code }),
       })
 
       const data = await res.json()
@@ -329,27 +340,29 @@ export function AuthProvider({ children }) {
   }
 
   // Refresh user data from /api/auth/me
+  // Apply a /api/auth/me result to state
+  const applyCurrentUser = ({ ok, status, user: freshUser }) => {
+    if (ok && freshUser) {
+      setUser(freshUser)
+      localStorage.setItem('hiremind_user', JSON.stringify(freshUser))
+      return freshUser
+    }
+    // Token is stale/invalid (e.g. after switching databases) — clear it cleanly
+    if (status === 401 || status === 403 || status === 404) {
+      console.warn('[Auth] Stale token detected — clearing session')
+      saveAuthSession(null, null)
+    }
+    return null
+  }
+
   const refreshUser = async () => {
     if (!token) return null
     try {
-      const res = await apiFetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await res.json()
-      if (res.ok && data.user) {
-        setUser(data.user)
-        localStorage.setItem('hiremind_user', JSON.stringify(data.user))
-        return data.user
-      }
-      // Token is stale/invalid (e.g. after switching databases) — clear it cleanly
-      if (res.status === 401 || res.status === 403 || res.status === 404) {
-        console.warn('[Auth] Stale token detected — clearing session')
-        saveAuthSession(null, null)
-      }
+      return applyCurrentUser(await requestCurrentUser(token))
     } catch (e) {
       console.warn('Failed to refresh user:', e.message)
+      return null
     }
-    return null
   }
 
   // Update Profile fields
@@ -548,12 +561,23 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  // If token exists on mount but user object is not yet loaded, refresh from /api/auth/me
+  // If a token exists but the user object is not loaded yet, load it from /api/auth/me
+  const needsUserLoad = Boolean(token && !user)
+  const applyLoadedUser = useEffectEvent((result) => {
+    applyCurrentUser(result)
+  })
   useEffect(() => {
-    if (token && !user) {
-      refreshUser()
+    if (!needsUserLoad) return undefined
+    let ignore = false
+    requestCurrentUser(token)
+      .then((result) => {
+        if (!ignore) applyLoadedUser(result)
+      })
+      .catch((e) => console.warn('Failed to load user:', e.message))
+    return () => {
+      ignore = true
     }
-  }, [token])
+  }, [needsUserLoad, token])
 
   const isAdmin = useMemo(() => {
     return user?.role === 'admin' || user?.email === 'admin@gmail.com'
@@ -658,8 +682,22 @@ export function AuthProvider({ children }) {
 
   // Live Real-Time Stream (Server-Sent Events) & Cross-Tab Sync for Demo Access updates
   // (candidates only — admins have unrestricted access and must not react to their own broadcasts)
+  const currentUserId = String(user?._id || user?.id || '')
+
+  // Effect events always see the latest state/helpers without re-opening the SSE connection
+  const syncAccessStatus = useEffectEvent(() => {
+    checkInterviewAccessStatus()
+  })
+  const applyLiveDemoUpdate = useEffectEvent((payload) => {
+    if (payload?.demoAccess) {
+      updateDemoQuota(payload.demoAccess)
+    }
+    checkInterviewAccessStatus()
+    window.dispatchEvent(new CustomEvent('hiremind_demo_access_live_updated', { detail: payload }))
+  })
+
   useEffect(() => {
-    if (!token || !user || isAdmin) return
+    if (!token || !currentUserId || isAdmin) return
 
     let eventSource = null
     let pollInterval = null
@@ -674,16 +712,9 @@ export function AuthProvider({ children }) {
         eventSource.addEventListener('demo_access_changed', (evt) => {
           try {
             const payload = JSON.parse(evt.data)
-            const currentId = (user._id || user.id || '').toString()
-            if (payload.userId && payload.userId.toString() === currentId) {
+            if (payload.userId && payload.userId.toString() === currentUserId) {
               console.log('[RealTime SSE] Received live demo access update:', payload)
-              if (payload.demoAccess) {
-                updateDemoQuota(payload.demoAccess)
-              }
-              checkInterviewAccessStatus()
-              window.dispatchEvent(
-                new CustomEvent('hiremind_demo_access_live_updated', { detail: payload })
-              )
+              applyLiveDemoUpdate(payload)
             }
           } catch (e) {
             console.warn('[RealTime SSE] Parse error:', e)
@@ -700,21 +731,20 @@ export function AuthProvider({ children }) {
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
         broadcastChannel = new BroadcastChannel('hiremind_demo_sync')
         broadcastChannel.onmessage = (msg) => {
-          const currentId = (user._id || user.id || '').toString()
-          if (!msg.data || !msg.data.userId || msg.data.userId.toString() === currentId) {
-            checkInterviewAccessStatus()
+          if (!msg.data || !msg.data.userId || msg.data.userId.toString() === currentUserId) {
+            syncAccessStatus()
             window.dispatchEvent(
               new CustomEvent('hiremind_demo_access_live_updated', { detail: msg.data })
             )
           }
         }
       }
-    } catch (_) {}
+    } catch { /* non-critical; safe to ignore */ }
 
     // 3. Storage event sync
     const handleStorage = (e) => {
       if (e.key === 'hiremind_demo_sync' && e.newValue) {
-        checkInterviewAccessStatus()
+        syncAccessStatus()
       }
     }
     window.addEventListener('storage', handleStorage)
@@ -723,20 +753,18 @@ export function AuthProvider({ children }) {
     // and instant refresh on window focus / tab visibility
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        checkInterviewAccessStatus()
+        syncAccessStatus()
       }
     }
     const handleFocus = () => {
-      checkInterviewAccessStatus()
+      syncAccessStatus()
     }
     window.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('focus', handleFocus)
 
-    if (!isAdmin) {
-      pollInterval = setInterval(() => {
-        checkInterviewAccessStatus()
-      }, 4000)
-    }
+    pollInterval = setInterval(() => {
+      syncAccessStatus()
+    }, 4000)
 
     return () => {
       if (eventSource) eventSource.close()
@@ -746,57 +774,46 @@ export function AuthProvider({ children }) {
       window.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleFocus)
     }
-  }, [token, user?._id, user?.id, isAdmin])
+  }, [token, currentUserId, isAdmin])
 
-  const value = useMemo(
-    () => ({
-      user,
-      token,
-      isAuthenticated: Boolean(token || user),
-      isAdmin,
-      demoAccess,
-      hasDemoAccess,
-      allowedInterviews,
-      completedInterviews,
-      remainingInterviews,
-      canAccessInterview,
-      checkInterviewAccessStatus,
-      updateDemoQuota,
-      loading,
-      login,
-      register,
-      verifyOtp,
-      resendOtp,
-      setup2FA,
-      enable2FA,
-      disable2FA,
-      verify2FALogin,
-      forgotPassword,
-      resetPassword,
-      deleteAccount,
-      logout,
-      setUser,
-      refreshUser,
-      updateUserProfile,
-      uploadUserResume,
-      deleteUserResume,
-      uploadUserAvatar,
-      connectUserGithub,
-      disconnectUserGithub,
-      updateUserSkills,
-      updateUserInterests,
-      updateUserLinkedin,
-    }),
-    [user, token, loading, canAccessInterview, hasDemoAccess, allowedInterviews, completedInterviews, remainingInterviews]
-  )
+  const value = {
+    user,
+    token,
+    isAuthenticated: Boolean(token || user),
+    isAdmin,
+    demoAccess,
+    hasDemoAccess,
+    allowedInterviews,
+    completedInterviews,
+    remainingInterviews,
+    canAccessInterview,
+    checkInterviewAccessStatus,
+    updateDemoQuota,
+    loading,
+    login,
+    register,
+    verifyOtp,
+    resendOtp,
+    setup2FA,
+    enable2FA,
+    disable2FA,
+    verify2FALogin,
+    forgotPassword,
+    resetPassword,
+    deleteAccount,
+    logout,
+    setUser,
+    refreshUser,
+    updateUserProfile,
+    uploadUserResume,
+    deleteUserResume,
+    uploadUserAvatar,
+    connectUserGithub,
+    disconnectUserGithub,
+    updateUserSkills,
+    updateUserInterests,
+    updateUserLinkedin,
+  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider')
-  }
-  return context
 }

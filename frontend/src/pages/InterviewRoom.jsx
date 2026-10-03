@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useEffectEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import recordingDotIcon from '../assets/icons/recording.svg'
 import callHangupIcon from '../assets/icons/call.svg'
-import videoIcon from '../assets/icons/video.svg'
 import audioIcon from '../assets/icons/audio.svg'
 import attachmentIcon from '../assets/icons/attachment.svg'
 import sendIcon from '../assets/icons/send.svg'
@@ -10,7 +9,7 @@ import tick2Icon from '../assets/icons/tick2.svg'
 import company1Icon from '../assets/icons/company1.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { getInterviewSession, saveInterviewSession } from '../utils/interviewUtils'
 import { getApiUrl } from '../config/api'
 import Editor from '@monaco-editor/react'
@@ -54,6 +53,24 @@ int main() {
 `,
 }
 
+const VOICE_STATES = {
+  INITIALIZING: 'INITIALIZING',
+  INTERVIEWER_SPEAKING: 'INTERVIEWER_SPEAKING',
+  WAITING_FOR_CANDIDATE: 'WAITING_FOR_CANDIDATE',
+  CANDIDATE_SPEAKING: 'CANDIDATE_SPEAKING',
+  TRANSCRIBING: 'TRANSCRIBING',
+  AI_PROCESSING: 'AI_PROCESSING',
+  INTERVIEW_COMPLETE: 'INTERVIEW_COMPLETE',
+  ERROR: 'ERROR',
+}
+
+let messageIdCounter = 0
+// Unique client-side id for transcript messages
+const createMessageId = (prefix) => {
+  messageIdCounter += 1
+  return `${prefix}-${Date.now().toString(36)}-${messageIdCounter}`
+}
+
 export default function InterviewRoom() {
   const navigate = useNavigate()
   const { token, id } = useParams()
@@ -69,24 +86,16 @@ export default function InterviewRoom() {
 
   // Track dynamic session details
   const [session, setSession] = useState(() => getInterviewSession(interviewId) || {})
-  const [isLoadingSession, setIsLoadingSession] = useState(true)
 
   useEffect(() => {
     if (!interviewId || interviewId === 'default') {
-      setIsLoadingSession(false)
       return
     }
 
     // Keep active session ID saved in browser storage
     localStorage.setItem('hiremind_last_interview_id', interviewId)
 
-    // 1. Load from local cache first
-    const local = getInterviewSession(interviewId)
-    if (local) {
-      setSession(local)
-    }
-
-    // 2. Fetch fresh dynamic data from backend API
+    // Fetch fresh dynamic data from backend API (local cache is the initial state)
     const fetchRemoteSession = async () => {
       try {
         const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
@@ -110,8 +119,6 @@ export default function InterviewRoom() {
         if (err.name !== 'AbortError') {
           console.warn('[InterviewRoom] Remote session fetch notice:', err)
         }
-      } finally {
-        setIsLoadingSession(false)
       }
     }
 
@@ -155,7 +162,7 @@ export default function InterviewRoom() {
       if (mediaStreamRef.current) {
         try {
           mediaStreamRef.current.getTracks().forEach((t) => t.stop())
-        } catch (_) {}
+        } catch { /* non-critical; safe to ignore */ }
         mediaStreamRef.current = null
       }
 
@@ -224,7 +231,7 @@ export default function InterviewRoom() {
         mediaStreamRef.current.getAudioTracks().forEach((track) => {
           track.stop()
         })
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
       mediaStreamRef.current = null
     }
     if (animFrameRef.current) {
@@ -249,52 +256,10 @@ export default function InterviewRoom() {
   }
 
 
-  // Cleanup on unmount only
-  useEffect(() => {
-    return () => {
-      isTerminatedRef.current = true
-      stopCurrentAudio()
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try { window.speechSynthesis.cancel() } catch (_) {}
-      }
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.onresult = null
-          recognitionRef.current.onerror = null
-          recognitionRef.current.onend = null
-          recognitionRef.current.abort()
-        } catch (_) {}
-        recognitionRef.current = null
-      }
-      if (inFlightAbortControllerRef.current) {
-        try { inFlightAbortControllerRef.current.abort() } catch (_) {}
-      }
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close().catch(() => {})
-      }
-      if (mediaStreamRef.current) {
-        try {
-          mediaStreamRef.current.getTracks().forEach((track) => track.stop())
-        } catch (_) {}
-      }
-      resetSilenceDetection()
-    }
-  }, [])
 
   /* =========================================================================
      VOICE INTERVIEW ARCHITECTURE & STATE MACHINE
      ========================================================================= */
-  const VOICE_STATES = {
-    INITIALIZING: 'INITIALIZING',
-    INTERVIEWER_SPEAKING: 'INTERVIEWER_SPEAKING',
-    WAITING_FOR_CANDIDATE: 'WAITING_FOR_CANDIDATE',
-    CANDIDATE_SPEAKING: 'CANDIDATE_SPEAKING',
-    TRANSCRIBING: 'TRANSCRIBING',
-    AI_PROCESSING: 'AI_PROCESSING',
-    INTERVIEW_COMPLETE: 'INTERVIEW_COMPLETE',
-    ERROR: 'ERROR',
-  }
 
   // Interview Mode: 'voice' | 'text'
   const [interviewMode, setInterviewMode] = useState('voice')
@@ -305,7 +270,6 @@ export default function InterviewRoom() {
 
   const [voiceState, setVoiceState] = useState(VOICE_STATES.INITIALIZING)
   const [voiceError, setVoiceError] = useState(null)
-  const [lastTranscript, setLastTranscript] = useState('')
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [playingMessageId, setPlayingMessageId] = useState(null)
 
@@ -352,20 +316,20 @@ export default function InterviewRoom() {
         currentAudioPlayerRef.current.currentTime = 0
         currentAudioPlayerRef.current.src = ''
         currentAudioPlayerRef.current.load()
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
       currentAudioPlayerRef.current = null
     }
     if (currentUtteranceRef.current) {
       try {
         currentUtteranceRef.current.onend = null
         currentUtteranceRef.current.onerror = null
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
       currentUtteranceRef.current = null
     }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel()
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
     }
     setPlayingMessageId(null)
   }
@@ -418,7 +382,7 @@ export default function InterviewRoom() {
           }
           window.speechSynthesis.speak(utterance)
           return
-        } catch (_) {
+        } catch {
           currentUtteranceRef.current = null
         }
       }
@@ -467,7 +431,7 @@ export default function InterviewRoom() {
             }
             window.speechSynthesis.speak(utterance)
             return
-          } catch (_) {
+          } catch {
             currentUtteranceRef.current = null
           }
         }
@@ -497,7 +461,7 @@ export default function InterviewRoom() {
             }
             window.speechSynthesis.speak(utterance)
             return
-          } catch (_) {
+          } catch {
             currentUtteranceRef.current = null
           }
         }
@@ -642,7 +606,7 @@ export default function InterviewRoom() {
     stopCurrentAudio()
 
     const candidateCodeMsg = {
-      id: `cand-code-${Date.now()}`,
+      id: createMessageId('cand-code'),
       sender: 'candidate',
       senderName: user?.firstName || 'You',
       time: formatTimer(secondsElapsed),
@@ -689,7 +653,7 @@ export default function InterviewRoom() {
         }
 
         if (data.nextQuestion) {
-          const aiMsgId = `ai-code-${Date.now()}`
+          const aiMsgId = createMessageId('ai-code')
           const aiMsg = {
             id: aiMsgId,
             sender: 'ai',
@@ -764,12 +728,12 @@ export default function InterviewRoom() {
           const ctx = new AudioCtx()
           if (ctx.state === 'suspended') ctx.resume()
         }
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
 
       // Prompt and initialize microphone
       try {
         await startMicrophone()
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
 
       // Directly start asking questions and automatically read aloud
       await startOrResumeInterview('voice', true)
@@ -804,7 +768,7 @@ export default function InterviewRoom() {
 
         if (data.chatMessages && data.chatMessages.length > 0) {
           const mapped = data.chatMessages.map((m, idx) => ({
-            id: m._id || `msg-${idx}-${Date.now()}`,
+            id: m._id || createMessageId(`msg-${idx}`),
             sender: m.role === 'candidate' ? 'candidate' : 'ai',
             senderName: m.role === 'candidate' ? (user?.firstName || 'You') : 'HireMind AI Interviewer',
             time: new Date(m.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -823,7 +787,7 @@ export default function InterviewRoom() {
             setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
           }
         } else if (data.question) {
-          const openMsgId = `ai-open-${Date.now()}`
+          const openMsgId = createMessageId('ai-open')
           setTranscriptMessages([
             {
               id: openMsgId,
@@ -855,60 +819,59 @@ export default function InterviewRoom() {
   }
 
   // Session check on load: if brand new interview, ask user whether they want Voice or Text
+  const checkInitialSession = useEffectEvent(async () => {
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}`), {
+        headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        const sess = data.session || data
+        if (sess) {
+          if (sess.interviewState?.status === 'completed' || sess.interviewState?.status === 'ended_by_user') {
+            setIsCompleted(true)
+            setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+            if (sess.chatMessages) {
+              const mapped = sess.chatMessages.map((m, idx) => ({
+                id: m._id || createMessageId(`msg-${idx}`),
+                sender: m.role === 'candidate' ? 'candidate' : 'ai',
+                senderName: m.role === 'candidate' ? (user?.firstName || 'You') : 'HireMind AI Interviewer',
+                time: new Date(m.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                stage: m.metrics?.stageName || null,
+                text: m.content,
+              }))
+              setTranscriptMessages(mapped)
+            }
+            return
+          }
+
+          const candidateMsgs = (sess.chatMessages || []).filter((m) => m.role === 'candidate')
+          const savedMode = sessionStorage.getItem(`hiremind_mode_${interviewId}`)
+
+          if (candidateMsgs.length > 0 || savedMode) {
+            // Resuming ongoing session with previous candidate interaction
+            const modeToUse = savedMode || 'voice'
+            setInterviewMode(modeToUse)
+            startOrResumeInterview(modeToUse, false)
+            return
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[InterviewRoom] Initial check error:', err)
+    }
+
+    // Fresh interview: prompt user with Voice vs Text Modal
+    setIsModeModalOpen(true)
+  })
+
   useEffect(() => {
     if (!interviewId || interviewId === 'default' || hasInitializedRef.current) return
     hasInitializedRef.current = true
-
-    const checkInitialSession = async () => {
-      try {
-        const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-        const res = await fetch(getApiUrl(`/api/interview/${interviewId}`), {
-          headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
-        })
-
-        if (res.ok) {
-          const data = await res.json()
-          const sess = data.session || data
-          if (sess) {
-            if (sess.interviewState?.status === 'completed' || sess.interviewState?.status === 'ended_by_user') {
-              setIsCompleted(true)
-              setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
-              if (sess.chatMessages) {
-                const mapped = sess.chatMessages.map((m, idx) => ({
-                  id: m._id || `msg-${idx}-${Date.now()}`,
-                  sender: m.role === 'candidate' ? 'candidate' : 'ai',
-                  senderName: m.role === 'candidate' ? (user?.firstName || 'You') : 'HireMind AI Interviewer',
-                  time: new Date(m.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                  stage: m.metrics?.stageName || null,
-                  text: m.content,
-                }))
-                setTranscriptMessages(mapped)
-              }
-              return
-            }
-
-            const candidateMsgs = (sess.chatMessages || []).filter((m) => m.role === 'candidate')
-            const savedMode = sessionStorage.getItem(`hiremind_mode_${interviewId}`)
-
-            if (candidateMsgs.length > 0 || savedMode) {
-              // Resuming ongoing session with previous candidate interaction
-              const modeToUse = savedMode || 'voice'
-              setInterviewMode(modeToUse)
-              startOrResumeInterview(modeToUse, false)
-              return
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[InterviewRoom] Initial check error:', err)
-      }
-
-      // Fresh interview: prompt user with Voice vs Text Modal
-      setIsModeModalOpen(true)
-    }
-
     checkInitialSession()
-  }, [interviewId, user?.firstName])
+  }, [interviewId])
 
   // Auto-scroll chat on new message
   useEffect(() => {
@@ -931,7 +894,7 @@ export default function InterviewRoom() {
     stopCurrentAudio()
 
     const candidateMsg = {
-      id: `cand-${Date.now()}`,
+      id: createMessageId('cand'),
       sender: 'candidate',
       senderName: user?.firstName || 'You',
       time: formatTimer(secondsElapsed),
@@ -975,7 +938,7 @@ export default function InterviewRoom() {
         }
 
         if (data.nextQuestion) {
-          const aiMsgId = `ai-${Date.now()}`
+          const aiMsgId = createMessageId('ai')
           const aiMsg = {
             id: aiMsgId,
             sender: 'ai',
@@ -1109,7 +1072,7 @@ export default function InterviewRoom() {
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop()
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
       recognitionRef.current = null
     }
 
@@ -1164,7 +1127,7 @@ export default function InterviewRoom() {
       if (SpeechRecognition) {
         try {
           if (recognitionRef.current) {
-            try { recognitionRef.current.stop() } catch (_) {}
+            try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
           }
 
           const recognition = new SpeechRecognition()
@@ -1205,7 +1168,7 @@ export default function InterviewRoom() {
             ) {
               try {
                 recognitionRef.current.start()
-              } catch (_) {}
+              } catch { /* non-critical; safe to ignore */ }
             }
           }
 
@@ -1215,7 +1178,7 @@ export default function InterviewRoom() {
             console.warn('[WebSpeech] SpeechRecognition start warning, retrying:', recStartErr)
             setTimeout(() => {
               if (!isVoiceMutedRef.current && voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
-                try { recognition.start() } catch (_) {}
+                try { recognition.start() } catch { /* non-critical; safe to ignore */ }
               }
             }, 150)
           }
@@ -1321,7 +1284,7 @@ export default function InterviewRoom() {
           mediaStreamRef.current.getAudioTracks().forEach((track) => {
             track.enabled = true
           })
-        } catch (_) {}
+        } catch { /* non-critical; safe to ignore */ }
         if (
           voiceStateRef.current !== VOICE_STATES.AI_PROCESSING &&
           voiceStateRef.current !== VOICE_STATES.TRANSCRIBING &&
@@ -1340,13 +1303,13 @@ export default function InterviewRoom() {
           mediaStreamRef.current.getAudioTracks().forEach((track) => {
             track.enabled = false
           })
-        } catch (_) {}
+        } catch { /* non-critical; safe to ignore */ }
       }
       if (recognitionRef.current) {
-        try { recognitionRef.current.stop() } catch (_) {}
+        try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
       }
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        try { mediaRecorderRef.current.stop() } catch (_) {}
+        try { mediaRecorderRef.current.stop() } catch { /* non-critical; safe to ignore */ }
       }
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current)
@@ -1397,7 +1360,6 @@ export default function InterviewRoom() {
       return
     }
 
-    setLastTranscript(trimmed)
     updateLiveTranscript('')
     submitCandidateAnswer(trimmed, 'voice', recordingSeconds)
   }
@@ -1450,7 +1412,6 @@ export default function InterviewRoom() {
         return
       }
 
-      setLastTranscript(transcript)
       submitCandidateAnswer(transcript, 'voice', durationSnapshot, data.latencyMs)
     } catch (err) {
       console.warn('[VoiceMode] STT processing error:', err)
@@ -1473,7 +1434,7 @@ export default function InterviewRoom() {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop()
-        } catch (_) {}
+        } catch { /* non-critical; safe to ignore */ }
       }
       resetSilenceDetection()
       setIsPaused(true)
@@ -1492,10 +1453,10 @@ export default function InterviewRoom() {
     // Immediately silence any interviewer voice playback and pause speech recognition
     stopCurrentAudio()
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch (_) {}
+      try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
     }
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch (_) {}
+      try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
     }
     resetSilenceDetection()
     setIsEndModalOpen(true)
@@ -1519,12 +1480,12 @@ export default function InterviewRoom() {
     // 2. Kill all active voice, speech synthesis, and audio buffers
     stopCurrentAudio()
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch (_) {}
+      try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
     }
 
     // 3. Abort in-flight network requests (AI turns, speech synth, code executions)
     if (inFlightAbortControllerRef.current) {
-      try { inFlightAbortControllerRef.current.abort() } catch (_) {}
+      try { inFlightAbortControllerRef.current.abort() } catch { /* non-critical; safe to ignore */ }
       inFlightAbortControllerRef.current = new AbortController()
     }
 
@@ -1535,7 +1496,7 @@ export default function InterviewRoom() {
         recognitionRef.current.onerror = null
         recognitionRef.current.onend = null
         recognitionRef.current.abort()
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
       recognitionRef.current = null
     }
 
@@ -1545,7 +1506,7 @@ export default function InterviewRoom() {
         mediaRecorderRef.current.ondataavailable = null
         mediaRecorderRef.current.onstop = null
         mediaRecorderRef.current.stop()
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
       mediaRecorderRef.current = null
     }
 
@@ -1553,13 +1514,13 @@ export default function InterviewRoom() {
     if (mediaStreamRef.current) {
       try {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop())
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
       mediaStreamRef.current = null
     }
 
     // 7. Close audio context
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      try { audioContextRef.current.close().catch(() => {}) } catch (_) {}
+      try { audioContextRef.current.close().catch(() => {}) } catch { /* non-critical; safe to ignore */ }
       audioContextRef.current = null
     }
 
@@ -1568,10 +1529,6 @@ export default function InterviewRoom() {
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = null
-    }
-    if (timerRef.current) {
-      clearInterval(timerRef.current)
-      timerRef.current = null
     }
 
     // 9. Resolve authoritative target session ID
@@ -1616,13 +1573,46 @@ export default function InterviewRoom() {
     // 11. Final voice kill before navigation
     stopCurrentAudio()
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch (_) {}
+      try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
     }
 
     setIsEnding(false)
     setIsEndModalOpen(false)
     navigate(`/interview-report?id=${targetSessionId}`, { replace: true })
   }
+
+  // Cleanup on unmount only (declared after the refs and helpers it uses)
+  useEffect(() => {
+    return () => {
+      isTerminatedRef.current = true
+      stopCurrentAudio()
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onresult = null
+          recognitionRef.current.onerror = null
+          recognitionRef.current.onend = null
+          recognitionRef.current.abort()
+        } catch { /* non-critical; safe to ignore */ }
+        recognitionRef.current = null
+      }
+      if (inFlightAbortControllerRef.current) {
+        try { inFlightAbortControllerRef.current.abort() } catch { /* non-critical; safe to ignore */ }
+      }
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(() => {})
+      }
+      if (mediaStreamRef.current) {
+        try {
+          mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+        } catch { /* non-critical; safe to ignore */ }
+      }
+      resetSilenceDetection()
+    }
+  }, [])
 
   // Derive dynamic session information
   const candidateTurns = transcriptMessages.filter((m) => m.sender === 'candidate').length

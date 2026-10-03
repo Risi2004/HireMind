@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import brandMarkImg from '../assets/images/3.png'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import ProfileDropdown from './ProfileDropdown'

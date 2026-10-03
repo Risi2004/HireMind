@@ -15,6 +15,400 @@ import {
 import './AdminPage.css'
 import './AdminInterviews.css'
 
+// ========================================================================
+// MOCK INTERVIEW SESSIONS DATASET
+// ========================================================================
+const mockSessions = [
+  {
+    id: 'SES-8901',
+    participant: 'Jazeel K.',
+    email: 'jazeel@example.com',
+    avatar: 'J',
+    isDemo: false,
+    role: 'Senior Backend Engineer',
+    company: 'Microsoft',
+    type: 'Technical',
+    date: 'Sep 22, 2026',
+    rawDate: '2026-09-22',
+    startTime: '14:15 UTC',
+    duration: '34 min',
+    questionsCount: '5 / 5',
+    status: 'Completed',
+    overallScore: 82,
+    evaluation: {
+      communication: 86,
+      answerRelevance: 84,
+      technicalKnowledge: 82,
+      overallPerformance: 84,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'Welcome Jazeel! Could you briefly introduce yourself and highlight a complex backend architecture you designed recently?',
+        answer:
+          'Hello! I am a software engineer specializing in high-throughput backend services. Recently, I built an asynchronous data ingestion platform using Spring Boot and Kafka that processes 25,000 webhook events per second with Redis caching for idempotent deduplication.',
+      },
+      {
+        qNum: 2,
+        question:
+          'How did you guarantee zero message loss and handle write amplification when Redis cache evictions occur?',
+        answer:
+          'We implemented a write-behind pattern with a Dead Letter Queue (DLQ) in Kafka. For write amplification, we batched Redis pipeline writes into chunks of 100 keys and used TTL-based expiration with probabilistic early expiration to avoid cache stampedes.',
+      },
+      {
+        qNum: 3,
+        question:
+          'Let us discuss concurrency: How would you architect a distributed lock across multiple Spring Boot microservice replicas?',
+        answer:
+          'I would leverage Redlock algorithm with Redis or distributed leases via PostgreSQL advisory locks if Redis persistence is insufficient. We also enforce token renewal heartbeats to guard against slow network partitions prematurely releasing the lock.',
+      },
+    ],
+    feedbackSummary:
+      'Candidate demonstrated strong command over distributed caching principles, concurrency controls, and asynchronous messaging pipelines with Spring Boot. Articulated trade-offs clearly under probing questions.',
+    strengths: [
+      'Deep architectural understanding of Redis write patterns & cache stampede mitigation',
+      'Structured and calm reasoning when challenged on concurrency failure modes',
+      'High technical fluency matching Senior Staff expectations',
+    ],
+    improvements: [
+      'Could provide more concrete memory sizing calculations when configuring Redis clusters',
+      'Mention distributed tracing (OpenTelemetry/Jaeger) during failure recovery walkthroughs',
+    ],
+    recommendation: 'Strong Hire • Proceed to Onsite Loop',
+  },
+  {
+    id: 'SES-8902',
+    participant: 'Alexander Chen',
+    email: 'alex.chen@tech.org',
+    avatar: 'A',
+    isDemo: true,
+    role: 'Staff Infrastructure Architect',
+    company: 'Google Cloud',
+    type: 'System Design',
+    date: 'Sep 22, 2026',
+    rawDate: '2026-09-22',
+    startTime: '12:30 UTC',
+    duration: '48 min',
+    questionsCount: '6 / 6',
+    status: 'Completed',
+    overallScore: 92,
+    evaluation: {
+      communication: 94,
+      answerRelevance: 95,
+      technicalKnowledge: 90,
+      overallPerformance: 93,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'Welcome Alexander. Design a globally distributed key-value store that supports multi-region read replicas with configurable consistency.',
+        answer:
+          'To meet this requirement, I would structure the cluster into primary consensus groups per partition using Raft, complemented by asynchronously replicated read-replicas across edge POPs using CRDTs or vector clocks for conflict-free resolution.',
+      },
+      {
+        qNum: 2,
+        question:
+          'How would you handle cross-continental network partitions without violating availability for read operations?',
+        answer:
+          'We degrade consistency gracefully: local read replicas serve stale reads with bounded staleness guarantees (e.g. max 500ms lag). Clients requesting strict linearizability wait on quorum acks from the primary partition leader.',
+      },
+      {
+        qNum: 3,
+        question:
+          'Walk me through LSM-Tree compaction strategies when write throughput exceeds 500MB/s per storage node.',
+        answer:
+          'I would switch from size-tiered compaction to leveled compaction with tiered SSTables at Level 0 to minimize write amplification. We also allocate dedicated NVMe write buffers and throttle incoming writes before memory exhaustion occurs.',
+      },
+    ],
+    feedbackSummary:
+      'Exceptional system design mastery. The candidate demonstrated flawless knowledge of consensus algorithms, multi-region failover, and storage engine internals.',
+    strengths: [
+      'Exemplary command of CAP trade-offs, Raft consensus, and bounded staleness',
+      'Crystal-clear communication and structured architectural drawings',
+      'Real-world operational awareness regarding NVMe saturation and SSTable compaction',
+    ],
+    improvements: [
+      'Could elaborate on cold-tier object storage archiving policies for multi-year compliance data',
+    ],
+    recommendation: 'Exceptional • Fast-Track Staff Level Offer',
+  },
+  {
+    id: 'SES-8903',
+    participant: 'Michael Vance',
+    email: 'm.vance@tech.co',
+    avatar: 'M',
+    isDemo: false,
+    role: 'Full Stack Engineer',
+    company: 'Stripe',
+    type: 'Technical',
+    date: 'Sep 22, 2026',
+    rawDate: '2026-09-22',
+    startTime: '11:00 UTC',
+    duration: '18 min',
+    questionsCount: '3 / 5',
+    status: 'In Progress',
+    overallScore: null,
+    evaluation: {
+      communication: 80,
+      answerRelevance: 78,
+      technicalKnowledge: 82,
+      overallPerformance: 80,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'Let us discuss webhook reliability: How do you prevent duplicate charge processing when an upstream payment gateway retries a webhook?',
+        answer:
+          'We record unique transaction idempotency keys in a database with a unique constraint. If a duplicate arrives, the handler returns 200 OK immediately with the cached previous payment response.',
+      },
+      {
+        qNum: 2,
+        question:
+          'What happens if the database write times out after the external charge has been made but before your status records update?',
+        answer:
+          'We use a two-phase status model with state machine transitions (Pending -> Confirmed -> Settled) and a reconciliation worker that queries the gateway audit endpoint periodically.',
+      },
+    ],
+    feedbackSummary: 'Session currently active in progress. Candidate is tackling Question 3.',
+    strengths: ['Clear grasp of payment idempotency keys and state machine transitions'],
+    improvements: ['Pending session completion for comprehensive analysis'],
+    recommendation: 'In Progress',
+  },
+  {
+    id: 'SES-8904',
+    participant: 'David Kim',
+    email: 'dkim99@gmail.com',
+    avatar: 'D',
+    isDemo: false,
+    role: 'Junior Full Stack Developer',
+    company: 'Meta',
+    type: 'Technical',
+    date: 'Sep 21, 2026',
+    rawDate: '2026-09-21',
+    startTime: '16:40 UTC',
+    duration: '08 min',
+    questionsCount: '1 / 5',
+    status: 'Failed',
+    overallScore: 42,
+    evaluation: {
+      communication: 55,
+      answerRelevance: 48,
+      technicalKnowledge: 45,
+      overallPerformance: 49,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'Can you explain the Virtual DOM in React and why keys are necessary when rendering dynamic lists?',
+        answer:
+          'The Virtual DOM is a lightweight copy of the real DOM. Keys help React identify which items have changed or removed so it does not re-render the whole list.',
+      },
+    ],
+    feedbackSummary:
+      'Session terminated prematurely due to client-side network disconnection during question 2. Marked as failed session drop.',
+    strengths: ['Understood high-level purpose of React list keys'],
+    improvements: ['Session was dropped before technical evaluation could be completed'],
+    recommendation: 'Incomplete Session • Allow Reschedule',
+  },
+  {
+    id: 'SES-8905',
+    participant: 'Sarah Jenkins',
+    email: 'sarah.j@outlook.com',
+    avatar: 'S',
+    isDemo: false,
+    role: 'Engineering Manager',
+    company: 'Uber',
+    type: 'Behavioral',
+    date: 'Sep 21, 2026',
+    rawDate: '2026-09-21',
+    startTime: '15:10 UTC',
+    duration: '45 min',
+    questionsCount: '5 / 5',
+    status: 'Completed',
+    overallScore: 88,
+    evaluation: {
+      communication: 92,
+      answerRelevance: 89,
+      technicalKnowledge: 84,
+      overallPerformance: 88,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'Tell me about a time when a critical project deadline was at risk due to misalignment between Product and Engineering.',
+        answer:
+          'At my previous company, PM wanted to launch 4 additional features two weeks prior to GA. I organized an emergency triage session, quantified technical debt risk, and negotiated a phased rollout where the P0 core launched on time and the rest followed in Sprint 2.',
+      },
+      {
+        qNum: 2,
+        question:
+          'How do you manage a low-performing senior engineer on a business-critical path without hurting team morale?',
+        answer:
+          'I hold 1-on-1 private root cause discussions. I set clear 30-day deliverables with measurable checkpoints and pair them with an empathetic lead while clarifying expectations objectively.',
+      },
+      {
+        qNum: 3,
+        question:
+          'How do you foster an engineering culture that balances technical excellence with business speed?',
+        answer:
+          'We institute the "20% technical health" policy into every sprint backlog. Refactoring and tech debt cleanup are treated as first-class citizens alongside new product roadmap epics.',
+      },
+    ],
+    feedbackSummary:
+      'Outstanding leadership and behavioral acumen. Articulated pragmatic conflict resolution frameworks, structured empathy, and deep technical empathy.',
+    strengths: [
+      'Structured STAR storytelling methodology throughout all behavioral answers',
+      'Demonstrated strong negotiation balance between product velocity and technical stability',
+      'Mature perspective on talent management and performance calibration',
+    ],
+    improvements: [
+      'Could include more specific metrics on team retention and sprint velocity post-interventions',
+    ],
+    recommendation: 'Strong Hire • Engineering Manager Role Approved',
+  },
+  {
+    id: 'SES-8906',
+    participant: 'Priya Sharma',
+    email: 'priya.s@design.io',
+    avatar: 'P',
+    isDemo: false,
+    role: 'Senior Product Designer',
+    company: 'Airbnb',
+    type: 'Behavioral',
+    date: 'Sep 20, 2026',
+    rawDate: '2026-09-20',
+    startTime: '10:00 UTC',
+    duration: '40 min',
+    questionsCount: '5 / 5',
+    status: 'Completed',
+    overallScore: 85,
+    evaluation: {
+      communication: 90,
+      answerRelevance: 86,
+      technicalKnowledge: 82,
+      overallPerformance: 86,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'How do you advocate for accessibility and universal design when stakeholders push back citing engineering deadlines?',
+        answer:
+          'I bring real user session recordings and explain that accessible design expands our total addressable market while improving SEO and overall usability for everyone.',
+      },
+    ],
+    feedbackSummary: 'Strong design leadership and user empathy demonstrated.',
+    strengths: ['Great articulation of design systems and accessibility impact'],
+    improvements: ['Provide more data on conversion metrics influenced by design updates'],
+    recommendation: 'Hire • Product Design Lead',
+  },
+  {
+    id: 'SES-8907',
+    participant: 'Chloe Vance',
+    email: 'chloe@stripe.com',
+    avatar: 'C',
+    isDemo: true,
+    role: 'Payments Infrastructure Engineer',
+    company: 'Stripe (Pilot)',
+    type: 'Technical',
+    date: 'Sep 19, 2026',
+    rawDate: '2026-09-19',
+    startTime: '14:00 UTC',
+    duration: '44 min',
+    questionsCount: '5 / 5',
+    status: 'Completed',
+    overallScore: 90,
+    evaluation: {
+      communication: 91,
+      answerRelevance: 92,
+      technicalKnowledge: 89,
+      overallPerformance: 91,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'How do you architect banking webhook reconciliation when partners send delayed callbacks up to 48 hours later?',
+        answer:
+          'We store asynchronous job tickets in an event log with exponential backoff retries and auto-trigger balance verifications upon callback arrival.',
+      },
+    ],
+    feedbackSummary: 'Excellent payment systems infrastructure evaluation.',
+    strengths: ['Deep domain knowledge of banking callbacks and idempotency'],
+    improvements: ['Minor pauses when discussing edge latency spikes'],
+    recommendation: 'Strong Hire • Senior Payment Engineer',
+  },
+  {
+    id: 'SES-8908',
+    participant: 'Liam O’Connor',
+    email: 'liam@atlassian.com',
+    avatar: 'L',
+    isDemo: true,
+    role: 'Principal Architect',
+    company: 'Atlassian (Pilot)',
+    type: 'System Design',
+    date: 'Sep 18, 2026',
+    rawDate: '2026-09-18',
+    startTime: '09:30 UTC',
+    duration: '50 min',
+    questionsCount: '5 / 5',
+    status: 'Completed',
+    overallScore: 94,
+    evaluation: {
+      communication: 95,
+      answerRelevance: 96,
+      technicalKnowledge: 93,
+      overallPerformance: 95,
+    },
+    conversation: [
+      {
+        qNum: 1,
+        question:
+          'How would you migrate a monolith serving 50M daily active users to a multi-tenant microservices topology with zero downtime?',
+        answer:
+          'We use the Strangler Fig pattern behind an intelligent API Gateway routing traffic by feature flag. We synchronize dual writes with shadow validation before deprecating monolithic endpoints.',
+      },
+    ],
+    feedbackSummary: 'Flawless execution on complex migration architecture.',
+    strengths: ['Strangler Fig mastery, canary deployments, zero-downtime database cutovers'],
+    improvements: ['None flagged'],
+    recommendation: 'Top 1% Candidate • Offer Fast-Track',
+  },
+  {
+    id: 'SES-8909',
+    participant: 'Hannah Brooks',
+    email: 'hannah.b@gmail.com',
+    avatar: 'H',
+    isDemo: false,
+    role: 'Frontend Engineer',
+    company: 'Vercel',
+    type: 'Technical',
+    date: 'Sep 17, 2026',
+    rawDate: '2026-09-17',
+    startTime: '13:00 UTC',
+    duration: '0 min',
+    questionsCount: '0 / 5',
+    status: 'Cancelled',
+    overallScore: null,
+    evaluation: {
+      communication: 0,
+      answerRelevance: 0,
+      technicalKnowledge: 0,
+      overallPerformance: 0,
+    },
+    conversation: [],
+    feedbackSummary: 'Interview cancelled by candidate prior to session initiation.',
+    strengths: [],
+    improvements: [],
+    recommendation: 'Cancelled by User',
+  },
+]
+
 export default function AdminInterviews() {
   // State for filters & search
   const [searchQuery, setSearchQuery] = useState('')
@@ -76,399 +470,6 @@ export default function AdminInterviews() {
     },
   ]
 
-  // ========================================================================
-  // MOCK INTERVIEW SESSIONS DATASET
-  // ========================================================================
-  const mockSessions = [
-    {
-      id: 'SES-8901',
-      participant: 'Jazeel K.',
-      email: 'jazeel@example.com',
-      avatar: 'J',
-      isDemo: false,
-      role: 'Senior Backend Engineer',
-      company: 'Microsoft',
-      type: 'Technical',
-      date: 'Sep 22, 2026',
-      rawDate: '2026-09-22',
-      startTime: '14:15 UTC',
-      duration: '34 min',
-      questionsCount: '5 / 5',
-      status: 'Completed',
-      overallScore: 82,
-      evaluation: {
-        communication: 86,
-        answerRelevance: 84,
-        technicalKnowledge: 82,
-        overallPerformance: 84,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'Welcome Jazeel! Could you briefly introduce yourself and highlight a complex backend architecture you designed recently?',
-          answer:
-            'Hello! I am a software engineer specializing in high-throughput backend services. Recently, I built an asynchronous data ingestion platform using Spring Boot and Kafka that processes 25,000 webhook events per second with Redis caching for idempotent deduplication.',
-        },
-        {
-          qNum: 2,
-          question:
-            'How did you guarantee zero message loss and handle write amplification when Redis cache evictions occur?',
-          answer:
-            'We implemented a write-behind pattern with a Dead Letter Queue (DLQ) in Kafka. For write amplification, we batched Redis pipeline writes into chunks of 100 keys and used TTL-based expiration with probabilistic early expiration to avoid cache stampedes.',
-        },
-        {
-          qNum: 3,
-          question:
-            'Let us discuss concurrency: How would you architect a distributed lock across multiple Spring Boot microservice replicas?',
-          answer:
-            'I would leverage Redlock algorithm with Redis or distributed leases via PostgreSQL advisory locks if Redis persistence is insufficient. We also enforce token renewal heartbeats to guard against slow network partitions prematurely releasing the lock.',
-        },
-      ],
-      feedbackSummary:
-        'Candidate demonstrated strong command over distributed caching principles, concurrency controls, and asynchronous messaging pipelines with Spring Boot. Articulated trade-offs clearly under probing questions.',
-      strengths: [
-        'Deep architectural understanding of Redis write patterns & cache stampede mitigation',
-        'Structured and calm reasoning when challenged on concurrency failure modes',
-        'High technical fluency matching Senior Staff expectations',
-      ],
-      improvements: [
-        'Could provide more concrete memory sizing calculations when configuring Redis clusters',
-        'Mention distributed tracing (OpenTelemetry/Jaeger) during failure recovery walkthroughs',
-      ],
-      recommendation: 'Strong Hire • Proceed to Onsite Loop',
-    },
-    {
-      id: 'SES-8902',
-      participant: 'Alexander Chen',
-      email: 'alex.chen@tech.org',
-      avatar: 'A',
-      isDemo: true,
-      role: 'Staff Infrastructure Architect',
-      company: 'Google Cloud',
-      type: 'System Design',
-      date: 'Sep 22, 2026',
-      rawDate: '2026-09-22',
-      startTime: '12:30 UTC',
-      duration: '48 min',
-      questionsCount: '6 / 6',
-      status: 'Completed',
-      overallScore: 92,
-      evaluation: {
-        communication: 94,
-        answerRelevance: 95,
-        technicalKnowledge: 90,
-        overallPerformance: 93,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'Welcome Alexander. Design a globally distributed key-value store that supports multi-region read replicas with configurable consistency.',
-          answer:
-            'To meet this requirement, I would structure the cluster into primary consensus groups per partition using Raft, complemented by asynchronously replicated read-replicas across edge POPs using CRDTs or vector clocks for conflict-free resolution.',
-        },
-        {
-          qNum: 2,
-          question:
-            'How would you handle cross-continental network partitions without violating availability for read operations?',
-          answer:
-            'We degrade consistency gracefully: local read replicas serve stale reads with bounded staleness guarantees (e.g. max 500ms lag). Clients requesting strict linearizability wait on quorum acks from the primary partition leader.',
-        },
-        {
-          qNum: 3,
-          question:
-            'Walk me through LSM-Tree compaction strategies when write throughput exceeds 500MB/s per storage node.',
-          answer:
-            'I would switch from size-tiered compaction to leveled compaction with tiered SSTables at Level 0 to minimize write amplification. We also allocate dedicated NVMe write buffers and throttle incoming writes before memory exhaustion occurs.',
-        },
-      ],
-      feedbackSummary:
-        'Exceptional system design mastery. The candidate demonstrated flawless knowledge of consensus algorithms, multi-region failover, and storage engine internals.',
-      strengths: [
-        'Exemplary command of CAP trade-offs, Raft consensus, and bounded staleness',
-        'Crystal-clear communication and structured architectural drawings',
-        'Real-world operational awareness regarding NVMe saturation and SSTable compaction',
-      ],
-      improvements: [
-        'Could elaborate on cold-tier object storage archiving policies for multi-year compliance data',
-      ],
-      recommendation: 'Exceptional • Fast-Track Staff Level Offer',
-    },
-    {
-      id: 'SES-8903',
-      participant: 'Michael Vance',
-      email: 'm.vance@tech.co',
-      avatar: 'M',
-      isDemo: false,
-      role: 'Full Stack Engineer',
-      company: 'Stripe',
-      type: 'Technical',
-      date: 'Sep 22, 2026',
-      rawDate: '2026-09-22',
-      startTime: '11:00 UTC',
-      duration: '18 min',
-      questionsCount: '3 / 5',
-      status: 'In Progress',
-      overallScore: null,
-      evaluation: {
-        communication: 80,
-        answerRelevance: 78,
-        technicalKnowledge: 82,
-        overallPerformance: 80,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'Let us discuss webhook reliability: How do you prevent duplicate charge processing when an upstream payment gateway retries a webhook?',
-          answer:
-            'We record unique transaction idempotency keys in a database with a unique constraint. If a duplicate arrives, the handler returns 200 OK immediately with the cached previous payment response.',
-        },
-        {
-          qNum: 2,
-          question:
-            'What happens if the database write times out after the external charge has been made but before your status records update?',
-          answer:
-            'We use a two-phase status model with state machine transitions (Pending -> Confirmed -> Settled) and a reconciliation worker that queries the gateway audit endpoint periodically.',
-        },
-      ],
-      feedbackSummary: 'Session currently active in progress. Candidate is tackling Question 3.',
-      strengths: ['Clear grasp of payment idempotency keys and state machine transitions'],
-      improvements: ['Pending session completion for comprehensive analysis'],
-      recommendation: 'In Progress',
-    },
-    {
-      id: 'SES-8904',
-      participant: 'David Kim',
-      email: 'dkim99@gmail.com',
-      avatar: 'D',
-      isDemo: false,
-      role: 'Junior Full Stack Developer',
-      company: 'Meta',
-      type: 'Technical',
-      date: 'Sep 21, 2026',
-      rawDate: '2026-09-21',
-      startTime: '16:40 UTC',
-      duration: '08 min',
-      questionsCount: '1 / 5',
-      status: 'Failed',
-      overallScore: 42,
-      evaluation: {
-        communication: 55,
-        answerRelevance: 48,
-        technicalKnowledge: 45,
-        overallPerformance: 49,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'Can you explain the Virtual DOM in React and why keys are necessary when rendering dynamic lists?',
-          answer:
-            'The Virtual DOM is a lightweight copy of the real DOM. Keys help React identify which items have changed or removed so it does not re-render the whole list.',
-        },
-      ],
-      feedbackSummary:
-        'Session terminated prematurely due to client-side network disconnection during question 2. Marked as failed session drop.',
-      strengths: ['Understood high-level purpose of React list keys'],
-      improvements: ['Session was dropped before technical evaluation could be completed'],
-      recommendation: 'Incomplete Session • Allow Reschedule',
-    },
-    {
-      id: 'SES-8905',
-      participant: 'Sarah Jenkins',
-      email: 'sarah.j@outlook.com',
-      avatar: 'S',
-      isDemo: false,
-      role: 'Engineering Manager',
-      company: 'Uber',
-      type: 'Behavioral',
-      date: 'Sep 21, 2026',
-      rawDate: '2026-09-21',
-      startTime: '15:10 UTC',
-      duration: '45 min',
-      questionsCount: '5 / 5',
-      status: 'Completed',
-      overallScore: 88,
-      evaluation: {
-        communication: 92,
-        answerRelevance: 89,
-        technicalKnowledge: 84,
-        overallPerformance: 88,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'Tell me about a time when a critical project deadline was at risk due to misalignment between Product and Engineering.',
-          answer:
-            'At my previous company, PM wanted to launch 4 additional features two weeks prior to GA. I organized an emergency triage session, quantified technical debt risk, and negotiated a phased rollout where the P0 core launched on time and the rest followed in Sprint 2.',
-        },
-        {
-          qNum: 2,
-          question:
-            'How do you manage a low-performing senior engineer on a business-critical path without hurting team morale?',
-          answer:
-            'I hold 1-on-1 private root cause discussions. I set clear 30-day deliverables with measurable checkpoints and pair them with an empathetic lead while clarifying expectations objectively.',
-        },
-        {
-          qNum: 3,
-          question:
-            'How do you foster an engineering culture that balances technical excellence with business speed?',
-          answer:
-            'We institute the "20% technical health" policy into every sprint backlog. Refactoring and tech debt cleanup are treated as first-class citizens alongside new product roadmap epics.',
-        },
-      ],
-      feedbackSummary:
-        'Outstanding leadership and behavioral acumen. Articulated pragmatic conflict resolution frameworks, structured empathy, and deep technical empathy.',
-      strengths: [
-        'Structured STAR storytelling methodology throughout all behavioral answers',
-        'Demonstrated strong negotiation balance between product velocity and technical stability',
-        'Mature perspective on talent management and performance calibration',
-      ],
-      improvements: [
-        'Could include more specific metrics on team retention and sprint velocity post-interventions',
-      ],
-      recommendation: 'Strong Hire • Engineering Manager Role Approved',
-    },
-    {
-      id: 'SES-8906',
-      participant: 'Priya Sharma',
-      email: 'priya.s@design.io',
-      avatar: 'P',
-      isDemo: false,
-      role: 'Senior Product Designer',
-      company: 'Airbnb',
-      type: 'Behavioral',
-      date: 'Sep 20, 2026',
-      rawDate: '2026-09-20',
-      startTime: '10:00 UTC',
-      duration: '40 min',
-      questionsCount: '5 / 5',
-      status: 'Completed',
-      overallScore: 85,
-      evaluation: {
-        communication: 90,
-        answerRelevance: 86,
-        technicalKnowledge: 82,
-        overallPerformance: 86,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'How do you advocate for accessibility and universal design when stakeholders push back citing engineering deadlines?',
-          answer:
-            'I bring real user session recordings and explain that accessible design expands our total addressable market while improving SEO and overall usability for everyone.',
-        },
-      ],
-      feedbackSummary: 'Strong design leadership and user empathy demonstrated.',
-      strengths: ['Great articulation of design systems and accessibility impact'],
-      improvements: ['Provide more data on conversion metrics influenced by design updates'],
-      recommendation: 'Hire • Product Design Lead',
-    },
-    {
-      id: 'SES-8907',
-      participant: 'Chloe Vance',
-      email: 'chloe@stripe.com',
-      avatar: 'C',
-      isDemo: true,
-      role: 'Payments Infrastructure Engineer',
-      company: 'Stripe (Pilot)',
-      type: 'Technical',
-      date: 'Sep 19, 2026',
-      rawDate: '2026-09-19',
-      startTime: '14:00 UTC',
-      duration: '44 min',
-      questionsCount: '5 / 5',
-      status: 'Completed',
-      overallScore: 90,
-      evaluation: {
-        communication: 91,
-        answerRelevance: 92,
-        technicalKnowledge: 89,
-        overallPerformance: 91,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'How do you architect banking webhook reconciliation when partners send delayed callbacks up to 48 hours later?',
-          answer:
-            'We store asynchronous job tickets in an event log with exponential backoff retries and auto-trigger balance verifications upon callback arrival.',
-        },
-      ],
-      feedbackSummary: 'Excellent payment systems infrastructure evaluation.',
-      strengths: ['Deep domain knowledge of banking callbacks and idempotency'],
-      improvements: ['Minor pauses when discussing edge latency spikes'],
-      recommendation: 'Strong Hire • Senior Payment Engineer',
-    },
-    {
-      id: 'SES-8908',
-      participant: 'Liam O’Connor',
-      email: 'liam@atlassian.com',
-      avatar: 'L',
-      isDemo: true,
-      role: 'Principal Architect',
-      company: 'Atlassian (Pilot)',
-      type: 'System Design',
-      date: 'Sep 18, 2026',
-      rawDate: '2026-09-18',
-      startTime: '09:30 UTC',
-      duration: '50 min',
-      questionsCount: '5 / 5',
-      status: 'Completed',
-      overallScore: 94,
-      evaluation: {
-        communication: 95,
-        answerRelevance: 96,
-        technicalKnowledge: 93,
-        overallPerformance: 95,
-      },
-      conversation: [
-        {
-          qNum: 1,
-          question:
-            'How would you migrate a monolith serving 50M daily active users to a multi-tenant microservices topology with zero downtime?',
-          answer:
-            'We use the Strangler Fig pattern behind an intelligent API Gateway routing traffic by feature flag. We synchronize dual writes with shadow validation before deprecating monolithic endpoints.',
-        },
-      ],
-      feedbackSummary: 'Flawless execution on complex migration architecture.',
-      strengths: ['Strangler Fig mastery, canary deployments, zero-downtime database cutovers'],
-      improvements: ['None flagged'],
-      recommendation: 'Top 1% Candidate • Offer Fast-Track',
-    },
-    {
-      id: 'SES-8909',
-      participant: 'Hannah Brooks',
-      email: 'hannah.b@gmail.com',
-      avatar: 'H',
-      isDemo: false,
-      role: 'Frontend Engineer',
-      company: 'Vercel',
-      type: 'Technical',
-      date: 'Sep 17, 2026',
-      rawDate: '2026-09-17',
-      startTime: '13:00 UTC',
-      duration: '0 min',
-      questionsCount: '0 / 5',
-      status: 'Cancelled',
-      overallScore: null,
-      evaluation: {
-        communication: 0,
-        answerRelevance: 0,
-        technicalKnowledge: 0,
-        overallPerformance: 0,
-      },
-      conversation: [],
-      feedbackSummary: 'Interview cancelled by candidate prior to session initiation.',
-      strengths: [],
-      improvements: [],
-      recommendation: 'Cancelled by User',
-    },
-  ]
 
   // ========================================================================
   // FILTERING LOGIC
@@ -507,7 +508,7 @@ export default function AdminInterviews() {
 
       return matchesSearch && matchesStatus && matchesDate && matchesDemo
     })
-  }, [mockSessions, searchQuery, statusFilter, dateFilter, demoUserFilter])
+  }, [searchQuery, statusFilter, dateFilter, demoUserFilter])
 
   return (
     <div>

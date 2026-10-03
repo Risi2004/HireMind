@@ -1,25 +1,21 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import brandMarkImg from '../assets/images/3.png'
-import userAvatarImg from '../assets/images/Frame 230.png'
 import company1Icon from '../assets/icons/company1.svg'
-import company2Icon from '../assets/icons/company2.svg'
 import searchIcon from '../assets/icons/search.svg'
 import arrowIcon from '../assets/icons/arrow.svg'
 import arrow2Icon from '../assets/icons/arrow2.svg'
 import problemSolvingIcon from '../assets/icons/problem solving.svg'
-import profileIcon from '../assets/icons/profile.svg'
 import communicationIcon from '../assets/icons/communication.svg'
 import languageIcon from '../assets/icons/language.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import Navbar from '../components/Navbar'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { getAllInterviewSessions, createInterviewSession, deleteInterviewSession } from '../utils/interviewUtils'
 import './Dashboard.css'
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { user, canAccessInterview, hasDemoAccess, remainingInterviews, allowedInterviews, isAdmin } = useAuth()
+  const { user, hasDemoAccess, remainingInterviews, allowedInterviews, isAdmin } = useAuth()
 
   // Delete modal state
   const [sessionToDelete, setSessionToDelete] = useState(null)
@@ -71,7 +67,6 @@ export default function Dashboard() {
   const candidateEmail = user?.email || 'jazeel.jaufer@example.com'
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeTab, setActiveTab] = useState('all')
   const [isChatOpen, setIsChatOpen] = useState(true)
   const [chatInput, setChatInput] = useState('')
   const [chatMessages, setChatMessages] = useState([

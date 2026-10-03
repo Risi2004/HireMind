@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import logoutIcon from '../assets/icons/logout.svg'
 import DeleteAccountModal from './DeleteAccountModal'
 import './ProfileDropdown.css'
@@ -13,7 +13,7 @@ export default function ProfileDropdown({
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
-  const [imageError, setImageError] = useState(false)
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState(null)
   const dropdownRef = useRef(null)
   const navigate = useNavigate()
   const { user, logout } = useAuth()
@@ -27,9 +27,8 @@ export default function ProfileDropdown({
     : propInitial || displayName?.trim().charAt(0).toUpperCase() || 'U'
   const avatarUrl = user?.avatarUrl
 
-  useEffect(() => {
-    setImageError(false)
-  }, [avatarUrl])
+  // A new avatar URL gets a fresh attempt automatically
+  const imageError = Boolean(avatarUrl) && failedAvatarUrl === avatarUrl
 
   // Close dropdown on outside click or Escape
   useEffect(() => {
@@ -87,7 +86,7 @@ export default function ProfileDropdown({
             src={avatarUrl}
             alt={displayName}
             className="prof-dropdown-avatar-img"
-            onError={() => setImageError(true)}
+            onError={() => setFailedAvatarUrl(avatarUrl)}
           />
         ) : (
           <span className="prof-dropdown-initial">{displayInitial}</span>
@@ -104,7 +103,7 @@ export default function ProfileDropdown({
                   src={avatarUrl}
                   alt={displayName}
                   className="prof-dropdown-avatar-img"
-                  onError={() => setImageError(true)}
+                  onError={() => setFailedAvatarUrl(avatarUrl)}
                 />
               ) : (
                 <span>{displayInitial}</span>

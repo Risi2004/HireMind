@@ -1,10 +1,27 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useEffectEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import OnboardingHeader from '../components/OnboardingHeader'
 import githubLogo from '../assets/icons/Vector.svg'
-import { useProfileSetup } from '../context/ProfileSetupContext'
-import { useAuth } from '../context/AuthContext'
+import { useProfileSetup } from '../context/useProfileSetup'
+import { useAuth } from '../context/useAuth'
 import './ProfileSetup.css'
+
+// Map the ?github_connected / ?github_error query params set by the backend OAuth callback
+function getGithubOAuthReturn(searchParams) {
+  const connected = searchParams.get('github_connected') === 'true'
+  const ghError = searchParams.get('github_error')
+  let error = ''
+  if (!connected && ghError) {
+    if (ghError === 'oauth_not_configured') {
+      error = 'GitHub OAuth credentials not yet configured in backend .env. You can enter your username below.'
+    } else if (ghError === 'access_denied') {
+      error = 'GitHub authorization was canceled or access was denied.'
+    } else {
+      error = 'GitHub connection failed. Please try again.'
+    }
+  }
+  return { connected, error }
+}
 
 export default function ProfileSetup() {
   const navigate = useNavigate()
@@ -19,36 +36,30 @@ export default function ProfileSetup() {
     }
   }, [user?.isProfileSetupCompleted, navigate])
 
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  // Result of a GitHub OAuth redirect back to this page (read once from the URL)
+  const [oauthReturn] = useState(() => getGithubOAuthReturn(searchParams))
+
+  const [isModalOpen, setIsModalOpen] = useState(() => Boolean(oauthReturn.error))
   const [usernameInput, setUsernameInput] = useState('')
   const [isConnecting, setIsConnecting] = useState(false)
-  const [error, setError] = useState('')
-  const [statusMessage, setStatusMessage] = useState('')
+  const [error, setError] = useState(() => oauthReturn.error)
+  const [statusMessage, setStatusMessage] = useState(() =>
+    oauthReturn.connected ? 'GitHub account connected successfully!' : ''
+  )
 
-  // Check for redirect return from GitHub OAuth flow
+  // After a GitHub OAuth redirect: refresh the profile, auto-hide the success message,
+  // and strip the OAuth query parameters from the URL
+  const finishGithubOAuthReturn = useEffectEvent(() => {
+    if (!oauthReturn.connected && !oauthReturn.error) return
+    if (oauthReturn.connected && refreshUser) refreshUser()
+    navigate('/profile-setup', { replace: true })
+  })
   useEffect(() => {
-    const isConnected = searchParams.get('github_connected')
-    const ghError = searchParams.get('github_error')
-
-    if (isConnected === 'true') {
-      if (refreshUser) refreshUser()
-      setStatusMessage('GitHub account connected successfully!')
-      setTimeout(() => setStatusMessage(''), 4000)
-      navigate('/profile-setup', { replace: true })
-    } else if (ghError) {
-      if (ghError === 'oauth_not_configured') {
-        setError('GitHub OAuth credentials not yet configured in backend .env. You can enter your username below.')
-        setIsModalOpen(true)
-      } else if (ghError === 'access_denied') {
-        setError('GitHub authorization was canceled or access was denied.')
-        setIsModalOpen(true)
-      } else {
-        setError('GitHub connection failed. Please try again.')
-        setIsModalOpen(true)
-      }
-      navigate('/profile-setup', { replace: true })
-    }
-  }, [searchParams, refreshUser, navigate])
+    finishGithubOAuthReturn()
+    if (!oauthReturn.connected) return undefined
+    const timer = setTimeout(() => setStatusMessage(''), 4000)
+    return () => clearTimeout(timer)
+  }, [oauthReturn])
 
   function goToAboutYou() {
     navigate('/profile-setup/about-you')

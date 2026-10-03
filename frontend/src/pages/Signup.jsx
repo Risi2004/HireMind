@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import logoImg from '../assets/images/logo.png'
 import logoDarkImg from '../assets/images/logo-dark.png'
 import logoIconBlack from '../assets/images/logo-icon.png'
 import './Auth.css'
 
 // Comprehensive Regex Patterns for Validation
-export const REGEX_PATTERNS = {
+const REGEX_PATTERNS = {
   nameHasNumbers: /\d/,
   nameValid: /^[a-zA-Z\s'-]{2,50}$/,
   email: /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/,

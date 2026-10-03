@@ -1,5 +1,5 @@
 import { useLocation, Navigate, Outlet, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { XCircleIcon, LogoutIcon } from './AdminIcons'
 
 export default function AdminProtectedRoute() {

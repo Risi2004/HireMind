@@ -1,98 +1,17 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { useAuth } from './AuthContext'
+import { useMemo, useState } from 'react'
+import { useAuth } from './useAuth'
+import { ProfileSetupContext } from './profileSetupContextObject'
+import {
+  EXPERIENCE_LEVELS,
+  FIELD_OPTIONS,
+  CAREER_STAGE_OPTIONS,
+  POPULAR_SKILLS,
+} from '../constants/profileOptions'
 import { getApiUrl } from '../config/api'
 
 // Helper for making API calls with dynamic backend base URL (Method 2)
 const apiFetch = (endpoint, options) => fetch(getApiUrl(endpoint), options)
 
-const ProfileSetupContext = createContext(null)
-
-
-export const EXPERIENCE_LEVELS = ['Beginner', 'Intermediate', 'Experienced']
-
-export const FIELD_OPTIONS = [
-  'Software Engineering',
-  'Computer Science',
-  'Information Technology',
-  'Data Science',
-  'Artificial Intelligence / Machine Learning',
-  'Cyber Security',
-  'Network Engineering',
-  'Cloud Computing',
-  'DevOps',
-  'UI/UX Design',
-  'Quality Assurance / Software Testing',
-  'Business Information Systems',
-  'Business Management',
-  'Accounting & Finance',
-  'Marketing',
-  'Human Resource Management',
-  'Engineering',
-  'Healthcare',
-  'Education',
-  'Other',
-]
-
-export const CAREER_STAGE_OPTIONS = [
-  'Student / Undergraduate',
-  'Recent Graduate',
-]
-
-export const POPULAR_SKILLS = [
-  'React',
-  'JavaScript',
-  'TypeScript',
-  'Node.js',
-  'Python',
-  'Java',
-  'C++',
-  'C#',
-  'HTML5',
-  'CSS3',
-  'Next.js',
-  'Vue.js',
-  'Angular',
-  'Express',
-  'Django',
-  'Flask',
-  'FastAPI',
-  'Spring Boot',
-  'SQL',
-  'PostgreSQL',
-  'MySQL',
-  'MongoDB',
-  'Redis',
-  'Docker',
-  'Kubernetes',
-  'AWS',
-  'Google Cloud',
-  'Azure',
-  'Git',
-  'Linux',
-  'REST APIs',
-  'GraphQL',
-  'Microservices',
-  'Machine Learning',
-  'Deep Learning',
-  'PyTorch',
-  'TensorFlow',
-  'Data Science',
-  'Pandas',
-  'NumPy',
-  'UI/UX Design',
-  'Figma',
-  'CI/CD',
-  'Cyber Security',
-  'Network Engineering',
-  'Agile / Scrum',
-  'System Design',
-  'Testing & QA',
-  'Go',
-  'Rust',
-  'Swift',
-  'Kotlin',
-  'Flutter',
-]
 
 export function ProfileSetupProvider({ children }) {
   const [resumeFile, setResumeFile] = useState(null)
@@ -151,10 +70,12 @@ export function ProfileSetupProvider({ children }) {
     repos: [],
   })
 
-  // Sync with authUser when user updates.
-  // IMPORTANT: Must use useEffect, NOT useMemo — calling setState inside useMemo
-  // happens during the render phase and causes a blank screen / infinite loop in React 18+.
-  useEffect(() => {
+  // Sync with authUser whenever the signed-in user object changes.
+  // Uses React's "adjust state while rendering" pattern (guarded by a comparison so it
+  // runs once per change) instead of an effect, avoiding an extra render pass.
+  const [syncedAuthUser, setSyncedAuthUser] = useState(null)
+  if (authUser !== syncedAuthUser) {
+    setSyncedAuthUser(authUser)
     if (authUser?.github) {
       setGithubData(authUser.github)
     }
@@ -173,7 +94,7 @@ export function ProfileSetupProvider({ children }) {
     if (authUser?.careerInterests && Array.isArray(authUser.careerInterests) && authUser.careerInterests.length > 0) {
       setCareerInterests(authUser.careerInterests)
     }
-  }, [authUser])
+  }
 
   const user = useMemo(
     () => ({ name: authUser?.firstName || 'Candidate' }),
@@ -289,66 +210,43 @@ export function ProfileSetupProvider({ children }) {
     return data
   }
 
-  const value = useMemo(
-    () => ({
-      user,
-      resumeFile,
-      setResumeFile,
-      clearResume: () => setResumeFile(null),
-      field,
-      setField,
-      customField,
-      setCustomField,
-      experienceLevel,
-      setExperienceLevel,
-      experienceLevels: EXPERIENCE_LEVELS,
-      fieldOptions: FIELD_OPTIONS,
-      careerStage,
-      setCareerStage,
-      customCareerStage,
-      setCustomCareerStage,
-      careerStageOptions: CAREER_STAGE_OPTIONS,
-      skills,
-      setSkills,
-      addSkill,
-      removeSkill,
-      popularSkills: POPULAR_SKILLS,
-      careerInterests,
-      setCareerInterests,
-      addCareerInterest,
-      removeCareerInterest,
-      githubData,
-      connectGithub,
-      disconnectGithub,
-      startGithubOAuth,
-      submitProfileSetup,
-    }),
-    [
-      user,
-      resumeFile,
-      field,
-      customField,
-      experienceLevel,
-      careerStage,
-      customCareerStage,
-      skills,
-      careerInterests,
-      githubData,
-      token,
-    ]
-  )
+  const value = {
+    user,
+    resumeFile,
+    setResumeFile,
+    clearResume: () => setResumeFile(null),
+    field,
+    setField,
+    customField,
+    setCustomField,
+    experienceLevel,
+    setExperienceLevel,
+    experienceLevels: EXPERIENCE_LEVELS,
+    fieldOptions: FIELD_OPTIONS,
+    careerStage,
+    setCareerStage,
+    customCareerStage,
+    setCustomCareerStage,
+    careerStageOptions: CAREER_STAGE_OPTIONS,
+    skills,
+    setSkills,
+    addSkill,
+    removeSkill,
+    popularSkills: POPULAR_SKILLS,
+    careerInterests,
+    setCareerInterests,
+    addCareerInterest,
+    removeCareerInterest,
+    githubData,
+    connectGithub,
+    disconnectGithub,
+    startGithubOAuth,
+    submitProfileSetup,
+  }
 
   return (
     <ProfileSetupContext.Provider value={value}>
       {children}
     </ProfileSetupContext.Provider>
   )
-}
-
-export function useProfileSetup() {
-  const context = useContext(ProfileSetupContext)
-  if (!context) {
-    throw new Error('useProfileSetup must be used within ProfileSetupProvider')
-  }
-  return context
 }

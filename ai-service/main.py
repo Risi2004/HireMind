@@ -300,7 +300,37 @@ def interview_agent_next_endpoint(payload: InterviewAgentTurnPayload):
         raise HTTPException(status_code=500, detail=f"Failed to process interview turn: {str(e)}")
 
 
-from agents.evaluation_agent import evaluation_agent_instance
+from agents.evaluation_agent import evaluation_agent_instance, EvaluationUnavailableError
+from agents.code_review_agent import code_review_agent_instance
+
+
+class CodeReviewPayload(BaseModel):
+    code: str = Field(..., description="Candidate source code")
+    language: Optional[str] = Field(default="", description="Programming language")
+    runOutput: Optional[str] = Field(default="", description="Sandbox execution output")
+    explanation: Optional[str] = Field(default="", description="Candidate's explanation")
+    nextStageName: Optional[str] = Field(default="", description="Name of the next interview stage")
+    nextStageTopics: Optional[List[str]] = Field(default_factory=list, description="Topics of the next stage")
+
+
+@app.post("/agents/code-review/review")
+def code_review_endpoint(payload: CodeReviewPayload):
+    """Review a live-coding submission and ask the next stage's opening question.
+    Returns 503 when the model is unavailable — never a canned assessment.
+    """
+    if not payload.code.strip():
+        raise HTTPException(status_code=400, detail="Code is required.")
+    review = code_review_agent_instance.review(
+        code=payload.code,
+        language=payload.language or "",
+        run_output=payload.runOutput or "",
+        explanation=payload.explanation or "",
+        next_stage_name=payload.nextStageName or "",
+        next_stage_topics=payload.nextStageTopics or [],
+    )
+    if not review:
+        raise HTTPException(status_code=503, detail="Code review model is temporarily unavailable.")
+    return {"status": "success", "review": review}
 
 
 class EvaluationPayload(BaseModel):
@@ -350,6 +380,9 @@ def evaluation_agent_endpoint(payload: EvaluationPayload):
             "status": "success",
             "evaluation": evaluation
         }
+    except EvaluationUnavailableError as e:
+        logger.warning(f"Evaluation unavailable: {e}")
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.exception("Failed to evaluate interview:")
         raise HTTPException(status_code=500, detail=f"Failed to evaluate interview: {str(e)}")
