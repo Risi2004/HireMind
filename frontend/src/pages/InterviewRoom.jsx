@@ -57,8 +57,15 @@ int main() {
 export default function InterviewRoom() {
   const navigate = useNavigate()
   const { token, id } = useParams()
-  const interviewId = id || token || 'default'
+  const rawId = id || token
+  const interviewId = (rawId && rawId !== 'default')
+    ? rawId
+    : (localStorage.getItem('hiremind_last_interview_id') || 'default')
   const { user, updateDemoQuota, checkInterviewAccessStatus } = useAuth()
+
+  // Strict Interview Termination and Network Abort refs
+  const isTerminatedRef = useRef(false)
+  const inFlightAbortControllerRef = useRef(new AbortController())
 
   // Track dynamic session details
   const [session, setSession] = useState(() => getInterviewSession(interviewId) || {})
@@ -69,6 +76,9 @@ export default function InterviewRoom() {
       setIsLoadingSession(false)
       return
     }
+
+    // Keep active session ID saved in browser storage
+    localStorage.setItem('hiremind_last_interview_id', interviewId)
 
     // 1. Load from local cache first
     const local = getInterviewSession(interviewId)
@@ -84,16 +94,22 @@ export default function InterviewRoom() {
           headers: {
             ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
           },
+          signal: inFlightAbortControllerRef.current?.signal,
         })
         if (res.ok) {
           const data = await res.json()
           if (data.session) {
             setSession((prev) => ({ ...prev, ...data.session }))
             saveInterviewSession(data.session)
+            if (data.session.sessionId) {
+              localStorage.setItem('hiremind_last_interview_id', data.session.sessionId)
+            }
           }
         }
       } catch (err) {
-        console.warn('[InterviewRoom] Remote session fetch notice:', err)
+        if (err.name !== 'AbortError') {
+          console.warn('[InterviewRoom] Remote session fetch notice:', err)
+        }
       } finally {
         setIsLoadingSession(false)
       }
@@ -236,6 +252,23 @@ export default function InterviewRoom() {
   // Cleanup on unmount only
   useEffect(() => {
     return () => {
+      isTerminatedRef.current = true
+      stopCurrentAudio()
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel() } catch (_) {}
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onresult = null
+          recognitionRef.current.onerror = null
+          recognitionRef.current.onend = null
+          recognitionRef.current.abort()
+        } catch (_) {}
+        recognitionRef.current = null
+      }
+      if (inFlightAbortControllerRef.current) {
+        try { inFlightAbortControllerRef.current.abort() } catch (_) {}
+      }
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close().catch(() => {})
@@ -245,6 +278,7 @@ export default function InterviewRoom() {
           mediaStreamRef.current.getTracks().forEach((track) => track.stop())
         } catch (_) {}
       }
+      resetSilenceDetection()
     }
   }, [])
 
@@ -310,16 +344,22 @@ export default function InterviewRoom() {
   const currentUtteranceRef = useRef(null)
   const audioCacheRef = useRef(new Map())
 
-  // Stop any active TTS audio playback
+  // Stop any active TTS audio playback completely
   const stopCurrentAudio = () => {
     if (currentAudioPlayerRef.current) {
       try {
         currentAudioPlayerRef.current.pause()
         currentAudioPlayerRef.current.currentTime = 0
+        currentAudioPlayerRef.current.src = ''
+        currentAudioPlayerRef.current.load()
       } catch (_) {}
       currentAudioPlayerRef.current = null
     }
     if (currentUtteranceRef.current) {
+      try {
+        currentUtteranceRef.current.onend = null
+        currentUtteranceRef.current.onerror = null
+      } catch (_) {}
       currentUtteranceRef.current = null
     }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -338,20 +378,27 @@ export default function InterviewRoom() {
       currentUtteranceRef.current = null
     }
 
+    if (isCompleted || isTerminatedRef.current) return
+
     voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
     setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
 
-    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice' && !isCompleted) {
+    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice' && !isCompleted && !isTerminatedRef.current) {
       startVoiceListening()
     }
   }
 
-  // Play Interviewer TTS Audio with strict Turn-Taking protection
+  // Play Interviewer TTS Audio with strict Turn-Taking and termination protection
   const playInterviewerAudio = (audioUrl, messageId = null, fallbackText = null) => {
+    if (isCompleted || isTerminatedRef.current) return
+
     if (!audioUrl) {
       if (fallbackText && typeof window !== 'undefined' && 'speechSynthesis' in window) {
         try {
+          if (isCompleted || isTerminatedRef.current) return
           stopCurrentAudio()
+          if (isCompleted || isTerminatedRef.current) return
+
           const utterance = new SpeechSynthesisUtterance(fallbackText)
           currentUtteranceRef.current = utterance
           utterance.rate = 1.0
@@ -359,11 +406,15 @@ export default function InterviewRoom() {
           setPlayingMessageId(messageId)
           utterance.onend = () => {
             currentUtteranceRef.current = null
-            handleAiSpeakingFinished()
+            if (!isCompleted && !isTerminatedRef.current) {
+              handleAiSpeakingFinished()
+            }
           }
           utterance.onerror = () => {
             currentUtteranceRef.current = null
-            handleAiSpeakingFinished()
+            if (!isCompleted && !isTerminatedRef.current) {
+              handleAiSpeakingFinished()
+            }
           }
           window.speechSynthesis.speak(utterance)
           return
@@ -371,11 +422,15 @@ export default function InterviewRoom() {
           currentUtteranceRef.current = null
         }
       }
-      handleAiSpeakingFinished()
+      if (!isCompleted && !isTerminatedRef.current) {
+        handleAiSpeakingFinished()
+      }
       return
     }
 
+    if (isCompleted || isTerminatedRef.current) return
     stopCurrentAudio()
+    if (isCompleted || isTerminatedRef.current) return
 
     try {
       const audio = new Audio(audioUrl)
@@ -385,21 +440,30 @@ export default function InterviewRoom() {
       setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
       setVoiceError(null)
 
-      audio.onended = () => handleAiSpeakingFinished()
+      audio.onended = () => {
+        if (!isCompleted && !isTerminatedRef.current) {
+          handleAiSpeakingFinished()
+        }
+      }
 
       audio.onerror = (e) => {
+        if (isCompleted || isTerminatedRef.current) return
         console.warn('[VoiceMode] Audio playback error:', e)
-        if (fallbackText && 'speechSynthesis' in window) {
+        if (fallbackText && 'speechSynthesis' in window && !isCompleted && !isTerminatedRef.current) {
           try {
             const utterance = new SpeechSynthesisUtterance(fallbackText)
             currentUtteranceRef.current = utterance
             utterance.onend = () => {
               currentUtteranceRef.current = null
-              handleAiSpeakingFinished()
+              if (!isCompleted && !isTerminatedRef.current) {
+                handleAiSpeakingFinished()
+              }
             }
             utterance.onerror = () => {
               currentUtteranceRef.current = null
-              handleAiSpeakingFinished()
+              if (!isCompleted && !isTerminatedRef.current) {
+                handleAiSpeakingFinished()
+              }
             }
             window.speechSynthesis.speak(utterance)
             return
@@ -407,22 +471,29 @@ export default function InterviewRoom() {
             currentUtteranceRef.current = null
           }
         }
-        handleAiSpeakingFinished()
+        if (!isCompleted && !isTerminatedRef.current) {
+          handleAiSpeakingFinished()
+        }
       }
 
       audio.play().catch((err) => {
+        if (isCompleted || isTerminatedRef.current) return
         console.warn('[VoiceMode] Audio autoplay was prevented or delayed:', err)
-        if (fallbackText && 'speechSynthesis' in window) {
+        if (fallbackText && 'speechSynthesis' in window && !isCompleted && !isTerminatedRef.current) {
           try {
             const utterance = new SpeechSynthesisUtterance(fallbackText)
             currentUtteranceRef.current = utterance
             utterance.onend = () => {
               currentUtteranceRef.current = null
-              handleAiSpeakingFinished()
+              if (!isCompleted && !isTerminatedRef.current) {
+                handleAiSpeakingFinished()
+              }
             }
             utterance.onerror = () => {
               currentUtteranceRef.current = null
-              handleAiSpeakingFinished()
+              if (!isCompleted && !isTerminatedRef.current) {
+                handleAiSpeakingFinished()
+              }
             }
             window.speechSynthesis.speak(utterance)
             return
@@ -430,22 +501,28 @@ export default function InterviewRoom() {
             currentUtteranceRef.current = null
           }
         }
-        handleAiSpeakingFinished()
+        if (!isCompleted && !isTerminatedRef.current) {
+          handleAiSpeakingFinished()
+        }
       })
     } catch (err) {
       console.warn('[VoiceMode] playInterviewerAudio exception:', err)
-      handleAiSpeakingFinished()
+      if (!isCompleted && !isTerminatedRef.current) {
+        handleAiSpeakingFinished()
+      }
     }
   }
 
   // Synthesize and play speech on-demand for any AI message
   const handleSynthesizeSpeech = async (text, messageId) => {
-    if (!text) return
+    if (!text || isCompleted || isTerminatedRef.current) return
     setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
     setPlayingMessageId(messageId)
 
     if (audioCacheRef.current.has(messageId)) {
-      playInterviewerAudio(audioCacheRef.current.get(messageId), messageId, text)
+      if (!isCompleted && !isTerminatedRef.current) {
+        playInterviewerAudio(audioCacheRef.current.get(messageId), messageId, text)
+      }
       return
     }
 
@@ -461,12 +538,15 @@ export default function InterviewRoom() {
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
         },
         body: JSON.stringify({ text }),
-        signal: controller.signal,
+        signal: inFlightAbortControllerRef.current?.signal || controller.signal,
       })
       clearTimeout(timeoutId)
 
+      if (isCompleted || isTerminatedRef.current) return
+
       if (res.ok) {
         const data = await res.json()
+        if (isCompleted || isTerminatedRef.current) return
         if (data.audioUrl) {
           audioCacheRef.current.set(messageId, data.audioUrl)
           playInterviewerAudio(data.audioUrl, messageId, text)
@@ -477,6 +557,7 @@ export default function InterviewRoom() {
         playInterviewerAudio(null, messageId, text)
       }
     } catch (err) {
+      if (isCompleted || isTerminatedRef.current) return
       console.warn('[VoiceMode] TTS synthesis notice, using native speech:', err)
       playInterviewerAudio(null, messageId, text)
     }
@@ -556,7 +637,7 @@ export default function InterviewRoom() {
   }
 
   const handleSubmitCodeSolution = async () => {
-    if (!codeContent.trim() || isCodeSubmitting || isAiTyping || isCompleted) return
+    if (!codeContent.trim() || isCodeSubmitting || isAiTyping || isCompleted || isTerminatedRef.current) return
     setIsCodeSubmitting(true)
     stopCurrentAudio()
 
@@ -594,10 +675,15 @@ export default function InterviewRoom() {
           mode: interviewMode,
           includeAudio: interviewMode === 'voice',
         }),
+        signal: inFlightAbortControllerRef.current?.signal,
       })
+
+      if (isCompleted || isTerminatedRef.current) return
 
       if (res.ok) {
         const data = await res.json()
+        if (isCompleted || isTerminatedRef.current) return
+
         if (data.interviewState) {
           setInterviewState(data.interviewState)
         }
@@ -616,11 +702,13 @@ export default function InterviewRoom() {
           setTranscriptMessages((prev) => [...prev, aiMsg])
           setIsAiTyping(false)
 
-          if (data.audioUrl) {
-            audioCacheRef.current.set(aiMsgId, data.audioUrl)
-            playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
-          } else {
-            handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
+          if (!isCompleted && !isTerminatedRef.current) {
+            if (data.audioUrl) {
+              audioCacheRef.current.set(aiMsgId, data.audioUrl)
+              playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
+            } else {
+              handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
+            }
           }
           return
         }
@@ -641,6 +729,7 @@ export default function InterviewRoom() {
         throw new Error(`Server returned status ${res.status}`)
       }
     } catch (err) {
+      if (err.name === 'AbortError' || isTerminatedRef.current) return
       console.warn('[InterviewRoom] Code submission error:', err)
       setVoiceError({
         code: 'CODE_SUBMIT_FAILED',
@@ -837,7 +926,7 @@ export default function InterviewRoom() {
      ========================================================================= */
   const submitCandidateAnswer = async (answerText, inputMode = 'text', durationSeconds = 0, sttLatencyMs = null) => {
     const trimmed = (answerText || '').trim()
-    if (!trimmed || isAiTyping || isCompleted) return
+    if (!trimmed || isAiTyping || isCompleted || isTerminatedRef.current) return
 
     stopCurrentAudio()
 
@@ -872,10 +961,15 @@ export default function InterviewRoom() {
           durationSeconds,
           sttLatencyMs,
         }),
+        signal: inFlightAbortControllerRef.current?.signal,
       })
+
+      if (isCompleted || isTerminatedRef.current) return
 
       if (res.ok) {
         const data = await res.json()
+        if (isCompleted || isTerminatedRef.current) return
+
         if (data.interviewState) {
           setInterviewState(data.interviewState)
         }
@@ -903,12 +997,14 @@ export default function InterviewRoom() {
             setIsCompleted(true)
           }
 
-          // ALWAYS AUTOMATICALLY READ QUESTION ALOUD AS SOON AS GENERATED
-          if (data.audioUrl) {
-            audioCacheRef.current.set(aiMsgId, data.audioUrl)
-            playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
-          } else {
-            handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
+          // ONLY READ QUESTION ALOUD IF NOT TERMINATED OR COMPLETED
+          if (!isCompleted && !isTerminatedRef.current) {
+            if (data.audioUrl) {
+              audioCacheRef.current.set(aiMsgId, data.audioUrl)
+              playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
+            } else {
+              handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
+            }
           }
           return
         }
@@ -934,6 +1030,9 @@ export default function InterviewRoom() {
         throw new Error(`Server returned status ${res.status}`)
       }
     } catch (err) {
+      if (err.name === 'AbortError' || isTerminatedRef.current) {
+        return
+      }
       console.warn('[InterviewRoom] Answer processing error:', err)
       setVoiceError({
         code: 'INTERVIEW_AGENT_FAILED',
@@ -1390,23 +1489,108 @@ export default function InterviewRoom() {
 
   // Open modal to safely confirm interview conclusion mid-way or completely
   const handleEndCall = () => {
+    // Immediately silence any interviewer voice playback and pause speech recognition
+    stopCurrentAudio()
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel() } catch (_) {}
+    }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch (_) {}
+    }
+    resetSilenceDetection()
     setIsEndModalOpen(true)
+  }
+
+  // Cancel conclusion modal and resume listening if voice mode active
+  const handleCancelEndModal = () => {
+    setIsEndModalOpen(false)
+    if (interviewMode === 'voice' && !isVoiceMuted && !isCompleted && !isPaused && !isTerminatedRef.current) {
+      startVoiceListening()
+    }
   }
 
   // Execute interview conclusion and transition to evaluation report
   const handleConfirmEndInterview = async () => {
+    // 1. Mark as permanently terminated immediately
+    isTerminatedRef.current = true
+    setIsCompleted(true)
     setIsEnding(true)
+
+    // 2. Kill all active voice, speech synthesis, and audio buffers
     stopCurrentAudio()
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel() } catch (_) {}
+    }
+
+    // 3. Abort in-flight network requests (AI turns, speech synth, code executions)
+    if (inFlightAbortControllerRef.current) {
+      try { inFlightAbortControllerRef.current.abort() } catch (_) {}
+      inFlightAbortControllerRef.current = new AbortController()
+    }
+
+    // 4. Abort speech recognition immediately and detach listeners
     if (recognitionRef.current) {
       try {
-        recognitionRef.current.stop()
+        recognitionRef.current.onresult = null
+        recognitionRef.current.onerror = null
+        recognitionRef.current.onend = null
+        recognitionRef.current.abort()
       } catch (_) {}
+      recognitionRef.current = null
     }
-    resetSilenceDetection()
 
+    // 5. Stop MediaRecorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.ondataavailable = null
+        mediaRecorderRef.current.onstop = null
+        mediaRecorderRef.current.stop()
+      } catch (_) {}
+      mediaRecorderRef.current = null
+    }
+
+    // 6. Stop all hardware audio & video tracks (mic and camera)
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+      } catch (_) {}
+      mediaStreamRef.current = null
+    }
+
+    // 7. Close audio context
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      try { audioContextRef.current.close().catch(() => {}) } catch (_) {}
+      audioContextRef.current = null
+    }
+
+    // 8. Clear all silence timers and elapsed intervals
+    resetSilenceDetection()
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    // 9. Resolve authoritative target session ID
+    const targetSessionId = session?.sessionId || session?.id || interviewId
+    if (targetSessionId && targetSessionId !== 'default') {
+      localStorage.setItem('hiremind_last_interview_id', targetSessionId)
+      saveInterviewSession({
+        id: targetSessionId,
+        sessionId: targetSessionId,
+        status: 'ended_by_user',
+        isEndedByUser: true,
+        lastVisitedPath: `/interview-report?id=${targetSessionId}`,
+      })
+    }
+
+    // 10. Call backend to mark interview as concluded
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const endRes = await fetch(getApiUrl(`/api/interview/${interviewId}/end`), {
+      const endRes = await fetch(getApiUrl(`/api/interview/${targetSessionId}/end`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1415,29 +1599,29 @@ export default function InterviewRoom() {
       })
       if (endRes.ok) {
         const endData = await endRes.json()
+        if (endData.sessionId) {
+          localStorage.setItem('hiremind_last_interview_id', endData.sessionId)
+        }
         if (endData.demoAccess && updateDemoQuota) {
           updateDemoQuota(endData.demoAccess)
         }
       }
       if (checkInterviewAccessStatus) {
-        await checkInterviewAccessStatus()
+        await checkInterviewAccessStatus().catch(() => {})
       }
     } catch (e) {
       console.warn('Manual end call network notice:', e)
     }
 
-    if (interviewId && interviewId !== 'default') {
-      saveInterviewSession({
-        id: interviewId,
-        status: 'ended_by_user',
-        isEndedByUser: true,
-        lastVisitedPath: `/interview-report?id=${interviewId}`,
-      })
+    // 11. Final voice kill before navigation
+    stopCurrentAudio()
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try { window.speechSynthesis.cancel() } catch (_) {}
     }
 
     setIsEnding(false)
     setIsEndModalOpen(false)
-    navigate(`/interview-report?id=${interviewId}`)
+    navigate(`/interview-report?id=${targetSessionId}`, { replace: true })
   }
 
   // Derive dynamic session information
@@ -1783,15 +1967,15 @@ export default function InterviewRoom() {
                   <span>{isPaused ? '▶ Resume' : '⏸ Pause'}</span>
                 </button>
 
-                {/* Stage End Interview Button */}
+                {/* Stage Stop / End Interview Button */}
                 <button
                   type="button"
                   className="int-room-stage-end-btn"
                   onClick={handleEndCall}
-                  title="Conclude Interview & View Evaluation"
-                  aria-label="End Interview"
+                  title="Stop Interview & View Evaluation"
+                  aria-label="Stop Interview"
                 >
-                  <span>End Interview</span>
+                  <span>Stop Interview</span>
                 </button>
 
                 {/* Floating Microphone Action Button */}
@@ -2625,7 +2809,7 @@ export default function InterviewRoom() {
               <button
                 type="button"
                 className="int-room-end-modal__cancel-btn"
-                onClick={() => setIsEndModalOpen(false)}
+                onClick={handleCancelEndModal}
                 disabled={isEnding}
               >
                 Keep Practicing

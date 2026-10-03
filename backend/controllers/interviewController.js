@@ -1225,7 +1225,16 @@ exports.manualEndLiveInterview = async (req, res) => {
   try {
     const { sessionId } = req.params;
 
-    let session = await InterviewSession.findOne({ sessionId });
+    let session = null;
+    if (sessionId && sessionId !== 'default' && sessionId !== 'latest') {
+      session = await InterviewSession.findOne({ sessionId });
+    }
+    if (!session && req.user?._id) {
+      session = await InterviewSession.findOne({ userId: req.user._id }).sort({ updatedAt: -1 });
+    }
+    if (!session) {
+      session = await InterviewSession.findOne().sort({ updatedAt: -1 });
+    }
     if (!session) {
       return res.status(404).json({ success: false, message: 'Interview session not found.' });
     }
@@ -1265,6 +1274,7 @@ exports.manualEndLiveInterview = async (req, res) => {
       success: true,
       status: 'ended_by_user',
       isComplete: true,
+      sessionId: session.sessionId,
       demoAccess: demoAccessUpdate,
       message: 'Interview concluded successfully.',
       interviewState: session.interviewState,
@@ -1289,13 +1299,14 @@ exports.getOrGenerateEvaluation = async (req, res) => {
     const forceRefresh = req.query.force === 'true' || req.body?.force === true;
 
     let session = null;
-    if (sessionId === 'latest' || sessionId === 'recent' || sessionId === 'default') {
-      session = await InterviewSession.findOne().sort({ updatedAt: -1 });
-    } else {
+    if (sessionId && sessionId !== 'latest' && sessionId !== 'recent' && sessionId !== 'default') {
       session = await InterviewSession.findOne({ sessionId });
-      if (!session) {
-        session = await InterviewSession.findOne().sort({ updatedAt: -1 });
-      }
+    }
+    if (!session && req.user?._id) {
+      session = await InterviewSession.findOne({ userId: req.user._id }).sort({ updatedAt: -1 });
+    }
+    if (!session) {
+      session = await InterviewSession.findOne().sort({ updatedAt: -1 });
     }
 
     if (!session) {
