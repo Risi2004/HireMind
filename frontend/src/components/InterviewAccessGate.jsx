@@ -1,5 +1,5 @@
 import { useState, useEffect, useEffectEvent } from 'react'
-import { Link, Outlet } from 'react-router-dom'
+import { Link, Outlet, useParams } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import './InterviewAccessGate.css'
 
@@ -15,16 +15,33 @@ export default function InterviewAccessGate({ children }) {
     checkInterviewAccessStatus,
   } = useAuth()
 
+  // Interview id from the matched child route (/new-interview/:id, /interview-room/:id, ...)
+  const { id: interviewId } = useParams()
+
   // Only show checking state initially if the candidate is not yet recognized as authorized
   const [checking, setChecking] = useState(() => !isAdmin && !canAccessInterview)
 
-  // Reads the latest auth values without making the mount-only effect below re-run
-  const verifyAccess = useEffectEvent(async () => {
-    if (isAdmin || canAccessInterview) return
-    await checkInterviewAccessStatus()
+  // The demo pass is consumed when an interview STARTS. That drops the remaining count to 0
+  // while the candidate is still inside the interview, so "has passes left" alone is the
+  // wrong test. Access granted on entering an interview is kept for that interview...
+  const [grantedInterviewId, setGrantedInterviewId] = useState(null)
+  if (canAccessInterview && interviewId && grantedInterviewId !== interviewId) {
+    setGrantedInterviewId(interviewId)
+  }
+  // ...and the server also confirms access for an already-started interview (e.g. after a refresh)
+  const [serverApprovedId, setServerApprovedId] = useState(null)
+
+  const isAuthorized =
+    canAccessInterview ||
+    (Boolean(interviewId) && (grantedInterviewId === interviewId || serverApprovedId === interviewId))
+
+  // Reads the latest auth values without re-running the effect below on every change
+  const verifyAccess = useEffectEvent(async (targetId) => {
+    if (isAdmin || canAccessInterview) return null
+    return checkInterviewAccessStatus(targetId)
   })
 
-  // Verify access with backend on initial navigation to interview routes (once, with a safety timeout)
+  // Verify access with the backend when entering an interview route (safety timeout included)
   useEffect(() => {
     let isMounted = true
     // Safety timeout: Never leave user stuck on spinner if network is slow or sleeping
@@ -32,7 +49,12 @@ export default function InterviewAccessGate({ children }) {
       if (isMounted) setChecking(false)
     }, 2500)
 
-    verifyAccess()
+    verifyAccess(interviewId)
+      .then((data) => {
+        if (isMounted && interviewId && data?.activeSessionAccess) {
+          setServerApprovedId(interviewId)
+        }
+      })
       .catch(() => {})
       .finally(() => {
         if (isMounted) setChecking(false)
@@ -42,10 +64,10 @@ export default function InterviewAccessGate({ children }) {
       isMounted = false
       clearTimeout(timer)
     }
-  }, [])
+  }, [interviewId])
 
-  // 1. Authorized (Admin or Demo User with remaining quota) -> Render Interview Page Immediately
-  if (canAccessInterview) {
+  // 1. Authorized (Admin, demo user with remaining passes, or an interview already in progress)
+  if (isAuthorized) {
     return children ? children : <Outlet />
   }
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const InterviewSession = require('../models/InterviewSession');
 const {
   analyzeResume,
   analyzeJobDescription,
@@ -64,7 +65,7 @@ router.get('/live-events', optionalProtect, (req, res) => {
 });
 
 // Check candidate's AI Interview Demo Access status
-router.get('/access-status', optionalProtect, (req, res) => {
+router.get('/access-status', optionalProtect, async (req, res) => {
   if (!req.user) {
     return res.status(200).json({
       success: true,
@@ -102,11 +103,33 @@ router.get('/access-status', optionalProtect, (req, res) => {
   const completed = Number(demo.completedInterviews) || 0;
   const remaining = Math.max(0, allowed - completed);
   const isEnabled = Boolean(demo.enabled);
-  const canAccess = isEnabled && remaining > 0;
+
+  // An interview that already consumed its demo pass (at start) may be continued even
+  // when no passes remain — otherwise the candidate is locked out of their own interview
+  // right after the first question. Only unfinished sessions owned by this user qualify.
+  let hasActiveSessionAccess = false;
+  const { sessionId } = req.query;
+  if (isEnabled && remaining === 0 && typeof sessionId === 'string' && sessionId && sessionId.length <= 128) {
+    try {
+      hasActiveSessionAccess = Boolean(
+        await InterviewSession.exists({
+          sessionId,
+          userId: req.user._id,
+          isDemoCounted: true,
+          status: { $nin: ['completed', 'ended_by_user'] },
+        })
+      );
+    } catch (err) {
+      console.warn('[Access Status] Active session lookup failed:', err.message);
+    }
+  }
+
+  const canAccess = isEnabled && (remaining > 0 || hasActiveSessionAccess);
 
   return res.status(200).json({
     success: true,
     canAccess,
+    activeSessionAccess: hasActiveSessionAccess,
     isAdmin: false,
     isAuthenticated: true,
     isProfileSetupCompleted: Boolean(req.user.isProfileSetupCompleted),

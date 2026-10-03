@@ -611,10 +611,12 @@ export function AuthProvider({ children }) {
     })
   }
 
-  const checkInterviewAccessStatus = async () => {
+  // Pass `sessionId` to also ask whether that specific (already started) interview may continue
+  const checkInterviewAccessStatus = async (sessionId = null) => {
     try {
       const activeToken = token || localStorage.getItem('hiremind_token')
-      const res = await apiFetch('/api/interview/access-status', {
+      const query = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
+      const res = await apiFetch(`/api/interview/access-status${query}`, {
         headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
       })
       const data = await res.json()
