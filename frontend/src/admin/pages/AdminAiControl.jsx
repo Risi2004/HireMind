@@ -5,11 +5,8 @@ import {
   MicIcon,
   VolumeIcon,
   DatabaseIcon,
-  ClockIcon,
   CheckCircleIcon,
   XCircleIcon,
-  TrendingUpIcon,
-  ActivityIcon,
 } from '../AdminIcons'
 import './AdminPage.css'
 import './AdminAiControl.css'

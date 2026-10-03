@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import OnboardingHeader from '../components/OnboardingHeader'
-import { useProfileSetup } from '../context/ProfileSetupContext'
+import { useProfileSetup } from '../context/useProfileSetup'
 import './ProfileSetup.css'
 import './YourField.css'
 import './CareerStage.css'

@@ -15,7 +15,6 @@ import {
   VolumeIcon,
   DatabaseIcon,
   CloseIcon,
-  SearchIcon,
 } from '../AdminIcons'
 import './AdminPage.css'
 import './AdminDashboard.css'

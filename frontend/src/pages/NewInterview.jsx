@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useEffectEvent, useRef, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import recordingDotIcon from '../assets/icons/recording.svg'
 import attachmentIcon from '../assets/icons/attachment.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import jdSkillsIcon from '../assets/icons/jdskills.svg'
@@ -8,7 +7,7 @@ import researchEngIcon from '../assets/icons/research engineering.svg'
 import genQuestionsIcon from '../assets/icons/generating questions.svg'
 import tick2Icon from '../assets/icons/tick2.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { generateInterviewId, getInterviewSession, saveInterviewSession } from '../utils/interviewUtils'
 import { getApiUrl } from '../config/api'
 import './NewInterview.css'
@@ -20,7 +19,6 @@ export default function NewInterview() {
     user: authUser,
     token: authToken,
     connectUserGithub,
-    canAccessInterview,
     hasDemoAccess,
     remainingInterviews,
     allowedInterviews,
@@ -45,10 +43,6 @@ export default function NewInterview() {
       navigate(`/new-interview/${generateInterviewId()}`, { replace: true })
     }
   }, [id, navigate])
-
-  // Session recording state & timer
-  const [isRecording, setIsRecording] = useState(false)
-  const [secondsElapsed, setSecondsElapsed] = useState(0)
 
   // Form setup state
   const [targetRole, setTargetRole] = useState('')
@@ -87,6 +81,34 @@ export default function NewInterview() {
 
   const fileInputRef = useRef(null)
   const isLoadedRef = useRef(false)
+
+  // Restore this interview's locally cached setup. Runs during render whenever the
+  // interview id changes (React's "adjust state on prop change" pattern), so the form
+  // never flashes empty and no extra effect-driven render is needed.
+  const [restoredSessionId, setRestoredSessionId] = useState(null)
+  if (id && restoredSessionId !== id) {
+    setRestoredSessionId(id)
+    const cached = getInterviewSession(id)
+    if (cached) {
+      if (cached.targetRole && cached.targetRole !== 'New Interview') setTargetRole(cached.targetRole)
+      if (cached.company) setCompany(cached.company)
+      if (cached.jobDescription) setJobDescription(cached.jobDescription)
+      if (cached.interviewType) setInterviewType(cached.interviewType)
+      if (cached.difficulty) setDifficulty(cached.difficulty)
+      if (cached.duration) setDuration(cached.duration)
+      if (cached.uploadedResume) setUploadedResume(cached.uploadedResume)
+      if (cached.resumeAnalysis) setResumeAnalysis(cached.resumeAnalysis)
+      if (cached.jdAnalysis) setJdAnalysis(cached.jdAnalysis)
+      if (cached.userFacingPlan || cached.interviewPlan) {
+        setPlanData(cached.userFacingPlan || cached.interviewPlan)
+      }
+      if (cached.isGithubConnected !== undefined) {
+        setIsGithubConnected(cached.isGithubConnected)
+      } else if (authUser?.github?.connected) {
+        setIsGithubConnected(true)
+      }
+    }
+  }
 
   // Sync isGithubConnected if user has GitHub connected in profile
   useEffect(() => {
@@ -169,67 +191,51 @@ export default function NewInterview() {
     return true
   }, [jdAnalysis, resumeAnalysis, targetRole, authUser])
 
-  // Load existing session data on mount
-  useEffect(() => {
-    if (!id) return
-
-    const session = getInterviewSession(id)
-    if (session) {
-      if (session.targetRole && session.targetRole !== 'New Interview') setTargetRole(session.targetRole)
-      if (session.company) setCompany(session.company)
-      if (session.jobDescription) setJobDescription(session.jobDescription)
-      if (session.interviewType) setInterviewType(session.interviewType)
-      if (session.difficulty) setDifficulty(session.difficulty)
-      if (session.duration) setDuration(session.duration)
-      if (session.uploadedResume) setUploadedResume(session.uploadedResume)
-      if (session.resumeAnalysis) setResumeAnalysis(session.resumeAnalysis)
-      if (session.jdAnalysis) setJdAnalysis(session.jdAnalysis)
-      if (session.userFacingPlan || session.interviewPlan) {
-        setPlanData(session.userFacingPlan || session.interviewPlan)
-      }
-      if (session.isGithubConnected !== undefined) {
-        setIsGithubConnected(session.isGithubConnected)
-      } else if (authUser?.github?.connected) {
-        setIsGithubConnected(true)
+  // Apply the backend copy of this interview (primary source of truth)
+  const applyRemoteSession = useEffectEvent((s) => {
+    if (s.targetRole && s.targetRole !== 'New Interview') setTargetRole(s.targetRole)
+    if (s.company) setCompany(s.company)
+    if (s.jobDescription) setJobDescription(s.jobDescription)
+    if (s.interviewType) setInterviewType(s.interviewType)
+    if (s.difficulty) setDifficulty(s.difficulty)
+    if (s.duration) setDuration(s.duration)
+    if (s.resumeFileName) setUploadedResume(s.resumeFileName.replace(/^resumes\//, ''))
+    if (s.jdAnalysis) setJdAnalysis(s.jdAnalysis)
+    if (s.userFacingPlan || s.interviewPlan) {
+      setPlanData(s.userFacingPlan || s.interviewPlan)
+      if (s.status === 'planned') {
+        setShowPlanView(true)
       }
     }
+    if (s.isGithubConnected !== undefined) {
+      setIsGithubConnected(s.isGithubConnected)
+    } else if (authUser?.github?.connected) {
+      setIsGithubConnected(true)
+    }
+    // Discard old mock fallbacks
+    if (s.resumeAnalysis && !s.resumeAnalysis?.summary?.includes('Qualified software engineer')) {
+      setResumeAnalysis(s.resumeAnalysis)
+    }
+  })
 
-    // Attempt to fetch from backend MongoDB as primary source of truth
-    fetch(getApiUrl(`/api/interview/${id}`))
+  // Load existing session data from the backend (requires the signed-in owner's token)
+  useEffect(() => {
+    if (!id) return
+    const activeToken = authToken || localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+    fetch(getApiUrl(`/api/interview/${id}`), {
+      headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && data.success && data.session) {
-          const s = data.session
-          if (s.targetRole && s.targetRole !== 'New Interview') setTargetRole(s.targetRole)
-          if (s.company) setCompany(s.company)
-          if (s.jobDescription) setJobDescription(s.jobDescription)
-          if (s.interviewType) setInterviewType(s.interviewType)
-          if (s.difficulty) setDifficulty(s.difficulty)
-          if (s.duration) setDuration(s.duration)
-          if (s.resumeFileName) setUploadedResume(s.resumeFileName.replace(/^resumes\//, ''))
-          if (s.jdAnalysis) setJdAnalysis(s.jdAnalysis)
-          if (s.userFacingPlan || s.interviewPlan) {
-            setPlanData(s.userFacingPlan || s.interviewPlan)
-            if (s.status === 'planned') {
-              setShowPlanView(true)
-            }
-          }
-          if (s.isGithubConnected !== undefined) {
-            setIsGithubConnected(s.isGithubConnected)
-          } else if (authUser?.github?.connected) {
-            setIsGithubConnected(true)
-          }
-          // Discard old mock fallbacks
-          if (s.resumeAnalysis && !s.resumeAnalysis?.summary?.includes('Qualified software engineer')) {
-            setResumeAnalysis(s.resumeAnalysis)
-          }
+          applyRemoteSession(data.session)
         }
       })
       .catch(() => {})
       .finally(() => {
         isLoadedRef.current = true
       })
-  }, [id])
+  }, [id, authToken])
 
   // Auto-save any form changes to persistent storage
   useEffect(() => {
@@ -276,30 +282,11 @@ export default function NewInterview() {
         }).catch((err) => {
           console.warn('[Interview Session] Sync to MongoDB failed:', err.message)
         })
-      } catch (_) {}
+      } catch { /* non-critical; safe to ignore */ }
     }, 300)
 
     return () => clearTimeout(syncTimer)
   }, [id, targetRole, company, jobDescription, interviewType, difficulty, duration, uploadedResume, resumeAnalysis, jdAnalysis, isGithubConnected, isAnalyzingResume, isAnalyzingJd, authUser, authToken])
-
-  // Live timer effect
-  useEffect(() => {
-    let interval = null
-    if (isRecording) {
-      interval = setInterval(() => {
-        setSecondsElapsed((prev) => prev + 1)
-      }, 1000)
-    }
-    return () => {
-      if (interval) clearInterval(interval)
-    }
-  }, [isRecording])
-
-  const formatTimer = (totalSeconds) => {
-    const mins = Math.floor(totalSeconds / 60)
-    const secs = totalSeconds % 60
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-  }
 
   const handleStartToggle = async () => {
     if (isAnalyzingResume || isAnalyzingJd) return
@@ -400,7 +387,7 @@ export default function NewInterview() {
           status: 'in_progress',
         }),
       }).catch(() => {})
-    } catch (_) {}
+    } catch { /* non-critical; safe to ignore */ }
 
     navigate(`/new-interview/${interviewId}/room`)
   }
@@ -1447,7 +1434,7 @@ export default function NewInterview() {
             {/* START INTERVIEW ACTION (Placed below GitHub) */}
             <button
               type="button"
-              className={`new-int-card-start-btn ${isRecording ? 'is-active' : ''} ${isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete ? 'is-disabled' : ''} ${planData ? 'is-plan-ready' : ''}`}
+              className={`new-int-card-start-btn ${isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete ? 'is-disabled' : ''} ${planData ? 'is-plan-ready' : ''}`}
               onClick={handleStartToggle}
               disabled={isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete}
               title={
@@ -1490,14 +1477,6 @@ export default function NewInterview() {
                     <line x1="16" y1="17" x2="8" y2="17" />
                   </svg>
                   <span>View Interview Plan</span>
-                </>
-              ) : isRecording ? (
-                <>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="6" y="4" width="4" height="16" />
-                    <rect x="14" y="4" width="4" height="16" />
-                  </svg>
-                  <span>Pause Interview</span>
                 </>
               ) : (
                 <>

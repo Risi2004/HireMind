@@ -615,11 +615,12 @@ Keep responses professional, concise (2-4 sentences max), constructive, and ask 
         : ['architecture and design patterns', 'state management and concurrency', 'database indexing and performance', 'error handling and resilience'];
       const topic = topics[(candidateTurnCount - 1) % topics.length];
 
+      // Neutral follow-ups only: without the model we cannot judge the answer, so no praise or assessment.
       const dynamicPrompts = [
-        `That makes good sense regarding your implementation approach, ${candidateName}. Let's dive deeper into ${topic}: how would you handle high concurrency and prevent race conditions in this scenario?`,
-        `Thank you for explaining that clearly. For the ${role} position at ${company}, reliability is paramount. Regarding ${topic}, what metrics or observability signals would you track to detect bottlenecks before users are impacted?`,
-        `Great insights on that topic, ${candidateName}. Shifting to our next area in ${topic}: could you walk me through a trade-off you made between development velocity and system maintainability?`,
-        `Excellent points. To wrap up this section of our ${session.interviewType || 'technical'} assessment, how would you design unit and integration tests to validate the edge cases of your solution?`,
+        `Thank you, ${candidateName}. Let's look at ${topic}: how would you handle high concurrency and prevent race conditions in this scenario?`,
+        `Noted. For the ${role} position at ${company}, regarding ${topic}, what metrics or observability signals would you track to detect bottlenecks before users are impacted?`,
+        `Thank you. Moving on to ${topic}: could you walk me through a trade-off you made between development velocity and system maintainability?`,
+        `Understood. To wrap up this section of our ${session.interviewType || 'technical'} interview, how would you design unit and integration tests to validate the edge cases of your solution?`,
       ];
 
       aiReplyText = dynamicPrompts[(candidateTurnCount - 1) % dynamicPrompts.length];
@@ -1389,50 +1390,23 @@ exports.getOrGenerateEvaluation = async (req, res) => {
       console.warn('[AI Service] Could not connect to Python Evaluation Agent:', aiErr.message);
     }
 
-    // Fallback if AI service did not respond with evaluationData
+    // No genuine evaluation -> tell the client honestly instead of inventing scores.
+    // Nothing is cached, so the report page can simply retry later.
     if (!evaluationData) {
-      const candidateTurns = (session.chatMessages || []).filter(m => m.role === 'candidate').length;
-      const isMidway = session.status === 'ended_by_user' || (session.interviewState?.status === 'ended_by_user');
-      const baseScore = Math.min(94, Math.max(58, 70 + Math.min(candidateTurns * 3, 14)));
-
-      const summary = isMidway
-        ? `${candidateName} concluded the ${session.interviewType || 'Role-Specific'} session after completing ${candidateTurns} responses for the ${targetRole} position at ${company}. The evaluation scores only the domains and answers covered during the session.`
-        : `The candidate completed an adaptive ${session.interviewType || 'Role-Specific'} session for ${targetRole} at ${company}. Across ${candidateTurns} responses, they addressed core competencies with practical domain perspective.`;
-
-      evaluationData = {
-        overallScore: baseScore,
-        readinessBadge: baseScore >= 80 ? 'Interview Ready' : baseScore >= 65 ? 'Good Progress' : 'Foundation Required',
-        summary,
-        technicalSkills: [
-          { name: 'Core Domain Knowledge', score: Math.min(95, baseScore + 3), status: 'Good', isFlagged: false },
-          { name: 'Practical Problem Solving', score: baseScore, status: 'Average', isFlagged: false },
-          { name: 'System & Architecture Reasoning', score: Math.max(55, baseScore - 8), status: baseScore - 8 < 60 ? 'Needs Attention' : 'Good', isFlagged: baseScore - 8 < 60 },
-          { name: 'Implementation & Quality', score: Math.min(92, baseScore + 1), status: 'Good', isFlagged: false },
-        ],
-        strongestSkill: 'Core Domain Knowledge',
-        needsAttentionSkill: 'System & Architecture Reasoning',
-        performanceBreakdown: [
-          { name: 'Technical Depth', score: Math.min(95, baseScore + 3), color: '#3b82f6' },
-          { name: 'Problem Solving', score: baseScore, color: '#10b981' },
-          { name: 'Architecture & Design', score: Math.max(50, baseScore - 5), color: '#8b5cf6' },
-          { name: 'Communication', score: Math.min(90, baseScore - 2), color: '#f59e0b' },
-        ],
-        communicationAnalysis: [
-          { name: 'Clarity of Explanation', score: 85, color: '#06b6d4' },
-          { name: 'Structured Thinking', score: 80, color: '#6366f1' },
-          { name: 'Confidence & Delivery', score: 82, color: '#ec4899' },
-          { name: 'Conciseness & Pace', score: 78, color: '#14b8a6' },
-        ],
-        aiRecommendation: {
-          headline: 'Primary Focus: Structure Your Answers',
-          insight: `Focus on structuring explanations with concrete examples and measurable outcomes for the ${targetRole} position.`,
-          strengths: ['Clear articulate explanations', 'Practical awareness of technical trade-offs'],
-          improvements: ['Elaborate with concrete architectural edge cases', 'Structure complex answers with STAR methodology'],
-          nextSteps: ['Conduct mock system design drills', 'Review production incident troubleshooting scenarios'],
-          hiringRecommendation: baseScore >= 75 ? 'Strong Hire' : 'Re-evaluate after further practice',
+      return res.status(503).json({
+        success: false,
+        error: 'EVALUATION_UNAVAILABLE',
+        retryable: true,
+        message: 'Your interview report could not be generated right now because the AI evaluator is unavailable. Your transcript is saved — please try again in a few minutes.',
+        session: {
+          sessionId: session.sessionId,
+          targetRole,
+          company,
+          candidateName,
+          status: session.status,
+          createdAt: session.createdAt,
         },
-        trendScores: [baseScore - 4, baseScore - 2, baseScore + 1, baseScore, baseScore],
-      };
+      });
     }
 
     // Persist evaluation
@@ -1666,40 +1640,40 @@ Candidate's explanation: ${cleanExplanation || 'Candidate implemented the soluti
 Evaluate their solution concisely (1-2 sentences): acknowledge correctness, highlight the time & space complexity (Big-O), and note any edge-case considerations. Then smoothly transition to our next section: ${nextStage.name || 'the next phase'} by asking the first question for that section.`;
 
     let aiReviewText = '';
-    if (process.env.OPENROUTER_API_KEY) {
-      try {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: process.env.AI_MODEL || 'qwen/qwen3.8-27b',
-            messages: [
-              {
-                role: 'system',
-                content: `You are the HireMind Lead Technical Interviewer. Evaluate the candidate's code submission professionally, comment on algorithmic complexity, and then smoothly introduce the next interview section: ${nextStage.name || 'General Knowledge and Behavioral Fit'}. Strictly ask ONE question.`,
-              },
-              { role: 'user', content: promptSummary },
-            ],
-            max_tokens: 350,
-            temperature: 0.3,
-          }),
-          signal: AbortSignal.timeout(20000),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          aiReviewText = data.choices?.[0]?.message?.content?.trim();
-        }
-      } catch (err) {
-        console.warn('[Interview Controller] OpenRouter code evaluation note:', err.message);
+    let isAiReviewed = false;
+    try {
+      const reviewRes = await fetch(`${AI_SERVICE_URL}/agents/code-review/review`, {
+        method: 'POST',
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          code,
+          language: language || '',
+          runOutput: runOutput || '',
+          explanation: cleanExplanation,
+          nextStageName: nextStage.name || '',
+          nextStageTopics: Array.isArray(nextStage.topics) ? nextStage.topics : [],
+        }),
+        signal: AbortSignal.timeout(45000),
+      });
+      if (reviewRes.ok) {
+        const data = await reviewRes.json();
+        aiReviewText = (data.review || '').trim();
+        isAiReviewed = Boolean(aiReviewText);
+      } else {
+        console.warn(`[Interview Controller] Code review unavailable (HTTP ${reviewRes.status})`);
       }
+    } catch (err) {
+      console.warn('[Interview Controller] Code review request failed:', err.message);
     }
 
     if (!aiReviewText) {
-      aiReviewText = `Thank you for sharing that solution. Your implementation demonstrates a clean approach with expected O(N) runtime characteristics. Let's transition to our next section, ${nextStage.name || 'Industry Trends and Team Collaboration'}. To start, could you share your perspective on how your team approaches code quality and architectural trade-offs?`;
+      // Honest fallback: acknowledge the submission without claiming anything about its
+      // correctness or complexity, and move on with a question from the next stage's plan.
+      const nextTopic = (Array.isArray(nextStage.topics) && nextStage.topics[0]) || '';
+      const nextName = nextStage.name || 'the next section';
+      aiReviewText = `Thank you, I've saved your solution. I couldn't review it automatically just now, so it will be assessed in your final report. Let's move on to ${nextName}.${
+        nextTopic ? ` Could you walk me through your experience with ${nextTopic}?` : ' Could you tell me how you would approach the problems in this area?'
+      }`;
     }
 
     // Advance to next stage
@@ -1731,7 +1705,7 @@ Evaluate their solution concisely (1-2 sentences): acknowledge correctness, high
         stageId: nextStage.id,
         stageName: nextStage.name,
         action: 'NEXT_STAGE',
-        reasonCode: 'CODE_SUBMITTED',
+        reasonCode: isAiReviewed ? 'CODE_REVIEWED' : 'CODE_REVIEW_UNAVAILABLE',
       },
       timestamp: new Date(),
     };

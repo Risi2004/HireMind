@@ -1,17 +1,34 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   PilotAccessIcon,
-  UsersIcon,
   InterviewsIcon,
   SearchIcon,
   CloseIcon,
   SparklesIcon,
-  CheckCircleIcon,
   ClockIcon,
 } from '../AdminIcons'
 import { getApiUrl } from '../../config/api'
 import './AdminPage.css'
 import './AdminPilotAccess.css'
+
+// Fetch demo accounts data from the backend (no React state; throws on failure)
+async function requestDemoAccounts() {
+  const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+  const res = await fetch(getApiUrl('/api/admin/demo-accounts'), {
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to load demo accounts (${res.status})`)
+  }
+  const data = await res.json()
+  if (!data.success) {
+    throw new Error(data.message || 'Unable to retrieve demo accounts')
+  }
+  return data
+}
 
 export default function AdminPilotAccess() {
   const [loading, setLoading] = useState(true)
@@ -61,28 +78,18 @@ export default function AdminPilotAccess() {
     setTimeout(() => setToastMessage(''), 4000)
   }
 
-  // Fetch demo accounts data from backend
+  // Apply a demo-accounts API response to page state
+  const applyDemoData = (data) => {
+    setError(null)
+    setStats(data.stats || {})
+    setDemoAccounts(data.demoAccounts || [])
+    setEligibleCandidates(data.eligibleCandidates || [])
+  }
+
+  // Refresh after admin actions (data updates in place, no full-table spinner)
   const fetchDemoData = async () => {
     try {
-      setLoading(true)
-      const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const res = await fetch(getApiUrl('/api/admin/demo-accounts'), {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (!res.ok) {
-        throw new Error(`Failed to load demo accounts (${res.status})`)
-      }
-
-      const data = await res.json()
-      if (data.success) {
-        setStats(data.stats || {})
-        setDemoAccounts(data.demoAccounts || [])
-        setEligibleCandidates(data.eligibleCandidates || [])
-      }
+      applyDemoData(await requestDemoAccounts())
     } catch (err) {
       console.error('[AdminPilotAccess] Error loading data:', err)
       setError(err.message)
@@ -91,8 +98,23 @@ export default function AdminPilotAccess() {
     }
   }
 
+  // Initial load
   useEffect(() => {
-    fetchDemoData()
+    let ignore = false
+    requestDemoAccounts()
+      .then((data) => {
+        if (!ignore) applyDemoData(data)
+      })
+      .catch((err) => {
+        console.error('[AdminPilotAccess] Error loading data:', err)
+        if (!ignore) setError(err.message)
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
   }, [])
 
   // Filtered Demo Accounts list
@@ -154,7 +176,7 @@ export default function AdminPilotAccess() {
             const bc = new BroadcastChannel('hiremind_demo_sync')
             bc.postMessage({ userId: selectedCandidate._id, action: 'grant', timestamp: Date.now() })
             bc.close()
-          } catch (_) {}
+          } catch { /* non-critical; safe to ignore */ }
           localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: selectedCandidate._id, action: 'grant', timestamp: Date.now() }))
         }
         setIsGrantModalOpen(false)
@@ -201,7 +223,7 @@ export default function AdminPilotAccess() {
             const bc = new BroadcastChannel('hiremind_demo_sync')
             bc.postMessage({ userId: refreshTargetUser._id, action: 'refresh', timestamp: Date.now() })
             bc.close()
-          } catch (_) {}
+          } catch { /* non-critical; safe to ignore */ }
           localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: refreshTargetUser._id, action: 'refresh', timestamp: Date.now() }))
         }
         setRefreshTargetUser(null)
@@ -245,7 +267,7 @@ export default function AdminPilotAccess() {
             const bc = new BroadcastChannel('hiremind_demo_sync')
             bc.postMessage({ userId: cancelTargetUser._id, action: 'cancel', timestamp: Date.now() })
             bc.close()
-          } catch (_) {}
+          } catch { /* non-critical; safe to ignore */ }
           localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: cancelTargetUser._id, action: 'cancel', timestamp: Date.now() }))
         }
         setCancelTargetUser(null)
@@ -495,6 +517,12 @@ export default function AdminPilotAccess() {
                 <tr>
                   <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
                     Loading demo accounts...
+                  </td>
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan="6" role="alert" style={{ textAlign: 'center', padding: '40px', color: '#f87171' }}>
+                    Failed to load demo accounts: {error}
                   </td>
                 </tr>
               ) : filteredDemoAccounts.length === 0 ? (

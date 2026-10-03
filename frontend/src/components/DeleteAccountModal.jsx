@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import './DeleteAccountModal.css'
 
-export default function DeleteAccountModal({ isOpen, onClose }) {
+// The content mounts fresh each time the modal opens, so the form always starts empty
+export default function DeleteAccountModal(props) {
+  if (!props.isOpen) return null
+  return <DeleteAccountModalContent {...props} />
+}
+
+function DeleteAccountModalContent({ isOpen, onClose }) {
   const { user, deleteAccount } = useAuth()
   const navigate = useNavigate()
 
@@ -14,19 +20,6 @@ export default function DeleteAccountModal({ isOpen, onClose }) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
-
-  // Reset state when modal opens or closes
-  useEffect(() => {
-    if (isOpen) {
-      setPassword('')
-      setShowPassword(false)
-      setConfirmWord('')
-      setAcknowledged(false)
-      setIsDeleting(false)
-      setError('')
-      setSuccess(false)
-    }
-  }, [isOpen])
 
   // Close on Escape key press
   useEffect(() => {

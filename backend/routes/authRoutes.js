@@ -75,7 +75,7 @@ router.delete('/account', protect, deleteAccount);
 // Two-Factor Authentication (MFA) endpoints
 router.post('/2fa/setup', protect, generate2FASetup);
 router.post('/2fa/enable', protect, twoFactorLimiter, enable2FA);
-router.post('/2fa/disable', protect, disable2FA);
+router.post('/2fa/disable', protect, twoFactorLimiter, disable2FA);
 router.post('/2fa/verify-login', twoFactorLimiter, verify2FALogin);
 
 // Secure streaming route from private Cloudflare R2 bucket

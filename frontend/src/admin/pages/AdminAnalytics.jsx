@@ -6,11 +6,8 @@ import {
   SparklesIcon,
   PilotAccessIcon,
   TrendingUpIcon,
-  TrendingDownIcon,
   ActivityIcon,
   CheckCircleIcon,
-  FeedbackIcon,
-  SearchIcon,
   BotIcon,
 } from '../AdminIcons'
 import './AdminPage.css'

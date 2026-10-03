@@ -7,7 +7,6 @@ import {
   XCircleIcon,
   SearchIcon,
   TrendingUpIcon,
-  TrendingDownIcon,
   CloseIcon,
   CheckCircleIcon,
   ClockIcon,
@@ -16,6 +15,25 @@ import {
 import { getApiUrl } from '../../config/api'
 import './AdminPage.css'
 import './AdminUsers.css'
+
+// Fetch all users from the backend (no React state; throws on failure)
+async function requestUsers() {
+  const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+  const res = await fetch(getApiUrl('/api/admin/users'), {
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  if (!res.ok) {
+    throw new Error(`Failed to load users (${res.status})`)
+  }
+  const data = await res.json()
+  if (!data.success) {
+    throw new Error(data.message || 'Unable to retrieve users')
+  }
+  return data
+}
 
 export default function AdminUsers() {
   const navigate = useNavigate()
@@ -39,7 +57,8 @@ export default function AdminUsers() {
   const pageSize = 8
 
   // Selected User for View Profile Details Modal
-  const [selectedUser, setSelectedUser] = useState(null)
+  // Store only the id; the shown record is derived from the latest users list
+  const [selectedUserId, setSelectedUserId] = useState(null)
 
   // Demo Access Modal state
   const [demoManageUser, setDemoManageUser] = useState(null)
@@ -60,57 +79,53 @@ export default function AdminUsers() {
   // ========================================================================
   // LIVE API FETCH
   // ========================================================================
+  // Apply a users API response to page state
+  const applyUsersData = useCallback((data) => {
+    setError(null)
+    setUsersList(data.users || [])
+    setStats(
+      data.stats || {
+        totalUsers: data.users?.length || 0,
+        activeUsers: 0,
+        demoUsers: 0,
+        inactiveUsers: 0,
+      }
+    )
+  }, [])
+
+  // Refresh after admin actions / refresh button (data updates in place)
   const fetchUsers = useCallback(async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-
-      const res = await fetch(getApiUrl('/api/admin/users'), {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (!res.ok) {
-        throw new Error(`Failed to load users (${res.status})`)
-      }
-
-      const data = await res.json()
-      if (data.success) {
-        setUsersList(data.users || [])
-        setStats(
-          data.stats || {
-            totalUsers: data.users?.length || 0,
-            activeUsers: 0,
-            demoUsers: 0,
-            inactiveUsers: 0,
-          }
-        )
-      } else {
-        throw new Error(data.message || 'Unable to retrieve users')
-      }
+      applyUsersData(await requestUsers())
     } catch (err) {
       console.error('[AdminUsers] Error loading users:', err)
       setError(err.message)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [applyUsersData])
 
+  // Initial load
   useEffect(() => {
-    fetchUsers()
-  }, [fetchUsers])
-
-
-  // Sync selected user when usersList updates
-  useEffect(() => {
-    if (selectedUser) {
-      const updated = usersList.find((u) => u.id === selectedUser.id)
-      if (updated) setSelectedUser(updated)
+    let ignore = false
+    requestUsers()
+      .then((data) => {
+        if (!ignore) applyUsersData(data)
+      })
+      .catch((err) => {
+        console.error('[AdminUsers] Error loading users:', err)
+        if (!ignore) setError(err.message)
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
     }
-  }, [usersList, selectedUser])
+  }, [applyUsersData])
+
+
+  const selectedUser = selectedUserId ? usersList.find((u) => u.id === selectedUserId) || null : null
 
   // ========================================================================
   // FILTERING & SORTING LOGIC
@@ -190,7 +205,7 @@ export default function AdminUsers() {
             const bc = new BroadcastChannel('hiremind_demo_sync')
             bc.postMessage({ userId: demoManageUser.id, action: 'grant', timestamp: Date.now() })
             bc.close()
-          } catch (_) {}
+          } catch { /* non-critical; safe to ignore */ }
           localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: demoManageUser.id, action: 'grant', timestamp: Date.now() }))
         }
         setDemoManageUser(null)
@@ -232,7 +247,7 @@ export default function AdminUsers() {
             const bc = new BroadcastChannel('hiremind_demo_sync')
             bc.postMessage({ userId: demoManageUser.id, action: 'refresh', timestamp: Date.now() })
             bc.close()
-          } catch (_) {}
+          } catch { /* non-critical; safe to ignore */ }
           localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: demoManageUser.id, action: 'refresh', timestamp: Date.now() }))
         }
         setDemoManageUser(null)
@@ -277,7 +292,7 @@ export default function AdminUsers() {
             const bc = new BroadcastChannel('hiremind_demo_sync')
             bc.postMessage({ userId: demoManageUser.id, action: 'cancel', timestamp: Date.now() })
             bc.close()
-          } catch (_) {}
+          } catch { /* non-critical; safe to ignore */ }
           localStorage.setItem('hiremind_demo_sync', JSON.stringify({ userId: demoManageUser.id, action: 'cancel', timestamp: Date.now() }))
         }
         setDemoManageUser(null)
@@ -780,7 +795,7 @@ export default function AdminUsers() {
                 onClick={() => {
                   const target = actionPopupUser
                   setActionPopupUser(null)
-                  setSelectedUser(target)
+                  setSelectedUserId(target?.id ?? null)
                 }}
               >
                 <div className="action-popup-item__icon action-popup-item__icon--cyan">
@@ -853,7 +868,7 @@ export default function AdminUsers() {
       {selectedUser && (
         <div
           className="user-details-modal-backdrop"
-          onClick={() => setSelectedUser(null)}
+          onClick={() => setSelectedUserId(null)}
           style={{ zIndex: 99999 }}
         >
           <div
@@ -889,7 +904,7 @@ export default function AdminUsers() {
               <button
                 type="button"
                 className="admin-sidebar__collapse-btn"
-                onClick={() => setSelectedUser(null)}
+                onClick={() => setSelectedUserId(null)}
                 aria-label="Close details"
               >
                 <CloseIcon size={16} />
@@ -1099,7 +1114,7 @@ export default function AdminUsers() {
               <button
                 type="button"
                 className="admin-btn admin-btn--primary admin-btn--sm"
-                onClick={() => setSelectedUser(null)}
+                onClick={() => setSelectedUserId(null)}
               >
                 Close Profile
               </button>

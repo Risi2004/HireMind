@@ -57,6 +57,18 @@ const checkOtp = async (email, code, purpose) => {
   return true;
 };
 
+// Verify a 6-digit TOTP code (±30s drift) against a base32 secret
+const isValidTotp = (code, secret) => {
+  const token = String(code ?? '').trim();
+  if (!/^\d{6}$/.test(token) || !secret) return false;
+  try {
+    const result = verifySync({ token, secret, window: 1 });
+    return Boolean(result && result.valid);
+  } catch {
+    return false;
+  }
+};
+
 const KEYBOARD_WALK_REGEX = /(?:qwer|wert|erty|rtyu|tyui|yuio|uiop|asdf|sdfg|dfgh|fghj|ghjk|hjkl|zxcv|xcvb|cvbn|vbnm|1234|2345|3456|4567|5678|6789|7890|abcd|bcde|cdef|defg|efgh|fghi|ghij|hijk|ijkl|jklm|klmn|lmno|mnop|nopq|opqr|pqrs|qrst|rstu|stuv|tuvw|uvwx|vwxy|wxyz|rewq|trew|ytre|iuyt|oiuy|poiu|lkjh|kjhg|jhgf|hgfd|gfed|fdsa|mnbv|nbvc|bvcx|vcxz|4321|5432|6543|7654|8765|9876|0987|dcba|edcb|fedc|gfed|hgfe|ihgf|jihg|kjih|lkji|mlkj|nmlk|onml|ponm|qpon|rqpo|srqp|tsrq|utsr|vuts|wvut|xwvu|yxwv|zyxw)/i;
 
 // Shared password policy for registration and password reset. Returns an error message or null.
@@ -634,6 +646,18 @@ const enable2FA = async (req, res) => {
 
     // Update user
     const dbUser = await User.findById(user._id).select('+twoFactorSecret');
+
+    // Replacing an active authenticator is equivalent to disabling 2FA, so it also
+    // requires a valid code from the CURRENT authenticator.
+    if (dbUser.twoFactorEnabled && dbUser.twoFactorSecret) {
+      if (!isValidTotp(req.body.currentCode, dbUser.twoFactorSecret)) {
+        return res.status(400).json({
+          message: 'Enter a valid code from your current authenticator app to reconfigure two-factor authentication.',
+          requiresCurrentCode: true,
+        });
+      }
+    }
+
     dbUser.twoFactorEnabled = true;
     dbUser.twoFactorSecret = secret;
     dbUser.twoFactorFrequency = frequency === 'every_two_weeks' ? 'every_two_weeks' : 'always';
@@ -677,6 +701,16 @@ const disable2FA = async (req, res) => {
     const dbUser = await User.findById(user._id).select('+twoFactorSecret');
     if (!dbUser) {
       return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Require proof of the authenticator device: a stolen session token alone
+    // must not be enough to strip 2FA from the account.
+    if (dbUser.twoFactorEnabled && dbUser.twoFactorSecret) {
+      if (!isValidTotp(req.body?.code, dbUser.twoFactorSecret)) {
+        return res.status(400).json({
+          message: 'Enter the current 6-digit code from your authenticator app to disable two-factor authentication.',
+        });
+      }
     }
 
     dbUser.twoFactorEnabled = false;

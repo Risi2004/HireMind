@@ -22,6 +22,10 @@ from config.settings import (
 logger = logging.getLogger("InterviewEvaluationAgent")
 
 
+class EvaluationUnavailableError(RuntimeError):
+    """Raised when no genuine model-generated evaluation could be produced."""
+
+
 # -------------------------------------------------------------------------
 # Pydantic Schemas for Evaluation
 # -------------------------------------------------------------------------
@@ -138,7 +142,6 @@ class InterviewEvaluationAgent:
         # Format candidate transcript turns and extract covered topics
         formatted_dialogue = []
         candidate_turns = 0
-        total_candidate_words = 0
         has_code_submission = False
 
         for msg in chat_messages:
@@ -149,7 +152,6 @@ class InterviewEvaluationAgent:
             formatted_dialogue.append(f"{speaker}: {content}")
             if speaker == "Candidate":
                 candidate_turns += 1
-                total_candidate_words += len(content.split())
 
         transcript_text = "\n\n".join(formatted_dialogue) if formatted_dialogue else "No interview dialogue recorded."
 
@@ -172,6 +174,7 @@ class InterviewEvaluationAgent:
             f"DIFFICULTY: {difficulty}\n"
             f"QUESTIONS ASKED: {state.get('questionsAsked', candidate_turns)}\n"
             f"CANDIDATE TURNS: {candidate_turns}\n"
+            f"CODE SUBMITTED: {'Yes' if has_code_submission else 'No'}\n"
             f"STATUS: {status_label}\n\n"
             f"INTERVIEW TRANSCRIPT:\n"
             f"{transcript_text}\n\n"
@@ -195,19 +198,10 @@ class InterviewEvaluationAgent:
                     logger.warning(f"EvaluationOutput validation notice: {val_err}. Normalizing output.")
                     return self._normalize_evaluation(parsed, role, company, candidate_name)
 
-        logger.info("Using deterministic evaluation synthesis for report.")
-        return self._heuristic_evaluation(
-            candidate_name=candidate_name,
-            role=role,
-            company=company,
-            interview_type=interview_type,
-            difficulty=difficulty,
-            chat_messages=chat_messages,
-            state=state,
-            candidate_turns=candidate_turns,
-            total_candidate_words=total_candidate_words,
-            is_midway=is_midway,
-            has_code_submission=has_code_submission,
+        # No made-up report: if the model could not produce an evaluation, say so and let
+        # the caller retry later, rather than inventing scores from word counts.
+        raise EvaluationUnavailableError(
+            "The evaluation model did not return a valid assessment. Please try again shortly."
         )
 
     def _call_llm(self, prompt: str) -> Optional[str]:
@@ -278,193 +272,56 @@ class InterviewEvaluationAgent:
         company: str,
         candidate_name: str
     ) -> Dict[str, Any]:
-        """Ensure all required fields exist with consistent defaults."""
-        score = int(parsed.get("overallScore", 78))
-        badge = parsed.get("readinessBadge") or ("Strong Candidate" if score >= 80 else "Good Progress" if score >= 65 else "Needs Practice")
-        summary = parsed.get("summary") or f"{candidate_name} demonstrated good foundational readiness for the {role} role at {company}, showing solid technical communication."
+        """Normalize a model evaluation that failed strict schema validation.
 
-        tech_skills = parsed.get("technicalSkills", [])
-        if not tech_skills:
-            tech_skills = [
-                {"name": "Domain Concepts", "score": min(95, score + 4), "isFlagged": False},
-                {"name": "Architecture & Workflow", "score": score, "isFlagged": False},
-                {"name": "!System Trade-offs", "score": max(55, score - 15), "isFlagged": True},
-            ]
+        Only data the model actually produced is kept. Missing sections become empty
+        rather than being filled with invented scores or boilerplate text.
+        """
 
-        perf_breakdown = parsed.get("performanceBreakdown", [])
-        if not perf_breakdown:
-            perf_breakdown = [
-                {"name": "Technical Knowledge", "score": score, "isFlagged": False},
-                {"name": "Problem Solving", "score": min(90, score + 2), "isFlagged": False},
-                {"name": "!Communication", "score": max(60, score - 12), "isFlagged": True},
-            ]
+        def clamp_score(value: Any) -> Optional[int]:
+            try:
+                return max(0, min(100, int(round(float(value)))))
+            except (TypeError, ValueError):
+                return None
 
-        comm_analysis = parsed.get("communicationAnalysis", [])
-        if not comm_analysis:
-            comm_analysis = [
-                {"name": "Clarity", "score": score, "isFlagged": False},
-                {"name": "!Answer Structure", "score": max(62, score - 14), "isFlagged": True},
-            ]
+        def clean_items(items: Any) -> List[Dict[str, Any]]:
+            cleaned = []
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, dict) or not item.get("name"):
+                    continue
+                item_score = clamp_score(item.get("score"))
+                if item_score is None:
+                    continue
+                cleaned.append({
+                    "name": str(item["name"]),
+                    "score": item_score,
+                    "isFlagged": bool(item.get("isFlagged", item_score < 70)),
+                })
+            return cleaned
 
-        ai_rec = parsed.get("aiRecommendation", {})
-        if not ai_rec.get("headline"):
-            ai_rec = {
-                "headline": "Primary Focus: Structure Your Answers",
-                "insight": f"Focus on structuring explanations with the STAR method (Situation, Task, Action, Result) to give clear, impactful examples for {role}.",
-                "primaryFocus": "Answer Structure & Concrete Examples"
-            }
+        score = clamp_score(parsed.get("overallScore"))
+        if score is None:
+            raise EvaluationUnavailableError("The evaluation model returned an invalid overall score.")
 
-        trend_scores = parsed.get("trendScores", [70, 75, score, min(95, score + 4)])
+        badge = parsed.get("readinessBadge") or (
+            "Strong Candidate" if score >= 80 else "Good Progress" if score >= 65 else "Needs Practice"
+        )
+        tech_skills = clean_items(parsed.get("technicalSkills"))
+        ai_rec = parsed.get("aiRecommendation") if isinstance(parsed.get("aiRecommendation"), dict) else {}
+        trend_scores = [
+            s for s in (clamp_score(v) for v in parsed.get("trendScores") or []) if s is not None
+        ]
 
         return {
             "overallScore": score,
             "readinessBadge": badge,
-            "summary": summary,
+            "summary": str(parsed.get("summary") or ""),
             "technicalSkills": tech_skills,
-            "strongestSkill": parsed.get("strongestSkill") or (tech_skills[0]["name"] if tech_skills else "Core Domain Competencies"),
-            "needsAttentionSkill": parsed.get("needsAttentionSkill") or (tech_skills[-1]["name"] if tech_skills else "System Design & Trade-offs"),
-            "performanceBreakdown": perf_breakdown,
-            "communicationAnalysis": comm_analysis,
+            "strongestSkill": parsed.get("strongestSkill") or (tech_skills[0]["name"] if tech_skills else ""),
+            "needsAttentionSkill": parsed.get("needsAttentionSkill") or (tech_skills[-1]["name"] if tech_skills else ""),
+            "performanceBreakdown": clean_items(parsed.get("performanceBreakdown")),
+            "communicationAnalysis": clean_items(parsed.get("communicationAnalysis")),
             "aiRecommendation": ai_rec,
-            "trendScores": trend_scores,
-        }
-
-    def _heuristic_evaluation(
-        self,
-        candidate_name: str,
-        role: str,
-        company: str,
-        interview_type: str,
-        difficulty: str,
-        chat_messages: List[Dict[str, Any]],
-        state: Dict[str, Any],
-        candidate_turns: int,
-        total_candidate_words: int,
-        is_midway: bool = False,
-        has_code_submission: bool = False,
-    ) -> Dict[str, Any]:
-        """Deterministic evaluation synthesizing transcript metrics, candidate word counts,
-        domain topics, and stage progression when LLM is unavailable.
-        Fairly assesses only what was covered if the interview was ended mid-way.
-        """
-        avg_words = total_candidate_words / max(1, candidate_turns)
-
-        # Baseline score calculation based on candidate responses
-        base_score = 74
-        if avg_words >= 30:
-            base_score += 6
-        elif avg_words >= 15:
-            base_score += 3
-        elif avg_words < 10 and candidate_turns > 0:
-            base_score -= 8
-
-        # Check for technical depth keywords in candidate responses
-        candidate_text = " ".join([m.get("content", "") for m in chat_messages if m.get("role") in ["candidate", "user"]]).lower()
-        interviewer_text = " ".join([m.get("content", "") for m in chat_messages if m.get("role") in ["assistant", "interviewer", "system"]]).lower()
-
-        if any(w in candidate_text for w in ["architecture", "redis", "postgres", "trade-off", "latency", "scale", "concurrency", "optimize", "pipeline", "cache"]):
-            base_score += 4
-
-        if has_code_submission:
-            base_score += 4
-
-        overall_score = max(55, min(94, base_score))
-        badge = "Strong Candidate" if overall_score >= 82 else "Good Progress" if overall_score >= 68 else "Needs Practice"
-
-        # Dynamically build domain technical skills based on topics actually asked
-        tech_skills = []
-        is_software = any(w in role.lower() for w in ["software", "developer", "engineer", "frontend", "backend", "full-stack", "data", "devops"])
-        is_marketing = any(w in role.lower() for w in ["marketing", "growth", "seo", "campaign"])
-        is_accounting = any(w in role.lower() for w in ["account", "finance", "audit", "tax"])
-
-        # Detect specific domains explored in interviewer questions
-        asked_project = any(w in interviewer_text for w in ["project", "resume", "cv", "portfolio", "built", "designed", "previous work"])
-        asked_theory = any(w in interviewer_text for w in ["concept", "principle", "under the hood", "difference between", "database", "memory", "thread", "concurrency", "acid", "index"])
-        asked_scenario = any(w in interviewer_text for w in ["scenario", "outage", "production", "crash", "scale", "traffic", "spike", "trade-off", "failure", "incident"])
-        asked_coding = has_code_submission or any(w in interviewer_text for w in ["code", "function", "algorithm", "solution", "array", "string", "ide", "write a function"])
-
-        if is_software:
-            if asked_project:
-                tech_skills.append({"name": "Project Architecture & Implementation", "score": min(95, overall_score + 4), "isFlagged": False})
-            if asked_theory:
-                tech_skills.append({"name": "Core CS Foundations & Theory", "score": min(92, overall_score + 2), "isFlagged": False})
-            if asked_scenario:
-                tech_skills.append({"name": "Production Scenarios & Trade-offs", "score": max(60, overall_score - 8), "isFlagged": overall_score - 8 < 70})
-            if asked_coding:
-                tech_skills.append({"name": "Live Coding & Algorithmic Problem Solving", "score": min(94, overall_score + 3), "isFlagged": False})
-
-            # If none specifically caught or fewer than 3, add primary domain skills
-            if len(tech_skills) < 3:
-                tech_skills.append({"name": "API Design & Backend Patterns", "score": overall_score, "isFlagged": False})
-                tech_skills.append({"name": "Data Consistency & Storage", "score": max(62, overall_score - 10), "isFlagged": overall_score - 10 < 70})
-        elif is_marketing:
-            if asked_project:
-                tech_skills.append({"name": "Campaign Portfolio & Execution", "score": min(95, overall_score + 4), "isFlagged": False})
-            tech_skills.append({"name": "CAC & Conversion Funnels", "score": min(92, overall_score + 2), "isFlagged": False})
-            tech_skills.append({"name": "Attribution & Performance Analytics", "score": overall_score, "isFlagged": False})
-            tech_skills.append({"name": "!A/B Testing & Experimentation", "score": max(60, overall_score - 12), "isFlagged": True})
-        elif is_accounting:
-            if asked_project:
-                tech_skills.append({"name": "Financial Reporting & Reconciliations", "score": min(95, overall_score + 4), "isFlagged": False})
-            tech_skills.append({"name": "GAAP/IFRS Principles & Compliance", "score": min(90, overall_score + 2), "isFlagged": False})
-            tech_skills.append({"name": "Variance Analysis & Cost Tracking", "score": overall_score, "isFlagged": False})
-            tech_skills.append({"name": "!Internal Controls & Risk Management", "score": max(62, overall_score - 12), "isFlagged": True})
-        else:
-            tech_skills.append({"name": "Domain Expertise & Concepts", "score": min(94, overall_score + 4), "isFlagged": False})
-            tech_skills.append({"name": "Practical Problem Solving", "score": overall_score, "isFlagged": False})
-            tech_skills.append({"name": "!Advanced Methodology & Strategy", "score": max(60, overall_score - 12), "isFlagged": True})
-
-        strongest = tech_skills[0]["name"] if tech_skills else "Technical Knowledge"
-        needs_attention = tech_skills[-1]["name"] if len(tech_skills) > 1 else "Architectural Trade-offs"
-
-        perf_breakdown = [
-            {"name": "Technical Knowledge", "score": min(92, overall_score + 3), "isFlagged": False},
-            {"name": "Communication", "score": max(65, overall_score - (10 if avg_words < 15 else 4)), "isFlagged": (overall_score - (10 if avg_words < 15 else 4)) < 70},
-            {"name": "Problem Solving", "score": min(90, overall_score + 2), "isFlagged": False},
-            {"name": "Confidence", "score": max(66, overall_score - 6), "isFlagged": False},
-        ]
-
-        comm_analysis = [
-            {"name": "Clarity & Articulation", "score": min(90, overall_score), "isFlagged": False},
-            {"name": "Answer Structure (STAR)", "score": max(62, overall_score - 12), "isFlagged": True},
-            {"name": "Technical Vocabulary", "score": min(88, overall_score + 2), "isFlagged": False},
-        ]
-
-        headline = "Primary Focus: Structure Your Explanations"
-        insight = (
-            f"You demonstrated solid domain knowledge across the topics discussed for the {role} role. "
-            f"To elevate your responses, organize answers with direct concrete context, explicit action steps, and measurable trade-offs."
-        )
-
-        trend_scores = [max(60, overall_score - 8), max(65, overall_score - 4), overall_score, min(95, overall_score + 2)]
-
-        if is_midway:
-            summary = (
-                f"{candidate_name} completed an active portion ({candidate_turns} answers) of the {interview_type} simulation "
-                f"for {role} at {company} before the interview concluded. The evaluation accurately assesses only the domains "
-                f"covered during the session without penalizing for unreached stages."
-            )
-        else:
-            summary = (
-                f"{candidate_name} completed the {interview_type} interview simulation for {role} at {company}. "
-                f"They demonstrated a solid grasp of core fundamentals and practical implementation, "
-                f"with key opportunities to provide deeper architectural reasoning and structured trade-off analysis."
-            )
-
-        return {
-            "overallScore": overall_score,
-            "readinessBadge": badge,
-            "summary": summary,
-            "technicalSkills": tech_skills,
-            "strongestSkill": strongest,
-            "needsAttentionSkill": needs_attention,
-            "performanceBreakdown": perf_breakdown,
-            "communicationAnalysis": comm_analysis,
-            "aiRecommendation": {
-                "headline": headline,
-                "insight": insight,
-                "primaryFocus": "Structured Problem Solving & Clear Metrics"
-            },
             "trendScores": trend_scores,
         }
 

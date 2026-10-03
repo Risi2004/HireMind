@@ -5,12 +5,8 @@ import {
   PilotAccessIcon,
   ClockIcon,
   XCircleIcon,
-  CheckCircleIcon,
   CloseIcon,
   SearchIcon,
-  TrendingUpIcon,
-  TrendingDownIcon,
-  BotIcon,
 } from '../AdminIcons'
 import './AdminPage.css'
 import './AdminFeedback.css'

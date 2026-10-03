@@ -7,7 +7,6 @@ import {
   FeedbackIcon,
   BotIcon,
   ReportsIcon,
-  ClockIcon,
   SparklesIcon,
   CloseIcon,
 } from '../AdminIcons'

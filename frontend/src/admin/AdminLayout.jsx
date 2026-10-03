@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import logoDarkImg from '../assets/images/logo-dark.png'
 import {
@@ -16,7 +16,6 @@ import {
   BellIcon,
   LogoutIcon,
   MenuIcon,
-  CloseIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
 } from './AdminIcons'
@@ -125,7 +124,7 @@ const ROUTE_META = {
   },
 }
 
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 
 export default function AdminLayout() {
   const location = useLocation()
@@ -138,11 +137,14 @@ export default function AdminLayout() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showLogoutToast, setShowLogoutToast] = useState(false)
 
-  // Auto-close mobile drawer on route change
-  useEffect(() => {
+  // Auto-close mobile drawer & notifications on route change
+  // (adjusting state during render when the path changes, instead of in an effect)
+  const [lastPathname, setLastPathname] = useState(location.pathname)
+  if (lastPathname !== location.pathname) {
+    setLastPathname(location.pathname)
     setIsMobileOpen(false)
     setShowNotifications(false)
-  }, [location.pathname])
+  }
 
   // Get current page meta or fallback
   const currentMeta = ROUTE_META[location.pathname] || {
@@ -225,7 +227,7 @@ export default function AdminLayout() {
 
         {/* Sidebar Navigation Items */}
         <nav className="admin-sidebar__nav">
-          {ADMIN_NAV_ITEMS.map((item, index) => {
+          {ADMIN_NAV_ITEMS.map((item) => {
             const Icon = item.icon
             return (
               <div key={item.path}>

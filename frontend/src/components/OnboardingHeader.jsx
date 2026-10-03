@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import logo from '../assets/images/3.png'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import './OnboardingHeader.css'
 
 export default function OnboardingHeader() {
   const { user } = useAuth()
-  const [imageError, setImageError] = useState(false)
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState(null)
 
   const initial = user?.firstName?.trim()
     ? user.firstName.trim().charAt(0).toUpperCase()
@@ -13,9 +13,8 @@ export default function OnboardingHeader() {
 
   const avatarUrl = user?.avatarUrl
 
-  useEffect(() => {
-    setImageError(false)
-  }, [avatarUrl])
+  // A new avatar URL gets a fresh attempt automatically
+  const imageError = Boolean(avatarUrl) && failedAvatarUrl === avatarUrl
 
   return (
     <header className="onboarding-header">
@@ -31,7 +30,7 @@ export default function OnboardingHeader() {
             className="onboarding-header__avatar-img"
             src={avatarUrl}
             alt={user?.firstName || 'User'}
-            onError={() => setImageError(true)}
+            onError={() => setFailedAvatarUrl(avatarUrl)}
           />
         ) : (
           <span className="onboarding-header__initial">{initial}</span>

@@ -23,6 +23,8 @@ export default function InterviewReport() {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [session, setSession] = useState(null)
   const [evaluation, setEvaluation] = useState(null)
   const [chatMessages, setChatMessages] = useState([])
@@ -32,43 +34,53 @@ export default function InterviewReport() {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel()
-      } catch (_) {}
+      } catch {
+        // Speech synthesis may be unavailable; nothing to stop
+      }
     }
   }, [])
 
-  // Fetch dynamic evaluation and session details from backend
+  // Fetch the evaluation from the backend. No placeholder report is ever shown:
+  // if the evaluator is unavailable the page says so and offers a retry.
   useEffect(() => {
     let isMounted = true
 
     const fetchEvaluation = async () => {
-      setIsLoading(true)
       try {
         const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-        const targetId = (sessionId && sessionId !== 'default') 
-          ? sessionId 
-          : (localStorage.getItem('hiremind_last_interview_id') || 'latest')
-        const res = await fetch(getApiUrl(`/api/interview/${targetId}/evaluation`), {
+        const res = await fetch(getApiUrl(`/api/interview/${sessionId}/evaluation`), {
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
         })
+        const data = await res.json().catch(() => ({}))
+        if (!isMounted) return
 
-        if (res.ok) {
-          const data = await res.json()
-          if (isMounted && data.success) {
-            setEvaluation(data.evaluation)
-            setSession(data.session)
-            setChatMessages(data.chatMessages || [])
-          }
+        if (res.ok && data.success && data.evaluation) {
+          setEvaluation(data.evaluation)
+          setSession(data.session)
+          setChatMessages(data.chatMessages || [])
+          setLoadError(null)
         } else {
-          console.warn('[InterviewReport] Non-200 response, using fallback evaluation')
+          if (data.session) setSession(data.session)
+          setLoadError({
+            message:
+              data.message ||
+              (res.status === 404
+                ? 'We could not find this interview report.'
+                : 'Your interview report could not be loaded right now.'),
+            retryable: res.status !== 404 && res.status !== 403,
+          })
         }
-      } catch (err) {
-        console.warn('[InterviewReport] Failed to fetch live evaluation:', err)
-      } finally {
+      } catch {
         if (isMounted) {
-          setIsLoading(false)
+          setLoadError({
+            message: 'Could not reach the HireMind server. Please check your connection and try again.',
+            retryable: true,
+          })
         }
+      } finally {
+        if (isMounted) setIsLoading(false)
       }
     }
 
@@ -76,67 +88,39 @@ export default function InterviewReport() {
     return () => {
       isMounted = false
     }
-  }, [sessionId])
+  }, [sessionId, reloadKey])
 
-  // Dynamic values with sensible defaults
-  const displayRole = session?.targetRole || 'Software Engineer Intern'
-  const displayCompany = session?.company || 'WSO2'
-  const displayCandidate = session?.candidateName || 'Candidate'
-  const overallScore = evaluation?.overallScore ?? 78
-  const readinessBadge =
-    evaluation?.readinessBadge ||
-    (overallScore >= 80 ? 'Interview Ready' : overallScore >= 65 ? 'Good Progress' : 'Needs Practice')
-
-  const summaryText =
-    evaluation?.summary ||
-    `Candidate completed an adaptive ${session?.interviewType || 'technical'} interview for the ${displayRole} role at ${displayCompany}. They demonstrated sound problem solving and practical experience with key domain technologies.`
-
-  const technicalSkills = evaluation?.technicalSkills && evaluation.technicalSkills.length > 0
-    ? evaluation.technicalSkills
-    : [
-        { name: 'REST APIs & Backend Logic', score: 82, isFlagged: false },
-        { name: 'Database Architecture & SQL', score: 76, isFlagged: false },
-        { name: 'Clean Code & Layering', score: 74, isFlagged: false },
-        { name: '!Database Design & Indexing', score: 62, isFlagged: true },
-        { name: '!System Design & Scalability', score: 58, isFlagged: true },
-      ]
-
-  const strongestSkill = evaluation?.strongestSkill || 'REST APIs & Backend Logic'
-  const needsAttentionSkill = evaluation?.needsAttentionSkill || 'System Design & Scalability'
-
-  const performanceBreakdown = evaluation?.performanceBreakdown && evaluation.performanceBreakdown.length > 0
-    ? evaluation.performanceBreakdown
-    : [
-        { name: 'Technical Depth', score: 80, isFlagged: false },
-        { name: '!Communication', score: 66, isFlagged: true },
-        { name: 'Problem Solving', score: 82, isFlagged: false },
-        { name: 'Confidence', score: 74, isFlagged: false },
-        { name: 'Behavioral', score: 78, isFlagged: false },
-      ]
-
-  const communicationAnalysis = evaluation?.communicationAnalysis && evaluation.communicationAnalysis.length > 0
-    ? evaluation.communicationAnalysis
-    : [
-        { name: 'Clarity of Explanation', score: 76, isFlagged: false },
-        { name: '!Answer Structure', score: 62, isFlagged: true },
-        { name: 'Speaking Pace', score: 80, isFlagged: false },
-        { name: 'Vocabulary', score: 74, isFlagged: false },
-        { name: 'Confidence', score: 70, isFlagged: false },
-      ]
-
-  const aiRecommendation = evaluation?.aiRecommendation || {
-    headline: 'Primary Focus: Structure Your Answers',
-    insight:
-      'You demonstrated solid domain knowledge. Utilize the STAR method (Situation, Task, Action, Result) to keep your technical explanations structured, concise, and focused on system trade-offs.',
-    primaryFocus: 'Structured Problem Solving & Clear Metrics',
+  const handleRetry = () => {
+    setIsLoading(true)
+    setLoadError(null)
+    setReloadKey((key) => key + 1)
   }
 
-  // Generate dynamic SVG curve coordinates from trend scores
-  const trendScores = evaluation?.trendScores && evaluation.trendScores.length >= 3
-    ? evaluation.trendScores
-    : [overallScore - 8, overallScore - 2, overallScore - 4, overallScore + 1, overallScore]
+  // Values come only from the stored session / AI evaluation — no invented defaults
+  const displayRole = session?.targetRole || 'Interview Report'
+  const displayCompany = session?.company || ''
+  const displayCandidate = session?.candidateName || 'Candidate'
+  const overallScore = typeof evaluation?.overallScore === 'number' ? evaluation.overallScore : null
+  const readinessBadge =
+    evaluation?.readinessBadge ||
+    (overallScore === null ? '' : overallScore >= 80 ? 'Interview Ready' : overallScore >= 65 ? 'Good Progress' : 'Needs Practice')
+
+  const summaryText = evaluation?.summary || ''
+  const technicalSkills = Array.isArray(evaluation?.technicalSkills) ? evaluation.technicalSkills : []
+  const strongestSkill = evaluation?.strongestSkill || ''
+  const needsAttentionSkill = evaluation?.needsAttentionSkill || ''
+  const performanceBreakdown = Array.isArray(evaluation?.performanceBreakdown) ? evaluation.performanceBreakdown : []
+  const communicationAnalysis = Array.isArray(evaluation?.communicationAnalysis) ? evaluation.communicationAnalysis : []
+  const aiRecommendation =
+    evaluation?.aiRecommendation && typeof evaluation.aiRecommendation === 'object' ? evaluation.aiRecommendation : {}
+  const trendScores = Array.isArray(evaluation?.trendScores)
+    ? evaluation.trendScores.filter((v) => typeof v === 'number')
+    : []
 
   const buildTrendSvgPath = () => {
+    if (trendScores.length < 2) {
+      return { pathD: null, areaD: null, lastPoint: null, midPoint: null }
+    }
     const width = 600
     const height = 200
     const pointsCount = trendScores.length
@@ -175,7 +159,7 @@ export default function InterviewReport() {
     transcriptText += `Candidate: ${displayCandidate}\n`
     transcriptText += `Target Role: ${displayRole}\n`
     transcriptText += `Company: ${displayCompany}\n`
-    transcriptText += `Overall Readiness Score: ${overallScore}%\n`
+    transcriptText += `Overall Readiness Score: ${overallScore ?? 'N/A'}%\n`
     transcriptText += `Status: ${readinessBadge}\n`
     transcriptText += `Generated At: ${new Date().toLocaleString()}\n\n`
     transcriptText += `EXECUTIVE SUMMARY\n`
@@ -183,10 +167,10 @@ export default function InterviewReport() {
     transcriptText += `${summaryText}\n\n`
     transcriptText += `PERFORMANCE EVALUATION OVERVIEW\n`
     transcriptText += `-------------------------------\n`
-    transcriptText += `Strongest Competency: ${strongestSkill}\n`
-    transcriptText += `Needs Most Attention: ${needsAttentionSkill}\n`
-    transcriptText += `Primary AI Recommendation: ${aiRecommendation.headline}\n`
-    transcriptText += `Insight: ${aiRecommendation.insight}\n\n`
+    transcriptText += `Strongest Competency: ${strongestSkill || 'Not assessed'}\n`
+    transcriptText += `Needs Most Attention: ${needsAttentionSkill || 'Not assessed'}\n`
+    transcriptText += `Primary AI Recommendation: ${aiRecommendation.headline || 'Not provided'}\n`
+    transcriptText += `Insight: ${aiRecommendation.insight || 'Not provided'}\n\n`
     transcriptText += `INTERVIEW TRANSCRIPT\n`
     transcriptText += `--------------------\n`
 
@@ -200,7 +184,7 @@ export default function InterviewReport() {
         transcriptText += `[${speaker} - ${time}]\n${msg.content}\n\n`
       })
     } else {
-      transcriptText += `(Candidate completed simulated interview assessment without live text logs)\n`
+      transcriptText += `(No messages were recorded for this session)\n`
     }
 
     const blob = new Blob([transcriptText], { type: 'text/plain;charset=utf-8' })
@@ -218,17 +202,17 @@ export default function InterviewReport() {
     roadmapText += `=======================================================\n`
     roadmapText += `Candidate: ${displayCandidate}\n`
     roadmapText += `Target Role: ${displayRole} @ ${displayCompany}\n`
-    roadmapText += `Current Readiness Score: ${overallScore}% (${readinessBadge})\n\n`
+    roadmapText += `Current Readiness Score: ${overallScore ?? 'N/A'}% (${readinessBadge || 'Not assessed'})\n\n`
     roadmapText += `1. EXECUTIVE EVALUATION\n`
     roadmapText += `   ${summaryText}\n\n`
     roadmapText += `2. KEY TECHNICAL FOCUS\n`
-    roadmapText += `   - Top Strength: ${strongestSkill}\n`
-    roadmapText += `   - Growth Target: ${needsAttentionSkill}\n\n`
+    roadmapText += `   - Top Strength: ${strongestSkill || 'Not assessed'}\n`
+    roadmapText += `   - Growth Target: ${needsAttentionSkill || 'Not assessed'}\n\n`
     roadmapText += `3. ACTIONABLE AI RECOMMENDATION\n`
-    roadmapText += `   ${aiRecommendation.headline}\n`
-    roadmapText += `   ${aiRecommendation.insight}\n\n`
+    roadmapText += `   ${aiRecommendation.headline || 'Not provided'}\n`
+    roadmapText += `   ${aiRecommendation.insight || ''}\n\n`
     roadmapText += `4. 7-DAY ACTION PLAN FOR ${displayRole.toUpperCase()}\n`
-    roadmapText += `   Day 1-2: Core fundamentals of ${needsAttentionSkill}.\n`
+    roadmapText += `   Day 1-2: Core fundamentals of ${needsAttentionSkill || 'your weakest topic from this interview'}.\n`
     roadmapText += `   Day 3-4: Trade-off and architecture design drills.\n`
     roadmapText += `   Day 5-6: Behavioral & structured communication (STAR technique).\n`
     roadmapText += `   Day 7: Re-attempt HireMind adaptive simulation.\n`
@@ -338,17 +322,40 @@ export default function InterviewReport() {
           </div>
         )}
 
+        {!isLoading && !evaluation && (
+          <div className="rep-card" style={{ maxWidth: '560px', margin: '48px auto', textAlign: 'center', padding: '32px 24px' }}>
+            <h3 className="rep-card-title" style={{ marginBottom: '10px' }}>Report not available yet</h3>
+            <p style={{ margin: '0 0 20px', fontSize: '13px', color: '#94a3b8', lineHeight: 1.6 }}>
+              {loadError?.message || 'Your interview report could not be loaded right now.'}
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              {loadError?.retryable !== false && (
+                <button type="button" className="rep-btn rep-btn--download" onClick={handleRetry}>
+                  <span>Try Again</span>
+                </button>
+              )}
+              <button type="button" className="rep-btn rep-btn--restart" onClick={() => navigate('/dashboard')}>
+                <span>Back to Dashboard</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {evaluation && (
+        <>
         {/* ROW 1: Hero Readiness Card & Technical Skills */}
         <div className="rep-grid-top">
           {/* Top-Left Hero Card */}
           <div className="rep-hero-card">
             <div className="rep-hero-left">
-              <span className="rep-hero-badge">{readinessBadge}</span>
+              {readinessBadge && <span className="rep-hero-badge">{readinessBadge}</span>}
               <h2 className="rep-hero-role">{displayRole}</h2>
-              <div className="rep-hero-company">
-                <img src={company1Icon} alt="" className="rep-hero-company-icon" />
-                <span>{displayCompany}</span>
-              </div>
+              {displayCompany && (
+                <div className="rep-hero-company">
+                  <img src={company1Icon} alt="" className="rep-hero-company-icon" />
+                  <span>{displayCompany}</span>
+                </div>
+              )}
 
               {/* Dynamic Executive Summary Blurb */}
               <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', maxWidth: '480px' }}>
@@ -381,7 +388,7 @@ export default function InterviewReport() {
             <div className="rep-score-box">
               <span className="rep-score-label">Readiness Score</span>
               <div className="rep-score-num-wrap">
-                <span className="rep-score-val">{overallScore}</span>
+                <span className="rep-score-val">{overallScore ?? '—'}</span>
                 <span className="rep-score-unit">%<br />SCORE</span>
               </div>
             </div>
@@ -392,6 +399,7 @@ export default function InterviewReport() {
             <h3 className="rep-card-title">Technical Skills</h3>
 
             <div className="rep-bars-list">
+              {technicalSkills.length === 0 && <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Not assessed in this session.</p>}
               {technicalSkills.map((skill) => (
                 <div key={skill.name} className="rep-bar-row">
                   <span className={`rep-bar-name ${skill.isFlagged ? 'is-flagged' : ''}`}>
@@ -412,11 +420,11 @@ export default function InterviewReport() {
             <div className="rep-tech-highlights">
               <div className="rep-highlight-box">
                 <span className="rep-highlight-tag">STRONGEST</span>
-                <span className="rep-highlight-val">{strongestSkill}</span>
+                <span className="rep-highlight-val">{strongestSkill || 'Not assessed'}</span>
               </div>
               <div className="rep-highlight-box rep-highlight-box--warning">
                 <span className="rep-highlight-tag rep-highlight-tag--warning">NEEDS MOST ATTENTION</span>
-                <span className="rep-highlight-val">{needsAttentionSkill}</span>
+                <span className="rep-highlight-val">{needsAttentionSkill || 'Not assessed'}</span>
               </div>
             </div>
           </div>
@@ -430,6 +438,7 @@ export default function InterviewReport() {
             <div className="rep-card">
               <h3 className="rep-card-title">Performance Breakdown</h3>
               <div className="rep-bars-list">
+                {performanceBreakdown.length === 0 && <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Not assessed in this session.</p>}
                 {performanceBreakdown.map((item) => (
                   <div key={item.name} className="rep-bar-row">
                     <span className={`rep-bar-name ${item.isFlagged ? 'is-flagged' : ''}`}>
@@ -451,6 +460,7 @@ export default function InterviewReport() {
             <div className="rep-card">
               <h3 className="rep-card-title">Communication Analysis</h3>
               <div className="rep-bars-list">
+                {communicationAnalysis.length === 0 && <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>Not assessed in this session.</p>}
                 {communicationAnalysis.map((item) => (
                   <div key={item.name} className="rep-bar-row">
                     <span className={`rep-bar-name ${item.isFlagged ? 'is-flagged' : ''}`}>
@@ -468,6 +478,7 @@ export default function InterviewReport() {
               </div>
 
               {/* Inset AI Recommendation */}
+              {(aiRecommendation.headline || aiRecommendation.insight) && (
               <div className="rep-insight-card">
                 <div className="rep-insight-header">
                   <span className="rep-insight-label">{aiRecommendation.primaryFocus || 'Core Assessment Focus'}</span>
@@ -481,6 +492,7 @@ export default function InterviewReport() {
                   </div>
                 </div>
               </div>
+              )}
             </div>
           </div>
 
@@ -589,7 +601,7 @@ export default function InterviewReport() {
                   ) : (
                     <div style={{ padding: '20px 0', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
                       <p style={{ fontStyle: 'normal' }}>
-                        No direct chat messages were recorded in this session. The evaluation above reflects the role criteria and initial assessment parameters.
+                        No messages were recorded in this session.
                       </p>
                     </div>
                   )}
@@ -619,6 +631,11 @@ export default function InterviewReport() {
               </div>
 
               {/* Dynamic SVG Trend Graph Curve */}
+              {!pathD ? (
+                <p style={{ margin: '16px 0', fontSize: '12px', color: '#64748b' }}>
+                  Not enough data points yet to show a trend.
+                </p>
+              ) : (
               <div className="rep-chart-container">
                 <svg className="rep-chart-svg" viewBox="0 0 600 200" preserveAspectRatio="none">
                   <defs>
@@ -656,9 +673,12 @@ export default function InterviewReport() {
                   )}
                 </svg>
               </div>
+              )}
             </div>
           </div>
         </div>
+        </>
+        )}
       </main>
 
       {/* Floating Chat Assistant Drawer */}
@@ -681,10 +701,12 @@ export default function InterviewReport() {
           <div className="rep-chat-body">
             <div className="rep-chat-bubble bot">
               <strong>Evaluation Summary:</strong>
-              <p style={{ margin: '6px 0' }}>{summaryText}</p>
-              <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-                <strong>Key Action Item:</strong> {aiRecommendation.headline}
-              </div>
+              <p style={{ margin: '6px 0' }}>{summaryText || 'No evaluation summary is available yet.'}</p>
+              {aiRecommendation.headline && (
+                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                  <strong>Key Action Item:</strong> {aiRecommendation.headline}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -4,16 +4,188 @@ import {
   SearchIcon,
   CheckCircleIcon,
   XCircleIcon,
-  ClockIcon,
   CloseIcon,
   SparklesIcon,
-  UsersIcon,
-  PilotAccessIcon,
-  SettingsIcon,
-  BotIcon,
 } from '../AdminIcons'
 import './AdminPage.css'
 import './AdminLogs.css'
+
+// ========================================================================
+// 1. MOCK SYSTEM LOGS DATA
+// ========================================================================
+const mockSystemLogs = [
+  {
+    id: 'LOG-9101',
+    timestamp: '2026-09-22 14:28:12',
+    dateCategory: 'Today',
+    category: 'AI',
+    event: 'LLM Inference Completed',
+    user: 'marcus.s@snowflake.com',
+    status: 'Success',
+    session: 'INT-9821',
+    description:
+      'Successfully generated tailored technical question for Data Platform Architect role with query optimization parameters.',
+    additionalInfo: {
+      latencyMs: 642,
+      modelEngine: 'Gemini 1.5 Pro',
+      tokensPrompt: 412,
+      tokensGenerated: 148,
+      clientIpCountry: 'US (Oregon)',
+      httpStatus: 200,
+      cachedEvaluation: false,
+    },
+  },
+  {
+    id: 'LOG-9102',
+    timestamp: '2026-09-22 14:24:05',
+    dateCategory: 'Today',
+    category: 'Speech',
+    event: 'Voice Synthesis Streamed',
+    user: 'marcus.s@snowflake.com',
+    status: 'Success',
+    session: 'INT-9821',
+    description:
+      'ElevenLabs Neural voice chunks synthesized and delivered via WebSocket with 240ms first-chunk audio playback.',
+    additionalInfo: {
+      voiceProfile: 'Neural-Expressive Low-Latency',
+      audioFormat: 'PCM 24kHz Mono',
+      durationSec: 8.4,
+      streamJitterMs: 14,
+      httpStatus: 200,
+    },
+  },
+  {
+    id: 'LOG-9103',
+    timestamp: '2026-09-22 13:58:30',
+    dateCategory: 'Today',
+    category: 'Authentication',
+    event: 'User Login 2FA Verified',
+    user: 'sarah.j@uber.com',
+    status: 'Success',
+    session: 'None (Auth Gate)',
+    description:
+      'Candidate successfully authenticated with email credentials and validated time-based OTP token.',
+    additionalInfo: {
+      authMethod: 'Password + TOTP',
+      deviceOs: 'macOS 15.0 / Chrome 129',
+      clientIpCountry: 'US (California)',
+      mfaAttemptCount: 1,
+      httpStatus: 200,
+    },
+  },
+  {
+    id: 'LOG-9104',
+    timestamp: '2026-09-22 13:12:44',
+    dateCategory: 'Today',
+    category: 'Errors',
+    event: 'RateLimitWarning (429)',
+    user: 'System Service',
+    status: 'Warning',
+    session: 'INT-9818',
+    description:
+      'LLM API request encountered upstream 429 concurrency throttle. Automatically backed off and resolved on retry 1.',
+    additionalInfo: {
+      upstreamEndpoint: '/v1beta/models/gemini-pro:generateContent',
+      retryAfterMs: 450,
+      retryOutcome: 'Success on Attempt 2',
+      impact: 'Zero candidate disruption',
+      httpStatus: 429,
+    },
+  },
+  {
+    id: 'LOG-9105',
+    timestamp: '2026-09-22 12:40:19',
+    dateCategory: 'Today',
+    category: 'Interview',
+    event: 'Mock Session Initialized',
+    user: 'elena.rostova@palantir.com',
+    status: 'Success',
+    session: 'INT-9816',
+    description:
+      'AI interview session started for Senior ML Engineer. Curriculum mapped to PyTorch, transformers, and model inference.',
+    additionalInfo: {
+      assignedInterviewer: 'HireMind Technical AI Core',
+      totalQuestionsScheduled: 5,
+      estimatedDurationMins: 35,
+      webcamEnabled: true,
+      micSampleRateHz: 48000,
+    },
+  },
+  {
+    id: 'LOG-9106',
+    timestamp: '2026-09-22 11:15:02',
+    dateCategory: 'Today',
+    category: 'System',
+    event: 'Database Health Check',
+    user: 'System Service',
+    status: 'Success',
+    session: 'Global',
+    description:
+      'Automated database cluster pool telemetry verified. Read replication lag below 3ms across all nodes.',
+    additionalInfo: {
+      activePoolConnections: 18,
+      idleConnections: 42,
+      avgQueryLatencyMs: 1.8,
+      storageFreePct: '84.2%',
+      clusterStatus: 'HEALTHY_GREEN',
+    },
+  },
+  {
+    id: 'LOG-9107',
+    timestamp: '2026-09-21 16:45:11',
+    dateCategory: 'Yesterday',
+    category: 'Speech',
+    event: 'Microphone Jitter Compensated',
+    user: 'dkim99@gmail.com',
+    status: 'Warning',
+    session: 'INT-9815',
+    description:
+      'Candidate audio feed experienced temporary buffer underrun (packet latency 110ms). Audio compensation filter engaged.',
+    additionalInfo: {
+      packetLossPct: '1.4%',
+      sttConfidence: 0.91,
+      autoCompensated: true,
+      droppedFrames: 3,
+    },
+  },
+  {
+    id: 'LOG-9108',
+    timestamp: '2026-09-21 14:10:00',
+    dateCategory: 'Yesterday',
+    category: 'Errors',
+    event: 'Socket Disconnection',
+    user: 'dkim99@gmail.com',
+    status: 'Error',
+    session: 'INT-9815',
+    description:
+      'WebSocket connection closed prematurely by candidate client. Session saved into pending recovery state.',
+    additionalInfo: {
+      closeCode: 1006,
+      reason: 'Abnormal Closure (Local network drop)',
+      sessionProgress: '2 of 5 Questions completed',
+      recoveryLinkIssued: true,
+    },
+  },
+  {
+    id: 'LOG-9109',
+    timestamp: '2026-09-20 10:22:30',
+    dateCategory: 'Last 7 Days',
+    category: 'Admin Actions',
+    event: 'Demo Access Granted',
+    user: 'admin@hiremind.ai',
+    status: 'Success',
+    session: 'None (Admin Portal)',
+    description:
+      'Enterprise pilot demo privileges granted to Marcus Sterling (Snowflake) with 3 full practice sessions.',
+    additionalInfo: {
+      authorizedBy: 'admin@hiremind.ai',
+      targetUser: 'marcus.s@snowflake.com',
+      allocatedInterviews: 3,
+      validityDays: 14,
+      roleAssigned: 'Demo / Pilot Participant',
+    },
+  },
+]
 
 export default function AdminLogs() {
   const [activeTab, setActiveTab] = useState('system') // 'system' | 'audit'
@@ -27,182 +199,6 @@ export default function AdminLogs() {
   // Selected log for View Details Modal
   const [selectedLog, setSelectedLog] = useState(null)
 
-  // ========================================================================
-  // 1. MOCK SYSTEM LOGS DATA
-  // ========================================================================
-  const mockSystemLogs = [
-    {
-      id: 'LOG-9101',
-      timestamp: '2026-09-22 14:28:12',
-      dateCategory: 'Today',
-      category: 'AI',
-      event: 'LLM Inference Completed',
-      user: 'marcus.s@snowflake.com',
-      status: 'Success',
-      session: 'INT-9821',
-      description:
-        'Successfully generated tailored technical question for Data Platform Architect role with query optimization parameters.',
-      additionalInfo: {
-        latencyMs: 642,
-        modelEngine: 'Gemini 1.5 Pro',
-        tokensPrompt: 412,
-        tokensGenerated: 148,
-        clientIpCountry: 'US (Oregon)',
-        httpStatus: 200,
-        cachedEvaluation: false,
-      },
-    },
-    {
-      id: 'LOG-9102',
-      timestamp: '2026-09-22 14:24:05',
-      dateCategory: 'Today',
-      category: 'Speech',
-      event: 'Voice Synthesis Streamed',
-      user: 'marcus.s@snowflake.com',
-      status: 'Success',
-      session: 'INT-9821',
-      description:
-        'ElevenLabs Neural voice chunks synthesized and delivered via WebSocket with 240ms first-chunk audio playback.',
-      additionalInfo: {
-        voiceProfile: 'Neural-Expressive Low-Latency',
-        audioFormat: 'PCM 24kHz Mono',
-        durationSec: 8.4,
-        streamJitterMs: 14,
-        httpStatus: 200,
-      },
-    },
-    {
-      id: 'LOG-9103',
-      timestamp: '2026-09-22 13:58:30',
-      dateCategory: 'Today',
-      category: 'Authentication',
-      event: 'User Login 2FA Verified',
-      user: 'sarah.j@uber.com',
-      status: 'Success',
-      session: 'None (Auth Gate)',
-      description:
-        'Candidate successfully authenticated with email credentials and validated time-based OTP token.',
-      additionalInfo: {
-        authMethod: 'Password + TOTP',
-        deviceOs: 'macOS 15.0 / Chrome 129',
-        clientIpCountry: 'US (California)',
-        mfaAttemptCount: 1,
-        httpStatus: 200,
-      },
-    },
-    {
-      id: 'LOG-9104',
-      timestamp: '2026-09-22 13:12:44',
-      dateCategory: 'Today',
-      category: 'Errors',
-      event: 'RateLimitWarning (429)',
-      user: 'System Service',
-      status: 'Warning',
-      session: 'INT-9818',
-      description:
-        'LLM API request encountered upstream 429 concurrency throttle. Automatically backed off and resolved on retry 1.',
-      additionalInfo: {
-        upstreamEndpoint: '/v1beta/models/gemini-pro:generateContent',
-        retryAfterMs: 450,
-        retryOutcome: 'Success on Attempt 2',
-        impact: 'Zero candidate disruption',
-        httpStatus: 429,
-      },
-    },
-    {
-      id: 'LOG-9105',
-      timestamp: '2026-09-22 12:40:19',
-      dateCategory: 'Today',
-      category: 'Interview',
-      event: 'Mock Session Initialized',
-      user: 'elena.rostova@palantir.com',
-      status: 'Success',
-      session: 'INT-9816',
-      description:
-        'AI interview session started for Senior ML Engineer. Curriculum mapped to PyTorch, transformers, and model inference.',
-      additionalInfo: {
-        assignedInterviewer: 'HireMind Technical AI Core',
-        totalQuestionsScheduled: 5,
-        estimatedDurationMins: 35,
-        webcamEnabled: true,
-        micSampleRateHz: 48000,
-      },
-    },
-    {
-      id: 'LOG-9106',
-      timestamp: '2026-09-22 11:15:02',
-      dateCategory: 'Today',
-      category: 'System',
-      event: 'Database Health Check',
-      user: 'System Service',
-      status: 'Success',
-      session: 'Global',
-      description:
-        'Automated database cluster pool telemetry verified. Read replication lag below 3ms across all nodes.',
-      additionalInfo: {
-        activePoolConnections: 18,
-        idleConnections: 42,
-        avgQueryLatencyMs: 1.8,
-        storageFreePct: '84.2%',
-        clusterStatus: 'HEALTHY_GREEN',
-      },
-    },
-    {
-      id: 'LOG-9107',
-      timestamp: '2026-09-21 16:45:11',
-      dateCategory: 'Yesterday',
-      category: 'Speech',
-      event: 'Microphone Jitter Compensated',
-      user: 'dkim99@gmail.com',
-      status: 'Warning',
-      session: 'INT-9815',
-      description:
-        'Candidate audio feed experienced temporary buffer underrun (packet latency 110ms). Audio compensation filter engaged.',
-      additionalInfo: {
-        packetLossPct: '1.4%',
-        sttConfidence: 0.91,
-        autoCompensated: true,
-        droppedFrames: 3,
-      },
-    },
-    {
-      id: 'LOG-9108',
-      timestamp: '2026-09-21 14:10:00',
-      dateCategory: 'Yesterday',
-      category: 'Errors',
-      event: 'Socket Disconnection',
-      user: 'dkim99@gmail.com',
-      status: 'Error',
-      session: 'INT-9815',
-      description:
-        'WebSocket connection closed prematurely by candidate client. Session saved into pending recovery state.',
-      additionalInfo: {
-        closeCode: 1006,
-        reason: 'Abnormal Closure (Local network drop)',
-        sessionProgress: '2 of 5 Questions completed',
-        recoveryLinkIssued: true,
-      },
-    },
-    {
-      id: 'LOG-9109',
-      timestamp: '2026-09-20 10:22:30',
-      dateCategory: 'Last 7 Days',
-      category: 'Admin Actions',
-      event: 'Demo Access Granted',
-      user: 'admin@hiremind.ai',
-      status: 'Success',
-      session: 'None (Admin Portal)',
-      description:
-        'Enterprise pilot demo privileges granted to Marcus Sterling (Snowflake) with 3 full practice sessions.',
-      additionalInfo: {
-        authorizedBy: 'admin@hiremind.ai',
-        targetUser: 'marcus.s@snowflake.com',
-        allocatedInterviews: 3,
-        validityDays: 14,
-        roleAssigned: 'Demo / Pilot Participant',
-      },
-    },
-  ]
 
   // ========================================================================
   // 2. MOCK ADMIN AUDIT LOG DATA
@@ -306,7 +302,7 @@ export default function AdminLogs() {
 
       return true
     })
-  }, [mockSystemLogs, selectedCategory, dateFilter, statusFilter, searchQuery])
+  }, [selectedCategory, dateFilter, statusFilter, searchQuery])
 
   return (
     <div>

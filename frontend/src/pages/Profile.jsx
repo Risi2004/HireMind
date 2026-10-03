@@ -1,10 +1,8 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useEffectEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import brandMarkImg from '../assets/images/3.png'
 import backArrowIcon from '../assets/icons/back arrow.svg'
 import logoutIcon from '../assets/icons/logout.svg'
 import emailIcon from '../assets/icons/email.svg'
-import tick2Icon from '../assets/icons/tick2.svg'
 import careerInfoIcon from '../assets/icons/career information.svg'
 import editIcon from '../assets/icons/edit.svg'
 import connectedProfilesIcon from '../assets/icons/connected profiles.svg'
@@ -17,14 +15,14 @@ import linkedinIcon from '../assets/icons/linkedin.svg'
 import Navbar from '../components/Navbar'
 import DeleteAccountModal from '../components/DeleteAccountModal'
 import TwoFactorModal from '../components/TwoFactorModal'
-import { useAuth } from '../context/AuthContext'
+import { useAuth } from '../context/useAuth'
 import { getApiUrl } from '../config/api'
 import {
   CAREER_STAGE_OPTIONS,
   FIELD_OPTIONS,
   EXPERIENCE_LEVELS,
   POPULAR_SKILLS,
-} from '../context/ProfileSetupContext'
+} from '../constants/profileOptions'
 import './Profile.css'
 
 export default function Profile() {
@@ -39,19 +37,18 @@ export default function Profile() {
     refreshUser,
     updateUserProfile,
     uploadUserResume,
-    deleteUserResume,
     uploadUserAvatar,
     connectUserGithub,
     disconnectUserGithub,
     updateUserSkills,
     updateUserInterests,
     updateUserLinkedin,
-    disable2FA,
   } = useAuth()
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isMfaModalOpen, setIsMfaModalOpen] = useState(false)
-  const [isDisablingMfa, setIsDisablingMfa] = useState(false)
+  // 'enable' (set up / reconfigure) or 'disable' — both verify an authenticator code
+  const [mfaModalMode, setMfaModalMode] = useState('enable')
   const [toastMessage, setToastMessage] = useState(null)
   const [isUploadingResume, setIsUploadingResume] = useState(false)
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
@@ -65,16 +62,18 @@ export default function Profile() {
     }, 4000)
   }
 
-  // Refresh fresh profile data from DB on mount
+  // Refresh fresh profile data from DB on mount / sign-in
+  const refreshProfile = useEffectEvent(() => {
+    refreshUser()
+  })
   useEffect(() => {
     if (token) {
-      refreshUser()
+      refreshProfile()
     }
   }, [token])
 
   // Profile data states derived dynamically from DB user
   const candidateFirstName = user?.firstName || 'Candidate'
-  const candidateLastName = user?.lastName || ''
   const candidateName = user
     ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email
     : 'Candidate'
@@ -86,22 +85,22 @@ export default function Profile() {
 
   // Hero identity editor state
   const [isEditingHero, setIsEditingHero] = useState(false)
-  const [heroFields, setHeroFields] = useState({
-    firstName: '',
-    lastName: '',
-    title: '',
-  })
+  const [heroFields, setHeroFields] = useState(() => ({
+    firstName: user?.firstName || '',
+    lastName: user?.lastName || '',
+    title: user?.title || user?.careerStage || '',
+  }))
 
-  // Sync Hero Fields with user
-  useEffect(() => {
-    if (user) {
-      setHeroFields({
-        firstName: user.firstName || '',
-        lastName: user.lastName || '',
-        title: user.title || user.careerStage || '',
-      })
-    }
-  }, [user])
+  // Re-sync Hero Fields whenever a new user object arrives (adjust state during render)
+  const [heroSyncedUser, setHeroSyncedUser] = useState(user)
+  if (user && user !== heroSyncedUser) {
+    setHeroSyncedUser(user)
+    setHeroFields({
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      title: user.title || user.careerStage || '',
+    })
+  }
 
   // Save Hero Identity (Name and Title) to DB
   const handleSaveHero = async (e) => {
@@ -191,16 +190,16 @@ export default function Profile() {
     experienceLevel: user?.experienceLevel || 'Beginner',
   })
 
-  // Sync Career Fields with user
-  useEffect(() => {
-    if (user) {
-      setCareerFields({
-        careerStage: user.careerStage || 'Student / Undergraduate',
-        field: user.field || 'Software Engineering',
-        experienceLevel: user.experienceLevel || 'Beginner',
-      })
-    }
-  }, [user])
+  // Re-sync Career Fields whenever a new user object arrives (adjust state during render)
+  const [careerSyncedUser, setCareerSyncedUser] = useState(user)
+  if (user && user !== careerSyncedUser) {
+    setCareerSyncedUser(user)
+    setCareerFields({
+      careerStage: user.careerStage || 'Student / Undergraduate',
+      field: user.field || 'Software Engineering',
+      experienceLevel: user.experienceLevel || 'Beginner',
+    })
+  }
 
   // Handle Career Info Save to DB
   const handleSaveCareer = async (e) => {
@@ -374,22 +373,10 @@ export default function Profile() {
     }
   }
 
-  // Handle Disable Multi-Factor Authentication
-  const handleDisable2FA = async () => {
-    const confirmDisable = window.confirm(
-      'Are you sure you want to disable Multi-Factor Authentication (2FA)? Your account will only be protected by your password.'
-    )
-    if (!confirmDisable) return
-
-    setIsDisablingMfa(true)
-    try {
-      await disable2FA()
-      showToast('Two-factor authentication disabled successfully')
-    } catch (err) {
-      showToast(err.message || 'Failed to disable two-factor authentication', 'error')
-    } finally {
-      setIsDisablingMfa(false)
-    }
+  // Open the 2FA modal in the requested mode
+  const openMfaModal = (mode) => {
+    setMfaModalMode(mode)
+    setIsMfaModalOpen(true)
   }
 
   // Handle Logout
@@ -1126,7 +1113,7 @@ export default function Profile() {
                   <button
                     type="button"
                     className="prof-mfa-action-btn prof-mfa-action-btn--reconfig"
-                    onClick={() => setIsMfaModalOpen(true)}
+                    onClick={() => openMfaModal('enable')}
                     title="Reconfigure Authenticator with new device or frequency"
                   >
                     RECONFIGURE
@@ -1134,18 +1121,17 @@ export default function Profile() {
                   <button
                     type="button"
                     className="prof-mfa-action-btn prof-mfa-action-btn--disable"
-                    onClick={handleDisable2FA}
-                    disabled={isDisablingMfa}
+                    onClick={() => openMfaModal('disable')}
                     title="Disable Two-Factor Authentication"
                   >
-                    {isDisablingMfa ? 'DISABLING...' : 'DISABLE 2FA'}
+                    DISABLE 2FA
                   </button>
                 </>
               ) : (
                 <button
                   type="button"
                   className="prof-mfa-action-btn prof-mfa-action-btn--enable"
-                  onClick={() => setIsMfaModalOpen(true)}
+                  onClick={() => openMfaModal('enable')}
                   title="Enable Multi-Factor Authentication"
                 >
                   ENABLE 2FA
@@ -1191,6 +1177,7 @@ export default function Profile() {
       {/* Two-Factor Authentication Setup Modal */}
       <TwoFactorModal
         isOpen={isMfaModalOpen}
+        mode={mfaModalMode}
         onClose={() => setIsMfaModalOpen(false)}
         onSuccess={(msg) => showToast(msg)}
       />

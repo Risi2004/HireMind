@@ -195,7 +195,7 @@ export async function deleteInterviewSession(id) {
       localStorage.removeItem(`hiremind_eval_${id}`)
       localStorage.removeItem(`hiremind_feedback_${id}`)
       localStorage.removeItem(`hiremind_session_${id}`)
-    } catch (_) {}
+    } catch { /* non-critical; safe to ignore */ }
 
     // 3. Delete from backend MongoDB
     try {
