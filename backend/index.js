@@ -12,6 +12,18 @@ const { checkR2Connection } = require('./services/cloudflareR2');
 
 dotenv.config();
 
+// Fail fast on missing security-critical configuration in production
+if (process.env.NODE_ENV === 'production') {
+  const missing = ['JWT_SECRET', 'AI_SERVICE_API_KEY'].filter((key) => !process.env[key]);
+  if (missing.includes('JWT_SECRET')) {
+    console.error('[HireMind API] FATAL: JWT_SECRET must be set in production.');
+    process.exit(1);
+  }
+  if (missing.length) {
+    console.warn(`[HireMind API] WARNING: Missing environment variables: ${missing.join(', ')}`);
+  }
+}
+
 // Connect to MongoDB & ensure admin account is seeded
 connectDB().then(() => {
   seedAdmin().catch((err) => console.error('[HireMind DB] Admin seeding error:', err.message));
@@ -62,16 +74,14 @@ app.use(
       const cleanOrigin = origin.replace(/\/+$/, '');
       const isAllowed =
         parsedOrigins.includes(cleanOrigin) ||
-        /^https?:\/\/localhost(:\d+)?$/.test(cleanOrigin) ||
-        /^https:\/\/.*\.vercel\.app$/.test(cleanOrigin) ||
-        /^https:\/\/.*\.onrender\.com$/.test(cleanOrigin) ||
-        /^https:\/\/.*\.netlify\.app$/.test(cleanOrigin);
+        (process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(cleanOrigin)) ||
+        /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(cleanOrigin);
 
       if (isAllowed) {
         return callback(null, true);
       }
-      // Allow fallback to avoid breaking valid frontend origins in production
-      return callback(null, true);
+      console.warn(`[CORS] Blocked request from origin: ${cleanOrigin}. Add it to CLIENT_URL if it is your frontend.`);
+      return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

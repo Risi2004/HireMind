@@ -6,7 +6,7 @@ const textToSpeechService = require('../services/textToSpeechService');
 const interviewAgentService = require('../services/interviewAgentService');
 const codeExecutionService = require('../services/codeExecutionService');
 
-const { getAiServiceUrl } = require('../config/aiServiceConfig');
+const { getAiServiceUrl, getAiServiceHeaders } = require('../config/aiServiceConfig');
 const { recordCompletedDemoInterview } = require('../middleware/demoAccessMiddleware');
 
 const AI_SERVICE_URL = getAiServiceUrl();
@@ -38,7 +38,7 @@ exports.analyzeResume = async (req, res) => {
 
     // Case 1: User requested to use their existing profile resume from signup
     if (useProfileResume === 'true' || useProfileResume === true) {
-      const userId = req.user?._id || req.body.userId;
+      const userId = req.user?._id;
       if (!userId) {
         return res.status(400).json({ message: 'User context is required to use profile resume.' });
       }
@@ -89,6 +89,7 @@ exports.analyzeResume = async (req, res) => {
 
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/resume-analyzer/analyze`, {
         method: 'POST',
+        headers: getAiServiceHeaders(),
         body: formData,
         signal: AbortSignal.timeout(120000),
       });
@@ -176,7 +177,7 @@ exports.getSession = async (req, res) => {
       // Create blank initial record if not yet existing
       session = await InterviewSession.create({
         sessionId,
-        userId: req.user?._id || null,
+        userId: req.user._id,
         status: 'setup',
       });
     }
@@ -198,15 +199,30 @@ exports.getSession = async (req, res) => {
 exports.updateSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const updates = req.body;
 
-    if (req.user?._id && !updates.userId) {
-      updates.userId = req.user._id;
+    // Only setup/configuration fields may be edited by the client.
+    // Status, transcript, evaluation, ownership and quota flags are server-controlled.
+    const EDITABLE_FIELDS = [
+      'targetRole',
+      'company',
+      'jobDescription',
+      'interviewType',
+      'difficulty',
+      'duration',
+      'isGithubConnected',
+      'resumeAnalysis',
+      'jdAnalysis',
+    ];
+    const updates = {};
+    for (const field of EDITABLE_FIELDS) {
+      if (req.body?.[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
     }
 
     const session = await InterviewSession.findOneAndUpdate(
       { sessionId },
-      { $set: updates },
+      { $set: updates, $setOnInsert: { userId: req.user._id } },
       { new: true, upsert: true }
     );
 
@@ -243,9 +259,7 @@ exports.analyzeJobDescription = async (req, res) => {
     try {
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/jd-analyzer/analyze`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           job_description: jobDescription.trim(),
           job_title: resolvedTargetRole,
@@ -328,7 +342,8 @@ exports.deleteSession = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Session ID is required.' });
     }
 
-    const session = await InterviewSession.findOneAndDelete({ sessionId });
+    const filter = req.user.role === 'admin' ? { sessionId } : { sessionId, userId: req.user._id };
+    const session = await InterviewSession.findOneAndDelete(filter);
 
     return res.status(200).json({
       success: true,
@@ -446,9 +461,7 @@ exports.generateInterviewPlan = async (req, res) => {
     try {
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/interview-planner/plan`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(planningContext),
         signal: AbortSignal.timeout(120000),
       });
@@ -755,7 +768,7 @@ exports.beginLiveInterview = async (req, res) => {
     try {
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/interview-agent/begin`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(beginPayload),
         signal: AbortSignal.timeout(45000),
       });
@@ -812,9 +825,14 @@ exports.beginLiveInterview = async (req, res) => {
 
     await session.save();
 
+    // Consume one demo pass when the interview starts (idempotent per session),
+    // so abandoned interviews cannot be restarted indefinitely without using quota.
+    const demoAccessUpdate = await recordCompletedDemoInterview(session);
+
     return res.status(200).json({
       success: true,
       resumed: false,
+      demoAccess: demoAccessUpdate,
       question: openingQuestion,
       audioUrl: audioUrl || null,
       stage: stageName,
@@ -990,7 +1008,7 @@ exports.submitLiveAnswer = async (req, res) => {
     try {
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/interview-agent/next`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(turnPayload),
         signal: AbortSignal.timeout(50000),
       });
@@ -1159,7 +1177,7 @@ exports.submitLiveAnswer = async (req, res) => {
       session.status = 'completed';
       session.interviewState.status = 'completed';
       session.interviewState.endedAt = new Date();
-      demoAccessUpdate = await recordCompletedDemoInterview(session, req.user?._id || req);
+      demoAccessUpdate = await recordCompletedDemoInterview(session);
     }
 
     // Generate audio if voice mode is active
@@ -1229,22 +1247,11 @@ exports.manualEndLiveInterview = async (req, res) => {
     if (sessionId && sessionId !== 'default' && sessionId !== 'latest') {
       session = await InterviewSession.findOne({ sessionId });
     }
-    if (!session && req.user?._id) {
+    if (!session) {
       session = await InterviewSession.findOne({ userId: req.user._id }).sort({ updatedAt: -1 });
     }
     if (!session) {
-      session = await InterviewSession.findOne().sort({ updatedAt: -1 });
-    }
-    if (!session) {
       return res.status(404).json({ success: false, message: 'Interview session not found.' });
-    }
-
-    if (req.user?._id && !session.userId) {
-      session.userId = req.user._id;
-    }
-
-    if (session.userId && req.user?._id && session.userId.toString() !== req.user._id.toString()) {
-      console.warn(`[Interview Controller] User mismatch on end session ${sessionId}: ${session.userId} vs ${req.user._id}. Permitting session closure.`);
     }
 
     session.status = 'ended_by_user';
@@ -1268,7 +1275,7 @@ exports.manualEndLiveInterview = async (req, res) => {
     }
 
     await session.save();
-    const demoAccessUpdate = await recordCompletedDemoInterview(session, req.user?._id || req);
+    const demoAccessUpdate = await recordCompletedDemoInterview(session);
 
     return res.status(200).json({
       success: true,
@@ -1302,33 +1309,12 @@ exports.getOrGenerateEvaluation = async (req, res) => {
     if (sessionId && sessionId !== 'latest' && sessionId !== 'recent' && sessionId !== 'default') {
       session = await InterviewSession.findOne({ sessionId });
     }
-    if (!session && req.user?._id) {
+    if (!session) {
       session = await InterviewSession.findOne({ userId: req.user._id }).sort({ updatedAt: -1 });
     }
     if (!session) {
-      session = await InterviewSession.findOne().sort({ updatedAt: -1 });
+      return res.status(404).json({ success: false, message: 'Interview session not found.' });
     }
-
-    if (!session) {
-      // Create a sensible starter session so evaluation page works immediately
-      session = await InterviewSession.create({
-        sessionId: sessionId && sessionId !== 'latest' && sessionId !== 'default' ? sessionId : 'default-session',
-        userId: req.user?._id || null,
-        targetRole: 'Software Engineer Intern',
-        company: 'HireMind',
-        interviewType: 'Role-Specific',
-        difficulty: 'Intermediate',
-        duration: '30 min',
-        status: 'completed',
-        chatMessages: [
-          { role: 'interviewer', content: 'Good morning! To begin, could you briefly introduce yourself and your backend projects?', timestamp: new Date(Date.now() - 600000) },
-          { role: 'candidate', content: 'Hello! I am a software engineering student. I build RESTful services using Node.js, Express, MongoDB, and Spring Boot. Recently I developed an automated deployment logging pipeline.', timestamp: new Date(Date.now() - 500000) },
-          { role: 'interviewer', content: 'That sounds relevant. Could you walk me through how you handled system reliability and database concurrency in that pipeline?', timestamp: new Date(Date.now() - 400000) },
-          { role: 'candidate', content: 'I designed idempotent workers with exponential backoff on transient errors, and used compound indexes in MongoDB to prevent high-latency queries under load.', timestamp: new Date(Date.now() - 300000) }
-        ],
-      });
-    }
-
 
     const candidateName = session.resumeAnalysis?.candidate_name || req.user?.firstName || 'Candidate';
     const targetRole = session.targetRole || session.resumeAnalysis?.detected_role || 'Software Engineer';
@@ -1387,7 +1373,7 @@ exports.getOrGenerateEvaluation = async (req, res) => {
 
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/evaluate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(60000),
       });
@@ -1452,7 +1438,7 @@ exports.getOrGenerateEvaluation = async (req, res) => {
     // Persist evaluation
     session.evaluation = evaluationData;
     await session.save();
-    const demoAccessUpdate = await recordCompletedDemoInterview(session, req.user?._id || req);
+    const demoAccessUpdate = await recordCompletedDemoInterview(session);
 
     return res.status(200).json({
       success: true,

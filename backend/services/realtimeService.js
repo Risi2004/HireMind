@@ -27,8 +27,7 @@ function subscribe(userId, req, res) {
     'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
-    'Access-Control-Allow-Origin': req.headers.origin || '*',
-    'Access-Control-Allow-Credentials': 'true',
+    // CORS headers are applied by the global cors() middleware (allowed origins only)
   });
 
   if (typeof res.flushHeaders === 'function') {

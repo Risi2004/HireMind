@@ -4,7 +4,10 @@ const jwt = require('jsonwebtoken');
 const { generateSecret, generateURI, verifySync } = require('otplib');
 const QRCode = require('qrcode');
 const User = require('../models/User');
+const InterviewSession = require('../models/InterviewSession');
 const Otp = require('../models/Otp');
+const { MAX_OTP_ATTEMPTS } = require('../models/Otp');
+const { getJwtSecret } = require('../config/authToken');
 const { uploadProfilePicture, getPrivateAvatarStream, deleteAvatar, deleteResume } = require('../services/cloudflareR2');
 const { sendOtpEmail, sendOnboardingEmail, sendPasswordResetOtpEmail, sendAccountDeletionEmail } = require('../services/emailService');
 
@@ -15,14 +18,63 @@ const { sendOtpEmail, sendOnboardingEmail, sendPasswordResetOtpEmail, sendAccoun
 const generateToken = (userId, email, rememberMe = false, role = 'user') => {
   return jwt.sign(
     { id: userId, email, role },
-    process.env.JWT_SECRET || 'super_secret_hiremind_jwt_dev_key',
+    getJwtSecret(),
     { expiresIn: rememberMe ? '30d' : '7d' }
   );
 };
 
 // Generate 6-digit numeric OTP
 const generateNumericOtp = () => {
-  return crypto.randomInt(100000, 999999).toString();
+  return crypto.randomInt(100000, 1000000).toString();
+};
+
+// Issue a fresh single-purpose OTP for an email (replaces earlier codes of the same purpose)
+const issueOtp = async (email, purpose) => {
+  const otpCode = generateNumericOtp();
+  await Otp.deleteMany({ email, purpose });
+  await Otp.create({ email, otp: otpCode, purpose });
+  return otpCode;
+};
+
+// Check an OTP; wrong guesses are counted and the code is destroyed after MAX_OTP_ATTEMPTS
+const checkOtp = async (email, code, purpose) => {
+  const record = await Otp.findOne({ email, purpose }).sort({ createdAt: -1 });
+  if (!record) return false;
+
+  const expected = Buffer.from(String(record.otp));
+  const supplied = Buffer.from(String(code ?? '').trim());
+  const isMatch = expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
+
+  if (!isMatch) {
+    record.attempts = (record.attempts || 0) + 1;
+    if (record.attempts >= MAX_OTP_ATTEMPTS) {
+      await Otp.deleteOne({ _id: record._id });
+    } else {
+      await record.save();
+    }
+    return false;
+  }
+  return true;
+};
+
+const KEYBOARD_WALK_REGEX = /(?:qwer|wert|erty|rtyu|tyui|yuio|uiop|asdf|sdfg|dfgh|fghj|ghjk|hjkl|zxcv|xcvb|cvbn|vbnm|1234|2345|3456|4567|5678|6789|7890|abcd|bcde|cdef|defg|efgh|fghi|ghij|hijk|ijkl|jklm|klmn|lmno|mnop|nopq|opqr|pqrs|qrst|rstu|stuv|tuvw|uvwx|vwxy|wxyz|rewq|trew|ytre|iuyt|oiuy|poiu|lkjh|kjhg|jhgf|hgfd|gfed|fdsa|mnbv|nbvc|bvcx|vcxz|4321|5432|6543|7654|8765|9876|0987|dcba|edcb|fedc|gfed|hgfe|ihgf|jihg|kjih|lkji|mlkj|nmlk|onml|ponm|qpon|rqpo|srqp|tsrq|utsr|vuts|wvut|xwvu|yxwv|zyxw)/i;
+
+// Shared password policy for registration and password reset. Returns an error message or null.
+const getPasswordPolicyError = (password) => {
+  if (typeof password !== 'string' || !password) return 'Password is required';
+  if (password.length < 8) return 'Password must be at least 8 characters long';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter (A-Z)';
+  if (!/[a-z]/.test(password)) return 'Password must contain at least one lowercase letter (a-z)';
+  if (!/\d/.test(password)) return 'Password must contain at least one number (0-9)';
+  if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password)) {
+    return 'Password must contain at least one special symbol (!@#$%^&*)';
+  }
+  if (/\s/.test(password)) return 'Password cannot contain spaces';
+  if (/(.)\1{2,}/.test(password)) return 'Password cannot contain 3 or more repeated characters in a row';
+  if (KEYBOARD_WALK_REGEX.test(password)) {
+    return 'Password cannot contain keyboard walks or sequential patterns (e.g. qwerty, 1234, abcd)';
+  }
+  return null;
 };
 
 /**
@@ -64,39 +116,10 @@ const register = async (req, res) => {
       return res.status(400).json({ message: 'Please enter a valid email address (e.g. user@example.com)' });
     }
 
-    // 3. Password rules with regex patterns:
-    // - At least 8 characters
-    if (password.length < 8) {
-      return res.status(400).json({ message: 'Password must be at least 8 characters long' });
-    }
-    // - Uppercase letter
-    if (!/[A-Z]/.test(password)) {
-      return res.status(400).json({ message: 'Password must contain at least one uppercase letter (A-Z)' });
-    }
-    // - Lowercase letter
-    if (!/[a-z]/.test(password)) {
-      return res.status(400).json({ message: 'Password must contain at least one lowercase letter (a-z)' });
-    }
-    // - Digit/Number
-    if (!/\d/.test(password)) {
-      return res.status(400).json({ message: 'Password must contain at least one number (0-9)' });
-    }
-    // - Symbol / Special character
-    if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(password)) {
-      return res.status(400).json({ message: 'Password must contain at least one special symbol (!@#$%^&*)' });
-    }
-    // - No spaces
-    if (/\s/.test(password)) {
-      return res.status(400).json({ message: 'Password cannot contain spaces' });
-    }
-    // - No 3 or more repeated characters in a row
-    if (/(.)\1{2,}/.test(password)) {
-      return res.status(400).json({ message: 'Password cannot contain 3 or more repeated characters in a row' });
-    }
-    // - No keyboard walks or sequential patterns
-    const keyboardWalkRegex = /(?:qwer|wert|erty|rtyu|tyui|yuio|uiop|asdf|sdfg|dfgh|fghj|ghjk|hjkl|zxcv|xcvb|cvbn|vbnm|1234|2345|3456|4567|5678|6789|7890|abcd|bcde|cdef|defg|efgh|fghi|ghij|hijk|ijkl|jklm|klmn|lmno|mnop|nopq|opqr|pqrs|qrst|rstu|stuv|tuvw|uvwx|vwxy|wxyz|rewq|trew|ytre|iuyt|oiuy|poiu|lkjh|kjhg|jhgf|hgfd|gfed|fdsa|mnbv|nbvc|bvcx|vcxz|4321|5432|6543|7654|8765|9876|0987|dcba|edcb|fedc|gfed|hgfe|ihgf|jihg|kjih|lkji|mlkj|nmlk|onml|ponm|qpon|rqpo|srqp|tsrq|utsr|vuts|wvut|xwvu|yxwv|zyxw)/i;
-    if (keyboardWalkRegex.test(password)) {
-      return res.status(400).json({ message: 'Password cannot contain keyboard walks or sequential patterns (e.g. qwerty, 1234, abcd)' });
+    // 3. Password policy
+    const passwordError = getPasswordPolicyError(password);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     // 4. Profile picture validation (if attached)
@@ -148,12 +171,7 @@ const register = async (req, res) => {
     }
 
     // Generate and store OTP
-    const otpCode = generateNumericOtp();
-    await Otp.deleteMany({ email: normalizedEmail });
-    await Otp.create({
-      email: normalizedEmail,
-      otp: otpCode,
-    });
+    const otpCode = await issueOtp(normalizedEmail, 'verify');
 
     // Send verification email
     await sendOtpEmail(normalizedEmail, otpCode, firstName.trim());
@@ -184,23 +202,22 @@ const verifyOtp = async (req, res) => {
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    // Find the latest OTP record
-    const otpRecord = await Otp.findOne({ email: normalizedEmail }).sort({ createdAt: -1 });
-    if (!otpRecord || otpRecord.otp !== otp.toString().trim()) {
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user || user.isVerified) {
       return res.status(400).json({ message: 'Invalid or expired verification code' });
     }
 
-    // Find and verify user
-    const user = await User.findOne({ email: normalizedEmail });
-    if (!user) {
-      return res.status(404).json({ message: 'User record not found' });
+    // Only account-verification codes are accepted here (never password reset codes)
+    const isValidCode = await checkOtp(normalizedEmail, otp, 'verify');
+    if (!isValidCode) {
+      return res.status(400).json({ message: 'Invalid or expired verification code' });
     }
 
     user.isVerified = true;
     await user.save();
 
     // Delete used OTP
-    await Otp.deleteMany({ email: normalizedEmail });
+    await Otp.deleteMany({ email: normalizedEmail, purpose: 'verify' });
 
     // Send Onboarding Welcome Email with dynamic links from .env
     sendOnboardingEmail(user.email, user.firstName).catch((err) =>
@@ -245,12 +262,7 @@ const resendOtp = async (req, res) => {
       return res.status(400).json({ message: 'Account is already verified. Please sign in.' });
     }
 
-    const otpCode = generateNumericOtp();
-    await Otp.deleteMany({ email: normalizedEmail });
-    await Otp.create({
-      email: normalizedEmail,
-      otp: otpCode,
-    });
+    const otpCode = await issueOtp(normalizedEmail, 'verify');
 
     await sendOtpEmail(normalizedEmail, otpCode, user.firstName);
 
@@ -294,9 +306,7 @@ const login = async (req, res) => {
     // Verify account status
     if (!user.isVerified) {
       // Auto-send fresh OTP so they can complete verification easily
-      const otpCode = generateNumericOtp();
-      await Otp.deleteMany({ email: normalizedEmail });
-      await Otp.create({ email: normalizedEmail, otp: otpCode });
+      const otpCode = await issueOtp(normalizedEmail, 'verify');
       sendOtpEmail(normalizedEmail, otpCode, user.firstName).catch(() => {});
 
       return res.status(403).json({
@@ -328,8 +338,8 @@ const login = async (req, res) => {
       if (!isDeviceTrusted) {
         // Issue temporary 2FA verification token valid for 10 minutes
         const tempToken = jwt.sign(
-          { id: user._id, email: user.email, step: '2fa', rememberMe: !!rememberMe },
-          process.env.JWT_SECRET || 'super_secret_hiremind_jwt_dev_key',
+          { id: user._id, email: user.email, step: '2fa', purpose: '2fa_login', rememberMe: !!rememberMe },
+          getJwtSecret(),
           { expiresIn: '10m' }
         );
 
@@ -418,22 +428,15 @@ const forgotPassword = async (req, res) => {
     const normalizedEmail = email.toLowerCase().trim();
     const user = await User.findOne({ email: normalizedEmail });
 
-    if (!user) {
-      return res.status(404).json({ message: 'No account found with this email address' });
+    // Same response whether or not the account exists (prevents email enumeration)
+    if (user) {
+      const otpCode = await issueOtp(normalizedEmail, 'reset');
+      await sendPasswordResetOtpEmail(normalizedEmail, otpCode, user.firstName);
     }
-
-    const otpCode = generateNumericOtp();
-    await Otp.deleteMany({ email: normalizedEmail });
-    await Otp.create({
-      email: normalizedEmail,
-      otp: otpCode,
-    });
-
-    await sendPasswordResetOtpEmail(normalizedEmail, otpCode, user.firstName);
 
     return res.status(200).json({
       success: true,
-      message: 'Password reset code has been sent to your email.',
+      message: 'If an account exists for this email, a password reset code has been sent.',
       email: normalizedEmail,
     });
   } catch (error) {
@@ -455,26 +458,30 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ message: 'Email, verification code, and new password are required' });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
+    const passwordError = getPasswordPolicyError(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const normalizedEmail = email.toLowerCase().trim();
 
-    const otpRecord = await Otp.findOne({ email: normalizedEmail }).sort({ createdAt: -1 });
-    if (!otpRecord || otpRecord.otp !== otp.toString().trim()) {
+    // Only password reset codes are accepted here
+    const isValidCode = await checkOtp(normalizedEmail, otp, 'reset');
+    if (!isValidCode) {
       return res.status(400).json({ message: 'Invalid or expired verification code' });
     }
 
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(400).json({ message: 'Invalid or expired verification code' });
     }
 
     user.password = newPassword;
+    // A password reset revokes any "remember this device" 2FA bypasses
+    user.twoFactorTrustedDevices = [];
     await user.save();
 
-    await Otp.deleteMany({ email: normalizedEmail });
+    await Otp.deleteMany({ email: normalizedEmail, purpose: 'reset' });
 
     return res.status(200).json({
       success: true,
@@ -534,6 +541,9 @@ const deleteAccount = async (req, res) => {
 
     // Delete any pending OTPs for the user's email
     await Otp.deleteMany({ email: user.email });
+
+    // Remove the candidate's interview sessions (resume text, transcripts, evaluations)
+    await InterviewSession.deleteMany({ userId });
 
     // Permanently remove the user from MongoDB
     await User.findByIdAndDelete(userId);
@@ -703,7 +713,7 @@ const verify2FALogin = async (req, res) => {
 
     let decoded;
     try {
-      decoded = jwt.verify(tempToken, process.env.JWT_SECRET || 'super_secret_hiremind_jwt_dev_key');
+      decoded = jwt.verify(tempToken, getJwtSecret());
     } catch (err) {
       return res.status(401).json({ message: 'Your login session has expired. Please enter your credentials again.' });
     }

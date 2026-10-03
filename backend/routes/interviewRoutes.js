@@ -1,8 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
 const {
   analyzeResume,
   analyzeJobDescription,
@@ -53,32 +51,8 @@ const audioUpload = multer({
   },
 });
 
-// Optional auth middleware that attaches req.user if valid token provided, but doesn't block if not
-const optionalProtect = async (req, res, next) => {
-  try {
-    let token = null;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.headers['x-access-token']) {
-      token = req.headers['x-access-token'];
-    } else if (req.query?.token) {
-      token = req.query.token;
-    } else if (req.body?.token) {
-      token = req.body.token;
-    }
-
-    if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_hiremind_jwt_dev_key');
-      const user = await User.findById(decoded.id);
-      if (user) req.user = user;
-    }
-  } catch {
-    // Non-blocking for guest sessions
-  }
-  next();
-};
-
-const { requireInterviewDemoAccess } = require('../middleware/demoAccessMiddleware');
+const { protect, optionalProtect, isAdminUser } = require('../middleware/authMiddleware');
+const { requireInterviewDemoAccess, requireSessionOwnership } = require('../middleware/demoAccessMiddleware');
 const { subscribe } = require('../services/realtimeService');
 
 // Live Real-Time Events SSE Stream for candidate dashboards
@@ -106,7 +80,7 @@ router.get('/access-status', optionalProtect, (req, res) => {
   }
 
   // 1. Administrators have unrestricted access
-  if (req.user.role === 'admin' || req.user.email === 'admin@gmail.com') {
+  if (isAdminUser(req.user)) {
     return res.status(200).json({
       success: true,
       canAccess: true,
@@ -151,23 +125,27 @@ router.get('/access-status', optionalProtect, (req, res) => {
   });
 });
 
-// Routes with High Security Demo Access Protection
-router.post('/:sessionId/analyze-resume', requireInterviewDemoAccess, upload.single('resume'), analyzeResume);
-router.post('/:sessionId/analyze-jd', requireInterviewDemoAccess, analyzeJobDescription);
-router.post('/:sessionId/plan', requireInterviewDemoAccess, generateInterviewPlan);
-router.post('/:sessionId/begin', requireInterviewDemoAccess, beginLiveInterview);
-router.post('/:sessionId/answer', requireInterviewDemoAccess, submitLiveAnswer);
-router.post('/:sessionId/voice/transcribe', requireInterviewDemoAccess, audioUpload.single('audio'), transcribeCandidateVoice);
-router.post('/:sessionId/voice/speech', requireInterviewDemoAccess, synthesizeInterviewerSpeech);
-router.post('/:sessionId/code/run', requireInterviewDemoAccess, runCode);
-router.post('/:sessionId/code/submit', requireInterviewDemoAccess, submitCodeSolution);
-router.post('/:sessionId/end', optionalProtect, manualEndLiveInterview);
-router.post('/:sessionId/chat', requireInterviewDemoAccess, sendChatMessage);
-router.get('/:sessionId/evaluation', optionalProtect, getOrGenerateEvaluation);
-router.post('/:sessionId/evaluate', optionalProtect, getOrGenerateEvaluation);
-router.get('/:sessionId', optionalProtect, getSession);
-router.put('/:sessionId', optionalProtect, updateSession);
-router.delete('/:sessionId', optionalProtect, deleteSession);
+// Interview execution routes: demo access + session ownership required
+const demoOwner = [requireInterviewDemoAccess, requireSessionOwnership];
+// Read/manage routes: authenticated owner only (no demo quota needed to view past reports)
+const owner = [protect, requireSessionOwnership];
+
+router.post('/:sessionId/analyze-resume', ...demoOwner, upload.single('resume'), analyzeResume);
+router.post('/:sessionId/analyze-jd', ...demoOwner, analyzeJobDescription);
+router.post('/:sessionId/plan', ...demoOwner, generateInterviewPlan);
+router.post('/:sessionId/begin', ...demoOwner, beginLiveInterview);
+router.post('/:sessionId/answer', ...demoOwner, submitLiveAnswer);
+router.post('/:sessionId/voice/transcribe', ...demoOwner, audioUpload.single('audio'), transcribeCandidateVoice);
+router.post('/:sessionId/voice/speech', ...demoOwner, synthesizeInterviewerSpeech);
+router.post('/:sessionId/code/run', ...demoOwner, runCode);
+router.post('/:sessionId/code/submit', ...demoOwner, submitCodeSolution);
+router.post('/:sessionId/chat', ...demoOwner, sendChatMessage);
+router.post('/:sessionId/end', ...owner, manualEndLiveInterview);
+router.get('/:sessionId/evaluation', ...owner, getOrGenerateEvaluation);
+router.post('/:sessionId/evaluate', ...owner, getOrGenerateEvaluation);
+router.get('/:sessionId', ...owner, getSession);
+router.put('/:sessionId', ...owner, updateSession);
+router.delete('/:sessionId', ...owner, deleteSession);
 
 module.exports = router;
 

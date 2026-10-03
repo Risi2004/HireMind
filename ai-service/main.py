@@ -16,12 +16,15 @@ venv_python = venv_dir / "Scripts" / "python.exe" if sys.platform == "win32" els
 if venv_python.exists() and os.path.abspath(sys.executable).lower() != os.path.abspath(str(venv_python)).lower():
     sys.exit(subprocess.call([str(venv_python)] + sys.argv))
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Response
+import hmac
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 
-from config.settings import AI_SERVICE_PORT, AI_SERVICE_HOST
+from config.settings import AI_SERVICE_PORT, AI_SERVICE_HOST, AI_SERVICE_API_KEY, IS_PRODUCTION
 from orchestrator.orchestrator import orchestrator_instance
 from agents.resume_analyzer import resume_analyzer_instance
 from agents.jd_analyzer import jd_analyzer_instance
@@ -37,14 +40,44 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS configuration
+# This service is called server-to-server by the HireMind backend only.
+# Browsers never call it directly, so no cross-origin access is granted.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=[],
 )
+
+# Endpoints reachable without the internal API key (health probes / landing)
+PUBLIC_PATHS = {"/", "/health"}
+
+
+@app.middleware("http")
+async def require_internal_api_key(request: Request, call_next):
+    """Reject any request that does not carry the shared backend secret.
+
+    Without this, anyone on the internet could call the LLM / STT / TTS endpoints
+    directly and spend the OpenRouter credits.
+    """
+    if request.method == "OPTIONS" or request.url.path in PUBLIC_PATHS:
+        return await call_next(request)
+
+    if not AI_SERVICE_API_KEY:
+        if IS_PRODUCTION:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "AI service is not configured: AI_SERVICE_API_KEY is missing."},
+            )
+        # Local development without a key: allow, but make it visible
+        return await call_next(request)
+
+    supplied = request.headers.get("x-internal-api-key", "")
+    if not hmac.compare_digest(supplied.encode(), AI_SERVICE_API_KEY.encode()):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
 
 
 class StartSessionRequest(BaseModel):

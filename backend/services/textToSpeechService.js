@@ -5,7 +5,7 @@
  * Synthesizes interviewer question text into audio for playback.
  */
 
-const { getAiServiceUrl } = require('../config/aiServiceConfig');
+const { getAiServiceUrl, getAiServiceHeaders } = require('../config/aiServiceConfig');
 const AI_SERVICE_URL = getAiServiceUrl();
 
 class TextToSpeechService {
@@ -36,7 +36,7 @@ class TextToSpeechService {
     try {
       const response = await fetch(`${AI_SERVICE_URL}/voice/synthesize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           text: cleanText,
           voice: chosenVoice,

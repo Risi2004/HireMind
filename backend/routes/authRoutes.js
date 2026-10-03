@@ -18,6 +18,15 @@ const {
   verifyAdminStatus,
 } = require('../controllers/authController');
 const { protect, requireAdmin } = require('../middleware/authMiddleware');
+const { rateLimit } = require('../middleware/rateLimiter');
+
+const FIFTEEN_MIN = 15 * 60 * 1000;
+// Code checks: limited per IP and per email so 6-digit codes cannot be brute-forced
+const codeLimiter = rateLimit({ windowMs: FIFTEEN_MIN, max: 10, keyField: 'email' });
+// Code/email dispatch: limits email spam
+const sendLimiter = rateLimit({ windowMs: FIFTEEN_MIN, max: 5, keyField: 'email' });
+const loginLimiter = rateLimit({ windowMs: FIFTEEN_MIN, max: 20, keyField: 'email' });
+const twoFactorLimiter = rateLimit({ windowMs: FIFTEEN_MIN, max: 10 });
 
 const router = express.Router();
 
@@ -54,20 +63,20 @@ const handleAvatarUpload = (req, res, next) => {
 };
 
 // Authentication & Profile Picture endpoints
-router.post('/register', handleAvatarUpload, register);
-router.post('/verify-otp', verifyOtp);
-router.post('/resend-otp', resendOtp);
-router.post('/login', login);
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password', resetPassword);
+router.post('/register', sendLimiter, handleAvatarUpload, register);
+router.post('/verify-otp', codeLimiter, verifyOtp);
+router.post('/resend-otp', sendLimiter, resendOtp);
+router.post('/login', loginLimiter, login);
+router.post('/forgot-password', sendLimiter, forgotPassword);
+router.post('/reset-password', codeLimiter, resetPassword);
 router.get('/me', protect, getMe);
 router.delete('/account', protect, deleteAccount);
 
 // Two-Factor Authentication (MFA) endpoints
 router.post('/2fa/setup', protect, generate2FASetup);
-router.post('/2fa/enable', protect, enable2FA);
+router.post('/2fa/enable', protect, twoFactorLimiter, enable2FA);
 router.post('/2fa/disable', protect, disable2FA);
-router.post('/2fa/verify-login', verify2FALogin);
+router.post('/2fa/verify-login', twoFactorLimiter, verify2FALogin);
 
 // Secure streaming route from private Cloudflare R2 bucket
 router.get('/avatar/:filename', getAvatar);

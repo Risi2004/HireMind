@@ -594,7 +594,9 @@ export function AuthProvider({ children }) {
         headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
       })
       const data = await res.json()
-      if (data.success) {
+      // Ignore anonymous responses (token rejected / expired) and admin responses —
+      // they describe a different session and must not overwrite this user's state.
+      if (data.success && data.isAuthenticated !== false && !data.isAdmin) {
         setUser((prev) => {
           if (!prev) return prev
           const curDemo = prev.demoAccess || {}
@@ -602,12 +604,14 @@ export function AuthProvider({ children }) {
             Boolean(curDemo.enabled) !== Boolean(data.hasDemoAccess) ||
             Number(curDemo.allowedInterviews || 0) !== Number(data.allowedInterviews || 0) ||
             Number(curDemo.completedInterviews || 0) !== Number(data.completedInterviews || 0) ||
-            (data.isProfileSetupCompleted !== undefined && Boolean(prev.isProfileSetupCompleted) !== Boolean(data.isProfileSetupCompleted))
+            (Boolean(data.isProfileSetupCompleted) && !prev.isProfileSetupCompleted)
 
           if (!hasChanged) return prev
 
-          // Preserve completed profile setup flag (never revert to false on demo sync)
-          const isSetupDone = Boolean(data.isProfileSetupCompleted ?? prev.isProfileSetupCompleted)
+          // Preserve completed profile setup flag: a demo-access sync may mark setup as
+          // done, but must never revert it to false (that would bounce the candidate back
+          // to /profile-setup from the Dashboard).
+          const isSetupDone = Boolean(prev.isProfileSetupCompleted) || Boolean(data.isProfileSetupCompleted)
 
           const updatedUser = {
             ...prev,
@@ -630,9 +634,32 @@ export function AuthProvider({ children }) {
     }
   }
 
-  // Live Real-Time Stream (Server-Sent Events) & Cross-Tab Sync for Demo Access updates
+  // Keep every open tab on the SAME signed-in account.
+  // All tabs share localStorage, so signing in (e.g. as admin) in one tab replaces the
+  // stored token. Without this, an older tab kept showing the previous account while its
+  // requests silently used the new account's token (403s / endless loading in interviews).
   useEffect(() => {
-    if (!token || !user) return
+    const handleSessionChange = (e) => {
+      if (e.key !== 'hiremind_token' && e.key !== 'hiremind_user' && e.key !== null) return
+      const storedToken = localStorage.getItem('hiremind_token') || null
+      let storedUser
+      try {
+        const raw = localStorage.getItem('hiremind_user')
+        storedUser = raw ? JSON.parse(raw) : null
+      } catch {
+        storedUser = null
+      }
+      setToken(storedToken)
+      setUser(storedToken ? storedUser : null)
+    }
+    window.addEventListener('storage', handleSessionChange)
+    return () => window.removeEventListener('storage', handleSessionChange)
+  }, [])
+
+  // Live Real-Time Stream (Server-Sent Events) & Cross-Tab Sync for Demo Access updates
+  // (candidates only — admins have unrestricted access and must not react to their own broadcasts)
+  useEffect(() => {
+    if (!token || !user || isAdmin) return
 
     let eventSource = null
     let pollInterval = null

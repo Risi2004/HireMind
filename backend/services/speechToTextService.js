@@ -4,7 +4,7 @@
  * Translates candidate audio to text transcript without altering content.
  */
 
-const { getAiServiceUrl } = require('../config/aiServiceConfig');
+const { getAiServiceUrl, getAiServiceHeaders } = require('../config/aiServiceConfig');
 const AI_SERVICE_URL = getAiServiceUrl();
 
 class SpeechToTextService {
@@ -50,6 +50,7 @@ class SpeechToTextService {
 
       const response = await fetch(`${AI_SERVICE_URL}/voice/transcribe`, {
         method: 'POST',
+        headers: getAiServiceHeaders(),
         body: formData,
         signal: AbortSignal.timeout(45000),
       });

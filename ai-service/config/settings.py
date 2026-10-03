@@ -33,6 +33,14 @@ STT_MODEL = os.getenv("STT_MODEL", "openai/whisper-large-v3-turbo")
 TTS_MODEL = os.getenv("TTS_MODEL", "gemini-3.8-flash-lite-tts")
 TTS_VOICE = os.getenv("TTS_VOICE", "Puck")
 
+# Shared secret the backend must send in the X-Internal-Api-Key header
+AI_SERVICE_API_KEY = os.getenv("AI_SERVICE_API_KEY", "").strip()
+# Render sets RENDER=true on its services; ENVIRONMENT=production also counts
+IS_PRODUCTION = (
+    os.getenv("ENVIRONMENT", "").lower() == "production"
+    or os.getenv("RENDER", "").lower() == "true"
+)
+
 # Service Configuration
 AI_SERVICE_PORT = int(os.getenv("PORT") or os.getenv("AI_SERVICE_PORT") or "8000")
 AI_SERVICE_HOST = os.getenv("AI_SERVICE_HOST", "0.0.0.0")

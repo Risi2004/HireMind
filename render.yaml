@@ -21,16 +21,20 @@ services:
         generateValue: true
       - key: CLIENT_URL
         sync: false
-      - key: BACKEND_URL
-        fromService:
-          type: web
-          name: hiremind-backend
-          property: host
+      # Admin login (seeded on startup). Set a strong password (12+ chars) in the Render dashboard.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Public HTTPS URL of the AI service, e.g. https://hiremind-ai-service.onrender.com
+      # (Render free-plan services cannot reach each other over the private network,
+      #  so the internal "host" property must NOT be used here.)
       - key: AI_SERVICE_URL
-        fromService:
-          type: web
-          name: hiremind-ai-service
-          property: host
+        sync: false
+      # Shared secret sent to the AI service; generated here and copied to the AI service below
+      - key: AI_SERVICE_API_KEY
+        generateValue: true
+      # Public backend URL (BACKEND_URL) is optional: Render provides RENDER_EXTERNAL_URL automatically.
       - key: CLOUDFLARE_R2_ACCOUNT_ID
         sync: false
       - key: CLOUDFLARE_R2_ACCESS_KEY_ID
@@ -84,8 +88,11 @@ services:
         value: gemini-3.8-flash-lite-tts
       - key: TTS_VOICE
         value: Puck
-      - key: BACKEND_API_URL
+      - key: ENVIRONMENT
+        value: production
+      # Must match the backend's AI_SERVICE_API_KEY (requests without it are rejected)
+      - key: AI_SERVICE_API_KEY
         fromService:
           type: web
           name: hiremind-backend
-          property: host
+          envVarKey: AI_SERVICE_API_KEY

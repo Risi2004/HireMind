@@ -1,5 +1,7 @@
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const InterviewSession = require('../models/InterviewSession');
+const { extractToken, verifySessionToken } = require('../config/authToken');
+const { isAdminUser } = require('./authMiddleware');
 
 /**
  * Middleware that strictly protects AI Interview execution.
@@ -12,13 +14,7 @@ const User = require('../models/User');
  */
 const requireInterviewDemoAccess = async (req, res, next) => {
   try {
-    let token = null;
-
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    } else if (req.query && req.query.token) {
-      token = req.query.token;
-    }
+    const token = extractToken(req);
 
     if (!token) {
       return res.status(401).json({
@@ -27,10 +23,7 @@ const requireInterviewDemoAccess = async (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'super_secret_hiremind_jwt_dev_key'
-    );
+    const decoded = verifySessionToken(token);
     const user = await User.findById(decoded.id);
 
     if (!user) {
@@ -43,7 +36,7 @@ const requireInterviewDemoAccess = async (req, res, next) => {
     req.user = user;
 
     // 1. Administrators always have unlimited access
-    if (user.role === 'admin' || user.email === 'admin@gmail.com') {
+    if (isAdminUser(user)) {
       req.isAdmin = true;
       return next();
     }
@@ -64,18 +57,27 @@ const requireInterviewDemoAccess = async (req, res, next) => {
     const allowed = Number(demo.allowedInterviews) || 0;
     const completed = Number(demo.completedInterviews) || 0;
 
-    // 3. Check if user still has remaining interview attempts
+    // 3. Check if user still has remaining interview attempts.
+    // A session that already consumed a pass may continue (so the quota is not
+    // re-checked mid-interview after the pass was deducted at start).
     if (completed >= allowed) {
-      return res.status(403).json({
-        success: false,
-        isComingSoon: false,
-        quotaExceeded: true,
-        hasDemoAccess: true,
-        allowedInterviews: allowed,
-        completedInterviews: completed,
-        remainingInterviews: 0,
-        message: `You have completed all ${allowed} of your allocated demo interview attempts. Please contact an administrator to refresh your interview count.`,
-      });
+      const sessionId = req.params?.sessionId;
+      const alreadyCounted = sessionId
+        ? await InterviewSession.exists({ sessionId, userId: user._id, isDemoCounted: true })
+        : null;
+
+      if (!alreadyCounted) {
+        return res.status(403).json({
+          success: false,
+          isComingSoon: false,
+          quotaExceeded: true,
+          hasDemoAccess: true,
+          allowedInterviews: allowed,
+          completedInterviews: completed,
+          remainingInterviews: 0,
+          message: `You have completed all ${allowed} of your allocated demo interview attempts. Please contact an administrator to refresh your interview count.`,
+        });
+      }
     }
 
     // 4. User is authorized with remaining demo passes
@@ -90,106 +92,110 @@ const requireInterviewDemoAccess = async (req, res, next) => {
     return res.status(401).json({
       success: false,
       message: 'Invalid or expired authentication session.',
-      error: error.message,
     });
   }
 };
 
 /**
- * Tracks and increments the completed interviews count for demo users upon interview conclusion.
- * Avoids duplicate increments per session.
+ * Ensures the authenticated user owns the interview session in :sessionId.
+ * - Sessions owned by another user are rejected with 403 (admins excepted).
+ * - Legacy sessions without an owner are claimed by the current user.
+ * - Sessions that do not exist yet pass through (handlers create them for req.user).
+ * Must run after protect / requireInterviewDemoAccess.
+ */
+const requireSessionOwnership = async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+    if (!req.user?._id) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+    if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 128) {
+      return res.status(400).json({ success: false, message: 'Invalid interview session ID.' });
+    }
+
+    const session = await InterviewSession.findOne({ sessionId }).select('userId').lean();
+    if (!session) return next();
+
+    if (!session.userId) {
+      await InterviewSession.updateOne({ sessionId, userId: null }, { $set: { userId: req.user._id } });
+      return next();
+    }
+
+    if (session.userId.toString() !== req.user._id.toString() && !isAdminUser(req.user)) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this interview session.' });
+    }
+
+    return next();
+  } catch (error) {
+    console.error('[Session Ownership] Error verifying session owner:', error.message);
+    return res.status(500).json({ success: false, message: 'Failed to verify interview session access.' });
+  }
+};
+
+/**
+ * Consumes one demo interview pass for the session owner.
+ * Idempotent per session: the session's isDemoCounted flag is flipped atomically,
+ * so concurrent calls (begin / end / evaluate) can never deduct twice.
  *
  * @param {Object} session - InterviewSession mongoose document
- * @param {string|Object} userOrReq - User ID, User document, or Express req object
  * @returns {Promise<Object|null>} Updated demoAccess object or null
  */
-const recordCompletedDemoInterview = async (session, userOrReq) => {
+const recordCompletedDemoInterview = async (session) => {
   try {
-    if (!session) return null;
-    if (session.isDemoCounted) {
-      console.log(`[Demo Access Security] Session ${session.sessionId} is already counted.`);
-      return null;
-    }
+    if (!session || !session.userId) return null;
 
-    let targetUserId = null;
-    if (userOrReq) {
-      if (typeof userOrReq === 'string' && userOrReq.trim()) {
-        targetUserId = userOrReq.trim();
-      } else if (userOrReq._id) {
-        targetUserId = userOrReq._id.toString();
-      } else if (userOrReq.user && userOrReq.user._id) {
-        targetUserId = userOrReq.user._id.toString();
-      } else if (userOrReq.headers && userOrReq.headers.authorization) {
-        try {
-          const authHeader = userOrReq.headers.authorization;
-          const token = authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
-          if (token) {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_hiremind_jwt_dev_key');
-            if (decoded && decoded.id) {
-              targetUserId = decoded.id.toString();
-            }
-          }
-        } catch (_) {}
-      }
-    }
-
-    if (!targetUserId && session.userId) {
-      targetUserId = session.userId.toString();
-    }
-
-    if (!targetUserId) {
-      console.warn(`[Demo Access Security] Cannot identify user for session ${session.sessionId}. Cannot record demo quota.`);
-      return null;
-    }
-
-    const candidate = await User.findById(targetUserId);
-    if (!candidate) {
-      console.warn(`[Demo Access Security] Candidate with ID ${targetUserId} not found in DB.`);
-      return null;
-    }
+    const candidate = await User.findById(session.userId);
+    if (!candidate) return null;
 
     // Admins do not consume demo quota
-    if (candidate.role === 'admin' || candidate.email === 'admin@gmail.com') {
+    if (isAdminUser(candidate)) {
       return candidate.demoAccess || null;
     }
 
-    if (candidate.demoAccess && candidate.demoAccess.enabled) {
-      const allowed = Number(candidate.demoAccess.allowedInterviews) || 0;
-      const current = Number(candidate.demoAccess.completedInterviews) || 0;
-      const updatedCount = current + 1;
-
-      candidate.demoAccess.completedInterviews = updatedCount;
-      candidate.markModified('demoAccess');
-      await candidate.save();
-
-      session.isDemoCounted = true;
-      if (!session.userId) {
-        session.userId = candidate._id;
-      }
-      await session.save();
-
-      const remaining = Math.max(0, allowed - updatedCount);
-      console.log(
-        `[Demo Access Security] Deducted quota for ${candidate.email}: completed=${updatedCount} / allowed=${allowed} (remaining: ${remaining})`
-      );
-
-      return {
-        enabled: Boolean(candidate.demoAccess.enabled),
-        allowedInterviews: allowed,
-        completedInterviews: updatedCount,
-        remainingInterviews: remaining,
-        notes: candidate.demoAccess.notes || '',
-      };
+    if (!candidate.demoAccess || !candidate.demoAccess.enabled) {
+      return null;
     }
 
-    return null;
+    // Atomically claim this session for quota counting
+    const claimed = await InterviewSession.findOneAndUpdate(
+      { _id: session._id, isDemoCounted: { $ne: true } },
+      { $set: { isDemoCounted: true } },
+      { new: true }
+    );
+    session.isDemoCounted = true;
+
+    if (!claimed) {
+      return null; // Already counted
+    }
+
+    const updated = await User.findByIdAndUpdate(
+      candidate._id,
+      { $inc: { 'demoAccess.completedInterviews': 1 } },
+      { new: true }
+    );
+
+    const allowed = Number(updated.demoAccess.allowedInterviews) || 0;
+    const completed = Number(updated.demoAccess.completedInterviews) || 0;
+    const remaining = Math.max(0, allowed - completed);
+    console.log(
+      `[Demo Access] Deducted quota for ${updated.email}: completed=${completed} / allowed=${allowed} (remaining: ${remaining})`
+    );
+
+    return {
+      enabled: Boolean(updated.demoAccess.enabled),
+      allowedInterviews: allowed,
+      completedInterviews: completed,
+      remainingInterviews: remaining,
+      notes: updated.demoAccess.notes || '',
+    };
   } catch (err) {
-    console.error('[Demo Access Security] Error recording completed demo interview:', err.message);
+    console.error('[Demo Access] Error recording demo interview:', err.message);
     return null;
   }
 };
 
 module.exports = {
   requireInterviewDemoAccess,
+  requireSessionOwnership,
   recordCompletedDemoInterview,
 };
