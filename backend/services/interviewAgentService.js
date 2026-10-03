@@ -4,7 +4,7 @@
  * Owns interview reasoning, question selection, and stage/topic progression.
  */
 
-const { getAiServiceUrl } = require('../config/aiServiceConfig');
+const { getAiServiceUrl, getAiServiceHeaders } = require('../config/aiServiceConfig');
 const AI_SERVICE_URL = getAiServiceUrl();
 
 class InterviewAgentService {
@@ -20,7 +20,7 @@ class InterviewAgentService {
     try {
       const response = await fetch(`${AI_SERVICE_URL}/agents/interview-agent/begin`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(50000),
       });
@@ -53,7 +53,7 @@ class InterviewAgentService {
     try {
       const response = await fetch(`${AI_SERVICE_URL}/agents/interview-agent/next`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(turnPayload),
         signal: AbortSignal.timeout(50000),
       });

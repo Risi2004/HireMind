@@ -14,7 +14,10 @@ export default function InterviewReport() {
   const navigate = useNavigate()
   const { id } = useParams()
   const [searchParams] = useSearchParams()
-  const sessionId = id || searchParams.get('id') || searchParams.get('sessionId') || 'latest'
+  const paramId = id || searchParams.get('id') || searchParams.get('sessionId')
+  const sessionId = (paramId && paramId !== 'default') 
+    ? paramId 
+    : (localStorage.getItem('hiremind_last_interview_id') || 'latest')
 
   const [activeTimeRange, setActiveTimeRange] = useState('15M')
   const [isChatOpen, setIsChatOpen] = useState(false)
@@ -24,6 +27,15 @@ export default function InterviewReport() {
   const [evaluation, setEvaluation] = useState(null)
   const [chatMessages, setChatMessages] = useState([])
 
+  // Ensure speech synthesis and audio are completely silent on report page
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel()
+      } catch (_) {}
+    }
+  }, [])
+
   // Fetch dynamic evaluation and session details from backend
   useEffect(() => {
     let isMounted = true
@@ -32,7 +44,9 @@ export default function InterviewReport() {
       setIsLoading(true)
       try {
         const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-        const targetId = sessionId && sessionId !== 'default' ? sessionId : 'latest'
+        const targetId = (sessionId && sessionId !== 'default') 
+          ? sessionId 
+          : (localStorage.getItem('hiremind_last_interview_id') || 'latest')
         const res = await fetch(getApiUrl(`/api/interview/${targetId}/evaluation`), {
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),

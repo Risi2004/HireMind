@@ -354,11 +354,13 @@ const getAllUsers = async (req, res) => {
     if (role && role !== 'All') {
       query.role = role.toLowerCase();
     }
-    if (search) {
+    if (search && typeof search === 'string') {
+      // Escape user input so it is matched literally (prevents regex injection / ReDoS)
+      const safeSearch = search.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       query.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
+        { firstName: { $regex: safeSearch, $options: 'i' } },
+        { lastName: { $regex: safeSearch, $options: 'i' } },
+        { email: { $regex: safeSearch, $options: 'i' } },
       ];
     }
 
