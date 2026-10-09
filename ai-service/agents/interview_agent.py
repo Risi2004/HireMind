@@ -539,7 +539,9 @@ class InterviewAgent:
             f"   - If in closing/wrap-up AND elapsed time >= 90% of target duration: choose END_INTERVIEW with reasonCode='INTERVIEW_COMPLETE'.\n"
             f"3. CRAFT THE ONE QUESTION:\n"
             f"   - Natural, human interviewer language. Strictly ONE question (1-2 sentences max).\n"
-            f"   - Avoid robotic transitions. Provide smooth, professional conversational shifts.\n"
+            f"   - Begin with a warm, natural acknowledgment of their specific answer (e.g., 'Understood, that makes good sense.', 'Got it, thanks for explaining that.', 'Fair point.') before asking the next question.\n"
+            f"   - When transitioning stages, clearly acknowledge concluding the current competency before introducing the next area.\n"
+            f"   - Avoid robotic transitions. Provide smooth, empathetic, professional conversational flow.\n"
             f"Respond ONLY in valid JSON."
         )
 

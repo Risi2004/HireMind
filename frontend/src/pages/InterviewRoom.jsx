@@ -208,7 +208,20 @@ export default function InterviewRoom() {
             for (let i = 0; i < dataArray.length; i++) {
               sum += dataArray[i]
             }
-            setAudioVolume(sum / dataArray.length)
+            const avgVol = sum / dataArray.length
+            setAudioVolume(avgVol)
+
+            // Candidate Barge-In / Interruption Detection (Feature 2A)
+            if (voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING && !isVoiceMutedRef.current && avgVol > 20) {
+              consecutiveSpeechFramesRef.current = (consecutiveSpeechFramesRef.current || 0) + 1
+              if (consecutiveSpeechFramesRef.current >= 6) {
+                consecutiveSpeechFramesRef.current = 0
+                handleCandidateBargeIn()
+              }
+            } else {
+              consecutiveSpeechFramesRef.current = 0
+            }
+
             animFrameRef.current = requestAnimationFrame(checkVolume)
           }
           checkVolume()
@@ -290,6 +303,206 @@ export default function InterviewRoom() {
   const [pendingTurnData, setPendingTurnData] = useState(null)
   const [isRetryingFeedback, setIsRetryingFeedback] = useState(false)
   const [feedbackError, setFeedbackError] = useState(null)
+
+  // =========================================================================
+  // FEATURE 1B: PRE-FLIGHT HARDWARE QUALITY CHECK ("GREEN ROOM") STATE
+  // =========================================================================
+  const [isHardwareModalOpen, setIsHardwareModalOpen] = useState(false)
+  const [micPermissionStatus, setMicPermissionStatus] = useState('checking')
+  const [isTestingMicRecording, setIsTestingMicRecording] = useState(false)
+  const [testRecordingCountdown, setTestRecordingCountdown] = useState(0)
+  const [testAudioBlob, setTestAudioBlob] = useState(null)
+  const [testAudioUrl, setTestAudioUrl] = useState(null)
+  const [isPlayingTestAudio, setIsPlayingTestAudio] = useState(false)
+  const [isPlayingSpeakerTest, setIsPlayingSpeakerTest] = useState(false)
+  const [speakerTestPassed, setSpeakerTestPassed] = useState(false)
+  const testMediaRecorderRef = useRef(null)
+  const testAudioPlayerRef = useRef(null)
+  const testAudioChunksRef = useRef([])
+
+  // =========================================================================
+  // FEATURE 2A: CANDIDATE BARGE-IN & INTERRUPTION STATE
+  // =========================================================================
+  const [bargeInToast, setBargeInToast] = useState(null)
+  const bargeInToastTimeoutRef = useRef(null)
+  const consecutiveSpeechFramesRef = useRef(0)
+
+  // Query microphone permissions
+  useEffect(() => {
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions
+        .query({ name: 'microphone' })
+        .then((perm) => {
+          setMicPermissionStatus(perm.state)
+          perm.onchange = () => setMicPermissionStatus(perm.state)
+        })
+        .catch(() => {
+          setMicPermissionStatus('prompt')
+        })
+    } else {
+      setMicPermissionStatus('prompt')
+    }
+  }, [])
+
+  const triggerBargeInToast = (message) => {
+    if (bargeInToastTimeoutRef.current) clearTimeout(bargeInToastTimeoutRef.current)
+    setBargeInToast(message)
+    bargeInToastTimeoutRef.current = setTimeout(() => {
+      setBargeInToast(null)
+    }, 3500)
+  }
+
+  // Handle Candidate Barge-In / Interruption (Feature 2A)
+  const handleCandidateBargeIn = (interruptedText = '') => {
+    if (isCompleted || isTerminatedRef.current) return
+    if (voiceStateRef.current !== VOICE_STATES.INTERVIEWER_SPEAKING) return
+
+    console.log('[BargeIn] Candidate interrupted interviewer speech')
+    stopCurrentAudio()
+
+    voiceStateRef.current = VOICE_STATES.CANDIDATE_SPEAKING
+    setVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+    setPlayingMessageId(null)
+    triggerBargeInToast('Interviewer paused — Listening to your response...')
+
+    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice') {
+      startVoiceListening()
+    }
+  }
+
+  // Play a pleasant 3-tone harmonic chime for Speaker test (Feature 1B)
+  const handlePlaySpeakerTestTone = () => {
+    if (isPlayingSpeakerTest) return
+    setIsPlayingSpeakerTest(true)
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext
+      if (!AudioCtx) throw new Error('Web Audio API not supported')
+      const ctx = new AudioCtx()
+      if (ctx.state === 'suspended') ctx.resume()
+
+      const now = ctx.currentTime
+      const notes = [523.25, 659.25, 783.99] // C5, E5, G5 harmonic triad
+
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(freq, now + idx * 0.16)
+
+        gain.gain.setValueAtTime(0, now + idx * 0.16)
+        gain.gain.linearRampToValueAtTime(0.22, now + idx * 0.16 + 0.04)
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.16 + 0.45)
+
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+
+        osc.start(now + idx * 0.16)
+        osc.stop(now + idx * 0.16 + 0.5)
+      })
+
+      setTimeout(() => {
+        setIsPlayingSpeakerTest(false)
+        setSpeakerTestPassed(true)
+      }, 700)
+    } catch (err) {
+      console.warn('[SpeakerTest] Tone generation failed:', err)
+      setIsPlayingSpeakerTest(false)
+    }
+  }
+
+  // Record 3-second sample for Microphone clarity loopback test (Feature 1B)
+  const handleRecordTestSample = async () => {
+    if (isTestingMicRecording) return
+    try {
+      let stream = mediaStreamRef.current
+      if (!stream || !stream.getAudioTracks().some((t) => t.readyState === 'live')) {
+        stream = await startMicrophone()
+      }
+
+      if (!stream) {
+        alert('Please allow microphone permissions to test audio.')
+        return
+      }
+
+      testAudioChunksRef.current = []
+      let mimeType = 'audio/webm;codecs=opus'
+      if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
+      }
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      testMediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          testAudioChunksRef.current.push(e.data)
+        }
+      }
+
+      recorder.onstop = () => {
+        const blob = new Blob(testAudioChunksRef.current, { type: mimeType || 'audio/webm' })
+        setTestAudioBlob(blob)
+        if (testAudioUrl) URL.revokeObjectURL(testAudioUrl)
+        const url = URL.createObjectURL(blob)
+        setTestAudioUrl(url)
+        setIsTestingMicRecording(false)
+        setTestRecordingCountdown(0)
+      }
+
+      recorder.start()
+      setIsTestingMicRecording(true)
+      setTestRecordingCountdown(3)
+
+      let count = 3
+      const countInterval = setInterval(() => {
+        count -= 1
+        setTestRecordingCountdown(count)
+        if (count <= 0) {
+          clearInterval(countInterval)
+          if (recorder.state === 'recording') {
+            recorder.stop()
+          }
+        }
+      }, 1000)
+    } catch (err) {
+      console.warn('[TestRecording] Error starting sample recording:', err)
+      setIsTestingMicRecording(false)
+      setTestRecordingCountdown(0)
+    }
+  }
+
+  // Play candidate's test recorded sample
+  const handlePlayTestSample = () => {
+    if (!testAudioUrl || isPlayingTestAudio) return
+    setIsPlayingTestAudio(true)
+    const audio = new Audio(testAudioUrl)
+    testAudioPlayerRef.current = audio
+    audio.onended = () => {
+      setIsPlayingTestAudio(false)
+      testAudioPlayerRef.current = null
+    }
+    audio.onerror = () => {
+      setIsPlayingTestAudio(false)
+      testAudioPlayerRef.current = null
+    }
+    audio.play().catch(() => {
+      setIsPlayingTestAudio(false)
+    })
+  }
+
+  // Confirm hardware ready and proceed into interview (Feature 1B)
+  const handleConfirmHardwareReady = async () => {
+    setIsHardwareModalOpen(false)
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext
+      if (AudioCtx) {
+        const ctx = new AudioCtx()
+        if (ctx.state === 'suspended') ctx.resume()
+      }
+    } catch { /* non-critical */ }
+
+    await startOrResumeInterview('voice', true)
+  }
 
   // Interview Mode Selection Modal state
   const [isModeModalOpen, setIsModeModalOpen] = useState(false)
@@ -757,13 +970,13 @@ export default function InterviewRoom() {
         }
       } catch { /* non-critical; safe to ignore */ }
 
+      // Open the Pre-Flight Hardware Quality Check ("Green Room") Modal (Feature 1B)
+      setIsHardwareModalOpen(true)
+
       // Prompt and initialize microphone
       try {
         await startMicrophone()
       } catch { /* non-critical; safe to ignore */ }
-
-      // Directly start asking questions and automatically read aloud
-      await startOrResumeInterview('voice', true)
     } else {
       await startOrResumeInterview('text', false)
     }
@@ -1279,6 +1492,11 @@ export default function InterviewRoom() {
             }
             const combined = (final + interim).trim()
             if (combined) {
+              // Candidate Barge-in / Interruption check (Feature 2A):
+              // If AI interviewer was speaking and candidate speaks, immediately interrupt AI!
+              if (voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING) {
+                handleCandidateBargeIn(combined)
+              }
               updateLiveTranscript(combined)
               // Reset and restart 3-second silence auto-send timer
               startSilenceDetection()
@@ -1387,8 +1605,13 @@ export default function InterviewRoom() {
     }
   }
 
-  // Toggle Mute / Unmute
+  // Toggle Mute / Unmute (Supports candidate barge-in when AI is speaking)
   const handleToggleMute = () => {
+    if (voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING) {
+      handleCandidateBargeIn()
+      return
+    }
+
     if (isVoiceMuted) {
       setIsVoiceMuted(false)
       isVoiceMutedRef.current = false
@@ -1812,6 +2035,25 @@ export default function InterviewRoom() {
         </div>
 
         <div className="int-room-nav__right">
+          {/* Audio & Hardware Green Room Check Button (Feature 1B) */}
+          <button
+            type="button"
+            className="int-room-nav__hw-btn"
+            onClick={() => {
+              setIsHardwareModalOpen(true)
+              startMicrophone().catch(() => {})
+            }}
+            title="Microphone & Speaker Hardware Quality Check"
+            aria-label="Hardware Audio Check"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+            </svg>
+            <span>Audio Check</span>
+          </button>
+
           {/* Chatbot Toggle Button */}
           <button
             type="button"
@@ -2001,28 +2243,59 @@ export default function InterviewRoom() {
               </div>
             </div>
 
-            {/* Interview Stages Roadmap */}
+            {/* FEATURE 2B: ENHANCED STAGE AGENDA COVERAGE MATRIX */}
             {stages.length > 0 && (
-              <div className="int-room-roadmap-group">
-                <div className="int-room-roadmap-header">
-                  <span className="int-room-roadmap-label">INTERVIEW ROADMAP</span>
-                  <span className="int-room-roadmap-counter">{currentStageNumber}/{totalStages}</span>
+              <div className="int-room-agenda-matrix">
+                <div className="int-room-agenda-header">
+                  <span className="int-room-agenda-label">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 11 12 14 22 4" />
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                    </svg>
+                    STAGE AGENDA COVERAGE
+                  </span>
+                  <span className="int-room-agenda-counter">
+                    {currentStageIndex + 1}/{totalStages} ({Math.min(100, Math.round(((currentStageIndex + 1) / Math.max(1, totalStages)) * 100))}%)
+                  </span>
                 </div>
-                <div className="int-room-roadmap-list">
+
+                <div className="int-room-agenda-progress-track">
+                  <div
+                    className="int-room-agenda-progress-fill"
+                    style={{
+                      width: `${Math.min(100, Math.round(((currentStageIndex + (interviewState?.currentStageHops || 0) * 0.4) / Math.max(1, totalStages)) * 100))}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="int-room-agenda-list">
                   {stages.map((stg, idx) => {
                     const isPast = idx < currentStageIndex
                     const isCurrent = idx === currentStageIndex
+                    const hops = isCurrent ? (interviewState?.currentStageHops || 1) : (isPast ? 2 : 0)
                     return (
                       <div
                         key={stg.id || idx}
-                        className={`int-room-roadmap-item ${isPast ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''}`}
+                        className={`int-room-agenda-item ${isPast ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''}`}
                       >
-                        <div className="int-room-roadmap-step-circle">
-                          {isPast ? '✓' : idx + 1}
-                        </div>
-                        <div className="int-room-roadmap-text">
-                          <span className="int-room-roadmap-name">{stg.name || stg.title}</span>
-                          {isCurrent && <span className="int-room-roadmap-live-tag">Active</span>}
+                        <div className="int-room-agenda-row">
+                          <div className="int-room-agenda-row-left">
+                            <div className={`int-room-agenda-step-dot ${isPast ? 'is-completed' : isCurrent ? 'is-current' : 'is-upcoming'}`}>
+                              {isPast ? '✓' : idx + 1}
+                            </div>
+                            <span className="int-room-agenda-name">{stg.name || stg.title || `Stage ${idx + 1}`}</span>
+                          </div>
+                          <div>
+                            {isPast ? (
+                              <span className="int-room-agenda-hop-pill is-done">✓ Covered</span>
+                            ) : isCurrent ? (
+                              <span className="int-room-agenda-hop-pill" title="Follow-up questioning depth (max 2 hops per stage)">
+                                Hop {Math.min(2, hops)} of 2
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '10.5px', color: '#64748b' }}>Planned</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )
@@ -2144,16 +2417,36 @@ export default function InterviewRoom() {
                 =============================================================== */}
             {interviewMode === 'voice' && !isCompleted && (
               <div className="int-room-voice-deck">
+                {/* Candidate Barge-in Floating Alert Toast (Feature 2A) */}
+                {bargeInToast && (
+                  <div className="int-room-bargein-toast" role="alert">
+                    <span className="int-room-bargein-toast-dot" />
+                    <span>{bargeInToast}</span>
+                  </div>
+                )}
+
                 <div className="int-room-voice-status-bar">
                   {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
-                    <span className="int-room-voice-badge is-speaking">
-                      <span className="int-room-pulse-dot is-cyan" />
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                      </svg>
-                      AI Interviewer Speaking... (Please Listen)
-                    </span>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span className="int-room-voice-badge is-speaking">
+                        <span className="int-room-pulse-dot is-cyan" />
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                        AI Interviewer Speaking... (Please Listen)
+                      </span>
+                      {/* Feature 2A: On-Screen Candidate Barge-In Button */}
+                      <button
+                        type="button"
+                        className="int-room-bargein-pill-btn"
+                        onClick={() => handleCandidateBargeIn()}
+                        title="Interrupt the AI interviewer and speak immediately"
+                      >
+                        <span>✋</span>
+                        <span>Excuse Me / Interject</span>
+                      </button>
+                    </div>
                   )}
                   {voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && (
                     <span className="int-room-voice-badge is-waiting">
@@ -2588,11 +2881,8 @@ export default function InterviewRoom() {
                         </>
                       ) : voiceState === VOICE_STATES.INTERVIEWER_SPEAKING ? (
                         <>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                          </svg>
-                          Interviewer Speaking (Click to Answer)
+                          <span style={{ fontSize: '13px' }}>✋</span>
+                          Excuse Me / Interject & Answer
                         </>
                       ) : (
                         <>
@@ -3065,6 +3355,198 @@ export default function InterviewRoom() {
                   }}
                 >
                   Start Text Interview →
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          FEATURE 1B: PRE-FLIGHT HARDWARE QUALITY CHECK ("GREEN ROOM") MODAL
+          ===================================================================== */}
+      {isHardwareModalOpen && (
+        <div className="int-room-hw-overlay" role="dialog" aria-modal="true" aria-labelledby="hw-modal-title">
+          <div className="int-room-hw-modal">
+            {/* Header */}
+            <div className="int-room-hw-header">
+              <div className="int-room-hw-badge">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                </svg>
+                PRE-FLIGHT HARDWARE CHECK • GREEN ROOM
+              </div>
+              <h2 id="hw-modal-title" className="int-room-hw-title">Audio & Microphone Quality Verification</h2>
+              <p className="int-room-hw-subtitle">
+                Ensure your microphone clarity, volume levels, and audio output are optimal before speaking with the AI interviewer for the <strong>{displayRole}</strong> position.
+              </p>
+            </div>
+
+            {/* Body */}
+            <div className="int-room-hw-body">
+              <div className="int-room-hw-grid">
+                {/* 1. Microphone Input & Level Test */}
+                <div className="int-room-hw-card">
+                  <div className="int-room-hw-card-header">
+                    <span className="int-room-hw-card-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                      Microphone Input
+                    </span>
+                    <span className={`int-room-hw-status-pill ${micPermissionStatus === 'granted' || isAudioOn ? 'is-ok' : micPermissionStatus === 'denied' ? 'is-error' : 'is-warn'}`}>
+                      {micPermissionStatus === 'granted' || isAudioOn ? '● Live & Connected' : micPermissionStatus === 'denied' ? 'Blocked' : 'Testing'}
+                    </span>
+                  </div>
+
+                  <p className="int-room-hw-card-desc">
+                    Speak into your microphone. Watch the live volume indicator below to ensure sufficient input gain.
+                  </p>
+
+                  {/* Live Volume Meter Bar */}
+                  <div className="int-room-hw-meter-wrap">
+                    <div
+                      className="int-room-hw-meter-bar"
+                      style={{ width: `${Math.min(100, Math.round(audioVolume * 2.8))}%` }}
+                    />
+                  </div>
+                  <div className="int-room-hw-meter-labels">
+                    <span>Silent</span>
+                    <span>{audioVolume > 15 ? 'Good Level' : 'Speak to test...'}</span>
+                    <span>Peak</span>
+                  </div>
+
+                  {/* 3s Voice Sample Recording & Loopback Playback */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      className={`int-room-hw-action-btn ${isTestingMicRecording ? 'is-active-recording' : ''}`}
+                      onClick={handleRecordTestSample}
+                      disabled={isTestingMicRecording}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="4" fill="currentColor" />
+                      </svg>
+                      {isTestingMicRecording ? `Recording... (${testRecordingCountdown}s)` : 'Record 3s Voice Sample'}
+                    </button>
+
+                    {testAudioUrl && (
+                      <button
+                        type="button"
+                        className="int-room-hw-action-btn is-success"
+                        onClick={handlePlayTestSample}
+                        disabled={isPlayingTestAudio || isTestingMicRecording}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                        {isPlayingTestAudio ? 'Playing Back...' : 'Play Back Sample'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Speaker Output Test */}
+                <div className="int-room-hw-card">
+                  <div className="int-room-hw-card-header">
+                    <span className="int-room-hw-card-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                      </svg>
+                      Speaker / Headphones
+                    </span>
+                    <span className={`int-room-hw-status-pill ${speakerTestPassed ? 'is-ok' : 'is-warn'}`}>
+                      {speakerTestPassed ? '✓ Tested' : 'Needs Test'}
+                    </span>
+                  </div>
+
+                  <p className="int-room-hw-card-desc">
+                    Click the button below to play a harmonic test chime. Make sure your headphones or speakers are unmuted so you can hear the AI interviewer.
+                  </p>
+
+                  <div style={{ marginTop: 'auto' }}>
+                    <button
+                      type="button"
+                      className={`int-room-hw-action-btn ${speakerTestPassed ? 'is-success' : ''}`}
+                      onClick={handlePlaySpeakerTestTone}
+                      disabled={isPlayingSpeakerTest}
+                      style={{ width: '100%' }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                      {isPlayingSpeakerTest ? 'Playing Test Sound...' : speakerTestPassed ? '✓ Play Test Sound Again' : 'Play Speaker Test Sound'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Troubleshooting Notice if mic is blocked */}
+              {micPermissionStatus === 'denied' && (
+                <div className="int-room-hw-alert-box" style={{ borderColor: '#ef4444', background: 'rgba(239, 68, 68, 0.1)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <span>
+                    <strong>Microphone access is blocked:</strong> Click the padlock icon in your browser address bar to allow microphone permissions, or switch to Text Mode below.
+                  </span>
+                </div>
+              )}
+
+              {/* Quality confirmation note */}
+              <div className="int-room-hw-alert-box">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+                <span>
+                  <strong>Tip for Sri Lankan candidates:</strong> Natural pauses while gathering your thoughts are completely fine. The system waits 3 seconds of silence before finalizing each response.
+                </span>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="int-room-hw-footer">
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="int-room-hw-text-fallback-btn"
+                  onClick={() => {
+                    setIsHardwareModalOpen(false)
+                    setInterviewMode('text')
+                    startOrResumeInterview('text', false)
+                  }}
+                >
+                  Switch to Text Interview
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="int-room-hw-text-fallback-btn"
+                  onClick={handleConfirmHardwareReady}
+                  title="Skip check and start immediately"
+                >
+                  Skip Check
+                </button>
+
+                <button
+                  type="button"
+                  className="int-room-hw-primary-btn"
+                  onClick={handleConfirmHardwareReady}
+                >
+                  <span>Looks & Sounds Good — Enter Interview →</span>
                 </button>
               </div>
             </div>

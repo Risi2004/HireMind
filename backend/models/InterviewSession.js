@@ -129,6 +129,8 @@ const interviewSessionSchema = new mongoose.Schema(
       questionsAsked: { type: Number, default: 0 },
       stageQuestionsAsked: { type: Number, default: 0 },
       followUpDepth: { type: Number, default: 0 },
+      currentStageHops: { type: Number, default: 0 },
+      maxHopsPerStage: { type: Number, default: 2 },
       coveredTopics: [{ type: String }],
       coveredObjectives: [{ type: String }],
       startedAt: { type: Date, default: null },

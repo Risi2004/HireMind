@@ -24,6 +24,59 @@ const streamToBuffer = async (readableStream) => {
 };
 
 /**
+ * Compute stage agenda coverage matrix (Feature 2B)
+ */
+const calculateAgendaCoverage = (stages = [], currentIdx = 0, currentHops = 0) => {
+  if (!Array.isArray(stages) || stages.length === 0) return [];
+  return stages.map((st, idx) => ({
+    id: st.id || `stage_${idx}`,
+    name: st.name || `Stage ${idx + 1}`,
+    topics: Array.isArray(st.topics) ? st.topics : [],
+    objectives: Array.isArray(st.objectives) ? st.objectives : [],
+    status: idx < currentIdx ? 'completed' : (idx === currentIdx ? 'in_progress' : 'upcoming'),
+    isCurrent: idx === currentIdx,
+    isCompleted: idx < currentIdx,
+    currentHops: idx === currentIdx ? Math.min(2, currentHops || 0) : (idx < currentIdx ? 2 : 0),
+    maxHops: 2,
+  }));
+};
+
+/**
+ * Natural Conversational Filler / Acknowledgment Generator (Feature 2A)
+ */
+const getConversationalAcknowledgment = (action, turnIndex = 0, stageName = '', topicName = '', nextStageName = '') => {
+  if (action === 'NEXT_STAGE') {
+    const transitions = [
+      `Great, that gives us a well-rounded picture of your experience with ${topicName || stageName || 'this area'}. Let's transition to our next competency: ${nextStageName || 'the next section'}. `,
+      `Understood, thank you for detailing that experience. Moving forward, let's explore ${nextStageName || 'our next area'}. `,
+      `Got it, that covers our key points for ${stageName || 'this topic'}. Now let's turn our attention to ${nextStageName || 'the next competency'}. `,
+    ];
+    return transitions[turnIndex % transitions.length];
+  }
+
+  const naturalFillers = [
+    "Understood, that makes good sense. ",
+    "Got it, thanks for explaining how you approached that. ",
+    "Fair point, that's a sound technical consideration. ",
+    "Thank you for detailing that experience. ",
+    "I see where you're coming from on that. ",
+    "That's a helpful perspective. ",
+  ];
+  return naturalFillers[turnIndex % naturalFillers.length];
+};
+
+/**
+ * Detect candidate clarification / repeat intent (Feature 2A)
+ */
+const isCandidateClarificationRequest = (text) => {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (trimmed.length > 200) return false;
+  const clarifyRegex = /\b(clarif(y|ication)|repeat|rephrase|didn't catch|did not catch|say that again|what do you mean|pardon|come again|what was the question|could you explain what you mean|say again|speak slower)\b/i;
+  return clarifyRegex.test(trimmed);
+};
+
+/**
  * Analyze candidate resume via the Google ADK AI Service and persist in DB.
  * POST /api/interview/:sessionId/analyze-resume
  */
@@ -895,9 +948,13 @@ exports.beginLiveInterview = async (req, res) => {
     session.interviewState.currentTopic = topic;
     session.interviewState.questionsAsked = 1;
     session.interviewState.stageQuestionsAsked = 1;
+    session.interviewState.currentStageHops = 0;
+    session.interviewState.maxHopsPerStage = 2;
     session.interviewState.lastQuestion = openingQuestion;
     session.interviewState.lastAction = 'START_INTERVIEW';
     session.interviewState.lastReasonCode = 'RELEVANT_DEPTH';
+    const planStages = session.interviewPlan?.stages || [];
+    session.interviewState.agendaCoverage = calculateAgendaCoverage(planStages, 0, 0);
 
     await session.save();
 
@@ -1034,6 +1091,79 @@ exports.submitLiveAnswer = async (req, res) => {
     };
     session.chatMessages.push(candidateMsg);
     await session.save();
+
+    // Candidate Clarification / Repeat Handling (Feature 2A)
+    const isClarify = isCandidateClarificationRequest(answer);
+    if (isClarify) {
+      const candidateName = session.resumeAnalysis?.candidate_name || req.user?.firstName || 'there';
+      const clarifyPrefixes = [
+        `Certainly, ${candidateName}! To clarify: `,
+        `Of course, let me repeat that with more context: `,
+        `Happy to clarify, ${candidateName}. Here is what I mean: `,
+      ];
+      const clarifyPrefix = clarifyPrefixes[(session.interviewState.questionsAsked || 0) % clarifyPrefixes.length];
+      const clarifyQuestion = `${clarifyPrefix}${questionBeingAnswered}`;
+
+      const clarifyAction = 'CLARIFY';
+      const clarifyReason = 'CANDIDATE_CLARIFICATION';
+
+      session.interviewState.lastQuestion = clarifyQuestion;
+      session.interviewState.lastAction = clarifyAction;
+      session.interviewState.lastReasonCode = clarifyReason;
+      session.interviewState.isProcessing = false;
+
+      // Do NOT increment stage questions or hops for a clarification request
+      let audioUrl = null;
+      const isVoiceMode = mode === 'voice' || inputMode === 'voice' || req.body?.includeAudio;
+      if (isVoiceMode && clarifyQuestion) {
+        const speechRes = await textToSpeechService.generateSpeech({ text: clarifyQuestion });
+        if (speechRes.success) {
+          audioUrl = speechRes.audioUrl;
+        }
+      }
+
+      const interviewerMsg = {
+        role: 'interviewer',
+        content: clarifyQuestion,
+        audioUrl: '',
+        metrics: {
+          stageId: session.interviewState.currentStageId,
+          stageName: session.interviewState.currentStageName,
+          topic: session.interviewState.currentTopic,
+          action: clarifyAction,
+          reasonCode: clarifyReason,
+        },
+        timestamp: new Date(),
+      };
+      session.chatMessages.push(interviewerMsg);
+
+      const planStages = session.interviewPlan?.stages || [];
+      session.interviewState.agendaCoverage = calculateAgendaCoverage(
+        planStages,
+        session.interviewState.currentStageIndex || 0,
+        session.interviewState.currentStageHops || 0
+      );
+
+      await session.save();
+
+      return res.status(200).json({
+        success: true,
+        feedback: null,
+        questionBeingAnswered,
+        candidateAnswer: answer.trim(),
+        nextQuestion: clarifyQuestion,
+        question: clarifyQuestion,
+        audioUrl: audioUrl || null,
+        action: clarifyAction,
+        reasonCode: clarifyReason,
+        stage: session.interviewState.currentStageName,
+        topic: session.interviewState.currentTopic,
+        isComplete: false,
+        interviewState: session.interviewState,
+        chatMessages: session.chatMessages,
+        interviewMode: session.interviewMode || 'HR_SIMULATION',
+      });
+    }
 
     // Prepare payload for AI Service with authoritative timing
     const stages = session.interviewPlan?.stages || [];
@@ -1189,14 +1319,17 @@ exports.submitLiveAnswer = async (req, res) => {
       }
     }
 
-    // Deterministic Stage Transition Guardrail:
-    // If the current stage has asked its allocated questions (targetQuestionCount or max 2) OR reached follow-up depth 2,
-    // force promote to NEXT_STAGE so the candidate is guaranteed to experience all stages (Projects, Theory, Scenarios, Coding, GK).
+    // Deterministic Stage Transition & Follow-Up Hops Guardrail (Feature 2B):
+    // Max 2 follow-up hops per core stage/competency.
     const stageQuestionTarget = Math.max(1, currStage.targetQuestionCount || 2);
     const questionsInCurrentStage = (session.interviewState.stageQuestionsAsked || 0) + 1;
+    const currentHops = (session.interviewState.currentStageHops || 0) + 1;
+    session.interviewState.currentStageHops = currentHops;
+
     const shouldAdvanceStage =
       action === 'NEXT_STAGE' ||
       questionsInCurrentStage >= stageQuestionTarget ||
+      currentHops >= 2 ||
       (session.interviewState.followUpDepth || 0) >= 2;
 
     if (shouldAdvanceStage && currStageIdx + 1 < stages.length && action !== 'END_INTERVIEW') {
@@ -1209,9 +1342,11 @@ exports.submitLiveAnswer = async (req, res) => {
       session.interviewState.followUpDepth = (session.interviewState.followUpDepth || 0) + 1;
     } else if (action === 'NEXT_TOPIC') {
       session.interviewState.followUpDepth = 0;
+      session.interviewState.currentStageHops = 0;
       if (aiResult.topic) session.interviewState.currentTopic = aiResult.topic;
     } else if (action === 'NEXT_STAGE') {
       session.interviewState.followUpDepth = 0;
+      session.interviewState.currentStageHops = 0;
       session.interviewState.stageQuestionsAsked = 0;
       const nextIdx = currStageIdx + 1;
 
@@ -1240,6 +1375,7 @@ exports.submitLiveAnswer = async (req, res) => {
         // Redistribute available time to deepen technical trade-offs, scenarios, and JD requirements.
         console.log(`[PACING] All stages visited but ${remainingTargetMinutes}m remaining. Redistributing time to deepen interview.`);
         session.interviewState.followUpDepth = 0;
+        session.interviewState.currentStageHops = 0;
         const topics = currStage.topics || [];
         if (topics.length > 0) {
           session.interviewState.currentTopic = topics[(session.interviewState.questionsAsked || 0) % topics.length];
@@ -1249,10 +1385,32 @@ exports.submitLiveAnswer = async (req, res) => {
 
     session.interviewState.questionsAsked = (session.interviewState.questionsAsked || 0) + 1;
     session.interviewState.stageQuestionsAsked = (session.interviewState.stageQuestionsAsked || 0) + 1;
+
+    // Conversational Acknowledgments & Natural Fillers (Feature 2A)
+    const hasExistingGreeting = /^(understood|got it|fair point|thank you|thanks|i see|great|excellent|that makes sense|certainly|of course)/i.test(nextQuestion);
+    if (!hasExistingGreeting && action !== 'END_INTERVIEW' && !isComplete) {
+      const nextStageName = stages[session.interviewState.currentStageIndex]?.name || 'the next section';
+      const ackPrefix = getConversationalAcknowledgment(
+        action,
+        session.interviewState.questionsAsked || 0,
+        currStage.name || session.interviewState.currentStageName,
+        session.interviewState.currentTopic,
+        nextStageName
+      );
+      nextQuestion = `${ackPrefix}${nextQuestion}`;
+    }
+
     session.interviewState.lastQuestion = nextQuestion;
     session.interviewState.lastAction = action;
     session.interviewState.lastReasonCode = reasonCode;
     session.interviewState.isProcessing = false;
+
+    // Update Stage Agenda Coverage Matrix (Feature 2B)
+    session.interviewState.agendaCoverage = calculateAgendaCoverage(
+      stages,
+      session.interviewState.currentStageIndex || 0,
+      session.interviewState.currentStageHops || 0
+    );
 
     // Handle completion
     let demoAccessUpdate = null;
@@ -1989,10 +2147,12 @@ Evaluate their solution concisely (1-2 sentences): acknowledge correctness, high
     session.interviewState.currentTopic = (nextStage.topics && nextStage.topics[0]) || 'General';
     session.interviewState.stageQuestionsAsked = 0;
     session.interviewState.followUpDepth = 0;
+    session.interviewState.currentStageHops = 0;
     session.interviewState.questionsAsked = (session.interviewState.questionsAsked || 0) + 1;
     session.interviewState.lastQuestion = aiReviewText;
     session.interviewState.lastAction = 'NEXT_STAGE';
     session.interviewState.lastReasonCode = 'STAGE_COMPLETE';
+    session.interviewState.agendaCoverage = calculateAgendaCoverage(stages, nextIdx, 0);
 
     // Generate interviewer voice if requested
     let audioUrl = null;
