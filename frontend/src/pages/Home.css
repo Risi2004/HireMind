@@ -419,17 +419,16 @@
   padding: 0.4rem 1.1rem;
   font-size: 0.85rem;
   color: var(--hm-text-white);
-  cursor: pointer;
+  cursor: default;
   margin-bottom: 1.75rem;
   transition: all 0.25s ease;
   backdrop-filter: blur(8px);
 }
 
 .hm-hero__badge:hover {
-  border-color: var(--hm-primary-cyan);
-  background: rgba(20, 45, 88, 0.9);
-  box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
-  transform: translateY(-1px);
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(20, 45, 88, 0.85);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
 }
 
 .hm-badge-dot {
@@ -924,7 +923,16 @@
 }
 
 .hm-tip-icon {
-  font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
 }
 
 .hm-btn--start-cockpit {

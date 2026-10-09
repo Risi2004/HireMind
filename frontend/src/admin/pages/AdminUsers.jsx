@@ -440,7 +440,16 @@ export default function AdminUsers() {
             fontSize: '13px',
           }}
         >
-          <span>⚠️ {error}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }} aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </span>
+            {error}
+          </span>
           <button
             type="button"
             onClick={fetchUsers}
@@ -1172,13 +1181,28 @@ export default function AdminUsers() {
                 }}
               >
                 {demoManageUser.accountType === 'Demo' ? (
-                  <>
-                    ✓ <strong>Demo Access is Currently Active:</strong> {demoManageUser.demoAccess?.completedInterviews || 0} completed / {demoManageUser.demoAccess?.allowedInterviews || 0} allowed passes.
-                  </>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', minWidth: '18px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399' }} aria-hidden="true">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </span>
+                    <span>
+                      <strong>Demo Access is Currently Active:</strong> {demoManageUser.demoAccess?.completedInterviews || 0} completed / {demoManageUser.demoAccess?.allowedInterviews || 0} allowed passes.
+                    </span>
+                  </div>
                 ) : (
-                  <>
-                    🔒 <strong>Standard Account (Gated):</strong> Candidate currently sees the preview "Feature Coming Soon" page.
-                  </>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', minWidth: '18px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }} aria-hidden="true">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                    </span>
+                    <span>
+                      <strong>Standard Account (Gated):</strong> Candidate currently sees the preview &quot;Feature Coming Soon&quot; page.
+                    </span>
+                  </div>
                 )}
               </div>
 

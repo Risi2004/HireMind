@@ -18,9 +18,11 @@ class SpeechToTextService {
    * @param {Buffer} params.audioBuffer - Raw audio file buffer from browser
    * @param {string} params.filename - File name (e.g. recording.webm)
    * @param {string} params.mimetype - MIME type (e.g. audio/webm)
+   * @param {string} [params.prompt] - Context (question, role, skills) that helps Whisper spell technical terms
+   * @param {string} [params.language] - ISO language code; defaults to English
    * @returns {Promise<{success: boolean, text?: string, error?: string, latencyMs?: number, duration?: number}>}
    */
-  async transcribeAudio({ audioBuffer, filename = 'recording.webm', mimetype = 'audio/webm' }) {
+  async transcribeAudio({ audioBuffer, filename = 'recording.webm', mimetype = 'audio/webm', prompt = '', language = 'en' }) {
     const startTime = Date.now();
 
     // 1. Basic validation
@@ -47,12 +49,14 @@ class SpeechToTextService {
       const formData = new FormData();
       const blob = new Blob([audioBuffer], { type: mimetype });
       formData.append('file', blob, filename);
+      if (prompt) formData.append('prompt', prompt);
+      if (language) formData.append('language', language);
 
       const response = await fetch(`${AI_SERVICE_URL}/voice/transcribe`, {
         method: 'POST',
         headers: getAiServiceHeaders(),
         body: formData,
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(35000),
       });
 
       const totalLatency = Date.now() - startTime;

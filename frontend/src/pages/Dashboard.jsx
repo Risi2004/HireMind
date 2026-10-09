@@ -10,7 +10,7 @@ import languageIcon from '../assets/icons/language.svg'
 import chatbotIcon from '../assets/icons/chatbot.svg'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../context/useAuth'
-import { getAllInterviewSessions, createInterviewSession, deleteInterviewSession } from '../utils/interviewUtils'
+import { getAllInterviewSessions, createInterviewSession, deleteInterviewSession, syncUserInterviewsFromBackend } from '../utils/interviewUtils'
 import './Dashboard.css'
 
 export default function Dashboard() {
@@ -35,9 +35,15 @@ export default function Dashboard() {
       const detail = e.detail || {}
       if (detail.action === 'grant' || detail.action === 'refresh') {
         const attempts = detail.demoAccess?.allowedInterviews || remainingInterviews || 1
-        setRealtimeNotification(`🎉 Live Update: Demo Access Activated! You have ${attempts} interview attempt(s) ready to start.`)
+        setRealtimeNotification({
+          type: 'success',
+          text: `Live Update: Demo Access Activated! You have ${attempts} interview attempt(s) ready to start.`,
+        })
       } else if (detail.action === 'cancel') {
-        setRealtimeNotification(`⚠️ Demo access has been revoked by an administrator.`)
+        setRealtimeNotification({
+          type: 'warning',
+          text: 'Demo access has been revoked by an administrator.',
+        })
       }
     }
 
@@ -69,11 +75,11 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isChatOpen, setIsChatOpen] = useState(true)
   const [chatInput, setChatInput] = useState('')
-  const [chatMessages, setChatMessages] = useState([
+  const [chatMessages, setChatMessages] = useState(() => [
     {
       id: 1,
       sender: 'bot',
-      text: `Hi ${candidateFirstName}! I've analyzed your recent 84% score at WSO2. Want to discuss how to improve your Communication score?`,
+      text: `Hi ${candidateFirstName}! Welcome to HireMind. Ready to practice and prepare for your next interview?`,
       time: 'Just now',
     },
   ])
@@ -82,6 +88,9 @@ export default function Dashboard() {
   const [interviews, setInterviews] = useState(() => getAllInterviewSessions())
 
   useEffect(() => {
+    // Sync backend sessions (and real evaluation scores from MongoDB) on mount
+    syncUserInterviewsFromBackend().catch(() => {})
+
     const handleUpdate = () => {
       setInterviews(getAllInterviewSessions())
     }
@@ -93,11 +102,82 @@ export default function Dashboard() {
     }
   }, [])
 
+  // Update AI Coach greeting dynamically based on genuine evaluated interview
+  useEffect(() => {
+    const evaluatedSession = interviews.find((s) => {
+      const raw = s.overallScore ?? s.evaluation?.overallScore ?? s.evaluation?.score
+      return typeof raw === 'number' && !isNaN(raw)
+    })
+
+    if (evaluatedSession) {
+      const raw = evaluatedSession.overallScore ?? evaluatedSession.evaluation?.overallScore ?? evaluatedSession.evaluation?.score
+      const scoreNum = Math.round(raw)
+      const companyOrRole = evaluatedSession.company || evaluatedSession.targetRole || 'your mock interview'
+      setChatMessages((prev) => {
+        if (prev.length === 1 && prev[0].sender === 'bot') {
+          return [
+            {
+              id: 1,
+              sender: 'bot',
+              text: `Hi ${candidateFirstName}! I've analyzed your recent ${scoreNum}% score for ${companyOrRole}. Want to discuss how to improve your performance?`,
+              time: 'Just now',
+            },
+          ]
+        }
+        return prev
+      })
+    }
+  }, [candidateFirstName, interviews])
+
+  // Helper to resolve genuine evaluated score badge
+  const getScoreBadge = (item) => {
+    const rawEvalScore = item.overallScore ?? item.evaluation?.overallScore ?? item.evaluation?.score
+    let evaluatedNumber = null
+
+    if (typeof rawEvalScore === 'number' && !isNaN(rawEvalScore)) {
+      evaluatedNumber = Math.round(rawEvalScore)
+    } else if (typeof item.score === 'number' && !isNaN(item.score)) {
+      evaluatedNumber = Math.round(item.score)
+    } else if (typeof item.score === 'string' && item.score.trim() && !['84%', '79%', '94%'].includes(item.score.trim())) {
+      const parsed = parseInt(item.score.replace('%', '').trim(), 10)
+      if (!isNaN(parsed)) {
+        evaluatedNumber = parsed
+      }
+    }
+
+    if (evaluatedNumber !== null) {
+      return {
+        className: 'dash-score-pill',
+        label: `Score: ${evaluatedNumber}%`,
+        title: `Evaluated Readiness Score: ${evaluatedNumber}%`,
+      }
+    }
+
+    if (item.status === 'completed' || item.status === 'ended_by_user') {
+      return {
+        className: 'dash-score-pill dash-score-pill--pending',
+        label: 'Evaluation Pending',
+        title: 'Interview completed. Click to generate or review full AI report.',
+      }
+    }
+
+    if (item.status === 'in_progress') {
+      return {
+        className: 'dash-score-pill dash-score-pill--progress',
+        label: 'In Progress',
+        title: 'Interview session currently in progress.',
+      }
+    }
+
+    return {
+      className: 'dash-score-pill dash-score-pill--setup',
+      label: 'Not Evaluated',
+      title: 'Interview session created but not yet evaluated.',
+    }
+  }
+
   // Recent Interview performance cards derived from persistent sessions
-  const performanceInterviews = interviews.slice(0, 3).map((item, idx) => ({
-    ...item,
-    score: item.score || (idx === 0 ? '84%' : idx === 1 ? '79%' : '94%'),
-  }))
+  const performanceInterviews = interviews.slice(0, 3)
 
   // Filter history based on search query
   const filteredInterviews = interviews.filter((item) => {
@@ -309,19 +389,59 @@ export default function Dashboard() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '14px 20px',
-                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(59, 130, 246, 0.18))',
-                border: '1px solid rgba(16, 185, 129, 0.5)',
+                padding: '12px 18px',
+                background:
+                  realtimeNotification.type === 'warning'
+                    ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(239, 68, 68, 0.12))'
+                    : 'linear-gradient(135deg, rgba(16, 185, 129, 0.14), rgba(59, 130, 246, 0.12))',
+                border:
+                  realtimeNotification.type === 'warning'
+                    ? '1px solid rgba(245, 158, 11, 0.4)'
+                    : '1px solid rgba(16, 185, 129, 0.4)',
                 borderRadius: '12px',
                 marginBottom: '20px',
-                color: '#34d399',
-                fontSize: '14px',
+                color: realtimeNotification.type === 'warning' ? '#fbbf24' : '#34d399',
+                fontSize: '13.5px',
                 fontWeight: 600,
-                boxShadow: '0 4px 24px rgba(16, 185, 129, 0.2)',
+                boxShadow:
+                  realtimeNotification.type === 'warning'
+                    ? '0 4px 20px rgba(245, 158, 11, 0.15)'
+                    : '0 4px 20px rgba(16, 185, 129, 0.15)',
                 animation: 'fadeIn 0.3s ease-in-out',
+                gap: '12px',
               }}
             >
-              <span>{realtimeNotification}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '6px',
+                    background:
+                      realtimeNotification.type === 'warning'
+                        ? 'rgba(245, 158, 11, 0.2)'
+                        : 'rgba(16, 185, 129, 0.2)',
+                    color: realtimeNotification.type === 'warning' ? '#fbbf24' : '#34d399',
+                  }}
+                  aria-hidden="true"
+                >
+                  {realtimeNotification.type === 'warning' ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                    </svg>
+                  )}
+                </span>
+                <span>{realtimeNotification.text || realtimeNotification}</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setRealtimeNotification(null)}
@@ -367,16 +487,41 @@ export default function Dashboard() {
                   <img src={arrowIcon} alt="" className="dash-btn-arrow" aria-hidden="true" />
                 </button>
                 {isAdmin ? (
-                  <span style={{ fontSize: '12px', background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#60a5fa', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
-                    👑 Admin Full Access
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#60a5fa', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14" />
+                    </svg>
+                    Admin Full Access
                   </span>
                 ) : hasDemoAccess ? (
-                  <span style={{ fontSize: '12px', background: remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)', border: `1px solid ${remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`, color: remainingInterviews > 0 ? '#34d399' : '#fbbf24', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
-                    {remainingInterviews > 0 ? `🎯 Demo Pass: ${remainingInterviews} of ${allowedInterviews} attempts left` : `⚠️ Demo Limit Reached (${allowedInterviews}/${allowedInterviews})`}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', background: remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)', border: `1px solid ${remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`, color: remainingInterviews > 0 ? '#34d399' : '#fbbf24', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    {remainingInterviews > 0 ? (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <circle cx="12" cy="12" r="6" />
+                          <circle cx="12" cy="12" r="2" />
+                        </svg>
+                        Demo Pass: {remainingInterviews} of {allowedInterviews} attempts left
+                      </>
+                    ) : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                          <line x1="12" y1="9" x2="12" y2="13" />
+                          <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                        Demo Limit Reached ({allowedInterviews}/{allowedInterviews})
+                      </>
+                    )}
                   </span>
                 ) : (
-                  <span style={{ fontSize: '12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
-                    🔒 Private Preview (Coming Soon)
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    Private Preview (Coming Soon)
                   </span>
                 )}
               </div>
@@ -394,57 +539,68 @@ export default function Dashboard() {
 
             <div className="dash-recent-list">
               {performanceInterviews.length > 0 ? (
-                performanceInterviews.map((item) => (
-                  <div
-                    key={item.id}
-                    className="dash-interview-row"
-                    onClick={() => navigate(item.lastVisitedPath || `/new-interview/${item.id}`)}
-                    style={{ cursor: 'pointer' }}
-                    title={`Resume: ${item.title || item.targetRole}`}
-                  >
-                    <div className="dash-interview-row__left">
-                      <div className="dash-interview-row__icon-box">
-                        <img src={item.icon || company1Icon} alt="" className="dash-company-icon" />
-                      </div>
-                      <div className="dash-interview-row__details">
-                        <span className="dash-interview-row__title">{item.title || item.targetRole}</span>
-                        <span className="dash-interview-row__subtitle">
-                          {item.company} • {item.track || item.interviewType || 'Technical'}
-                        </span>
-                      </div>
-                    </div>
+                performanceInterviews.map((item) => {
+                  const badge = getScoreBadge(item)
+                  const targetPath = item.lastVisitedPath || (
+                    (item.overallScore != null || item.evaluation || item.status === 'completed' || item.status === 'ended_by_user')
+                      ? `/interview-report?id=${item.id}`
+                      : `/new-interview/${item.id}`
+                  )
 
-                    <div className="dash-interview-row__right">
-                      <span className="dash-score-pill">Score: {item.score}</span>
-                      <button
-                        type="button"
-                        className="dash-action-circle-btn"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          navigate(item.lastVisitedPath || `/new-interview/${item.id}`)
-                        }}
-                        title="Review / Resume Session"
-                        aria-label="Review Session Details"
-                      >
-                        <img src={arrow2Icon} alt="" className="dash-arrow-diag" />
-                      </button>
-                      <button
-                        type="button"
-                        className="dash-delete-btn"
-                        onClick={(e) => handleDeleteClick(e, item)}
-                        title="Delete Interview & all related data"
-                        aria-label={`Delete interview for ${item.title || item.targetRole}`}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          <line x1="10" y1="11" x2="10" y2="17" />
-                          <line x1="14" y1="11" x2="14" y2="17" />
-                        </svg>
-                      </button>
+                  return (
+                    <div
+                      key={item.id}
+                      className="dash-interview-row"
+                      onClick={() => navigate(targetPath)}
+                      style={{ cursor: 'pointer' }}
+                      title={`Open: ${item.title || item.targetRole || 'Interview'}`}
+                    >
+                      <div className="dash-interview-row__left">
+                        <div className="dash-interview-row__icon-box">
+                          <img src={item.icon || company1Icon} alt="" className="dash-company-icon" />
+                        </div>
+                        <div className="dash-interview-row__details">
+                          <span className="dash-interview-row__title">{item.title || item.targetRole || 'New Interview'}</span>
+                          <span className="dash-interview-row__subtitle">
+                            {item.company ? `${item.company} • ` : ''}{item.track || item.interviewType || 'Role-Specific Interview'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="dash-interview-row__right">
+                        <span className={badge.className} title={badge.title}>
+                          {badge.label}
+                        </span>
+                        <button
+                          type="button"
+                          className="dash-action-circle-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            navigate(targetPath)
+                          }}
+                          title="Review / Resume Session"
+                          aria-label="Review Session Details"
+                        >
+                          <img src={arrow2Icon} alt="" className="dash-arrow-diag" />
+                        </button>
+                        <button
+                          type="button"
+                          className="dash-delete-btn"
+                          onClick={(e) => handleDeleteClick(e, item)}
+                          title="Delete Interview & all related data"
+                          aria-label={`Delete interview for ${item.title || item.targetRole}`}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  )
+                })
               ) : (
                 <div style={{ padding: '24px 16px', textAlign: 'center', color: '#64748B' }}>
                   <p style={{ margin: 0, fontSize: '0.9rem' }}>No recent interviews created yet.</p>

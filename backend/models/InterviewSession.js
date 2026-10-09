@@ -24,6 +24,10 @@ const chatMessageSchema = new mongoose.Schema({
     runOutput: { type: String, default: '' },
     aiReview: { type: String, default: '' },
   },
+  feedback: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
   timestamp: {
     type: Date,
     default: Date.now,
@@ -77,6 +81,11 @@ const interviewSessionSchema = new mongoose.Schema(
       type: String,
       default: 'Role-Specific',
     },
+    interviewMode: {
+      type: String,
+      enum: ['HR_SIMULATION', 'FEEDBACK_COACHING'],
+      default: 'HR_SIMULATION',
+    },
     difficulty: {
       type: String,
       default: 'Intermediate',
@@ -120,6 +129,13 @@ const interviewSessionSchema = new mongoose.Schema(
       questionsAsked: { type: Number, default: 0 },
       stageQuestionsAsked: { type: Number, default: 0 },
       followUpDepth: { type: Number, default: 0 },
+      currentStageHops: { type: Number, default: 0 },
+      maxHopsPerStage: { type: Number, default: 2 },
+      // Adaptive follow-up budget (planned vs adaptive question mix)
+      adaptiveTurns: { type: Number, default: 0 },
+      stageAdaptiveTurns: { type: Number, default: 0 },
+      // Consecutive turns where the agent ignored a required stage change
+      policyViolations: { type: Number, default: 0 },
       coveredTopics: [{ type: String }],
       coveredObjectives: [{ type: String }],
       startedAt: { type: Date, default: null },
@@ -139,6 +155,15 @@ const interviewSessionSchema = new mongoose.Schema(
       isEndedByUser: { type: Boolean, default: false },
     },
     chatMessages: [chatMessageSchema],
+    perAnswerFeedbacks: [
+      {
+        turnIndex: { type: Number, default: 0 },
+        question: { type: String, default: '' },
+        answer: { type: String, default: '' },
+        feedback: { type: mongoose.Schema.Types.Mixed, default: null },
+        timestamp: { type: Date, default: Date.now },
+      },
+    ],
     evaluation: {
       type: mongoose.Schema.Types.Mixed,
       default: null,

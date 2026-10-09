@@ -12,6 +12,17 @@ class TextToSpeechService {
   constructor() {
     this.modelName = process.env.TTS_MODEL || 'gemini-3.8-flash-lite-tts';
     this.defaultVoice = process.env.TTS_VOICE || 'Puck';
+    // TTS sits on the critical path of every voice turn, so keep the wait short;
+    // the browser falls back to its built-in voice when no audio comes back.
+    this.timeoutMs = Number(process.env.TTS_TIMEOUT_MS) || 15000;
+    // After a failure, skip TTS for a while instead of making every turn wait
+    // for the same timeout again.
+    this.failureCooldownMs = Number(process.env.TTS_FAILURE_COOLDOWN_MS) || 60000;
+    this.disabledUntil = 0;
+  }
+
+  markFailure() {
+    this.disabledUntil = Date.now() + this.failureCooldownMs;
   }
 
   /**
@@ -30,6 +41,15 @@ class TextToSpeechService {
       return { success: false, error: 'EMPTY_TEXT', message: 'No text provided for audio synthesis.' };
     }
 
+    if (Date.now() < this.disabledUntil) {
+      return {
+        success: false,
+        error: 'TTS_COOLDOWN',
+        message: 'Audio synthesis temporarily skipped after a recent failure. Text fallback will be used.',
+        latencyMs: 0,
+      };
+    }
+
     const chosenVoice = voice || this.defaultVoice;
     console.log(`[TTS_STARTED] model=${this.modelName}, voice=${chosenVoice}, text_length=${cleanText.length}`);
 
@@ -42,7 +62,7 @@ class TextToSpeechService {
           voice: chosenVoice,
           format: 'json',
         }),
-        signal: AbortSignal.timeout(35000),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
 
       const totalLatency = Date.now() - startTime;
@@ -50,6 +70,7 @@ class TextToSpeechService {
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`[TextToSpeechService] [ERROR] AI Service TTS failed status ${response.status}:`, errorText.slice(0, 200));
+        this.markFailure();
         return {
           success: false,
           error: 'TTS_FAILED',
@@ -59,6 +80,16 @@ class TextToSpeechService {
       }
 
       const result = await response.json();
+      if (!result.audioUrl) {
+        this.markFailure();
+        return {
+          success: false,
+          error: 'TTS_FAILED',
+          message: 'Audio synthesis returned no audio. Text fallback will be used.',
+          latencyMs: totalLatency,
+        };
+      }
+      this.disabledUntil = 0;
       console.log(`[TTS_COMPLETED] Audio generated in ${totalLatency}ms (cached: ${result.cached})`);
 
       return {
@@ -72,6 +103,7 @@ class TextToSpeechService {
     } catch (err) {
       const totalLatency = Date.now() - startTime;
       console.error('[TextToSpeechService] [ERROR] TTS request failed:', err.message);
+      this.markFailure();
       return {
         success: false,
         error: err.name === 'TimeoutError' ? 'TTS_TIMEOUT' : 'TTS_FAILED',

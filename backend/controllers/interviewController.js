@@ -24,6 +24,140 @@ const streamToBuffer = async (readableStream) => {
 };
 
 /**
+ * Compute stage agenda coverage matrix (Feature 2B)
+ */
+const calculateAgendaCoverage = (stages = [], currentIdx = 0, currentHops = 0) => {
+  if (!Array.isArray(stages) || stages.length === 0) return [];
+  return stages.map((st, idx) => ({
+    id: st.id || `stage_${idx}`,
+    name: st.name || `Stage ${idx + 1}`,
+    topics: Array.isArray(st.topics) ? st.topics : [],
+    objectives: Array.isArray(st.objectives) ? st.objectives : [],
+    status: idx < currentIdx ? 'completed' : (idx === currentIdx ? 'in_progress' : 'upcoming'),
+    isCurrent: idx === currentIdx,
+    isCompleted: idx < currentIdx,
+    currentHops: idx === currentIdx ? Math.min(2, currentHops || 0) : (idx < currentIdx ? 2 : 0),
+    maxHops: 2,
+  }));
+};
+
+/**
+ * Natural Conversational Filler / Acknowledgment Generator (Feature 2A)
+ */
+// Share of answered turns that may receive an adaptive follow-up instead of a planned question
+const ADAPTIVE_TURN_SHARE = 0.4;
+
+const isClosingStage = (stage) => {
+  const name = (stage?.name || '').toLowerCase();
+  return name.includes('closing') || name.includes('wrap') || name.includes('q&a');
+};
+
+/**
+ * Decide which actions the interview agent may take on THIS turn.
+ * The interview mixes planned questions (stage topics from the plan) with occasional
+ * adaptive follow-ups: at most one follow-up per answer thread and per stage, and at most
+ * ~40% of all turns, so the interview is adaptive part of the time, not throughout.
+ * The agent writes its question for the chosen action, so the backend never has to
+ * override the action afterwards (which previously produced mismatched questions).
+ */
+const computeTurnPolicy = ({ state, stages, currStageIdx, progressRatio, isAbsoluteMaxReached }) => {
+  const currStage = stages[currStageIdx] || {};
+  const nextStage = stages[currStageIdx + 1] || null;
+  const questionsAsked = state.questionsAsked || 1;
+  const stageAsked = state.stageQuestionsAsked || 1;
+  const stageAdaptive = state.stageAdaptiveTurns || 0;
+  const adaptiveTotal = state.adaptiveTurns || 0;
+  // Under time pressure (>= 85% of the target duration) the remaining plan is compressed:
+  // one question per remaining stage and no follow-ups, so the interview still reaches
+  // every stage instead of overrunning the selected duration.
+  const underTimePressure = progressRatio >= 0.85;
+  const stageTarget = underTimePressure ? 1 : Math.max(1, currStage.targetQuestionCount || 2);
+  const plannedAskedInStage = Math.max(0, stageAsked - stageAdaptive);
+
+  const maxAdaptive = Math.max(1, Math.floor((questionsAsked + 1) * ADAPTIVE_TURN_SHARE));
+  const followUpAllowed =
+    !isAbsoluteMaxReached &&
+    !underTimePressure &&
+    (state.followUpDepth || 0) < 1 &&
+    stageAdaptive < 1 &&
+    adaptiveTotal < maxAdaptive;
+
+  // Hold the closing stage back while plenty of target time remains (deepen instead)
+  const canEnterNextStage = Boolean(nextStage) && !(isClosingStage(nextStage) && progressRatio < 0.85);
+  const stageDone = plannedAskedInStage >= stageTarget;
+  const remainingStageTopics = (currStage.topics || []).filter(
+    (t) => t !== state.currentTopic && !(state.coveredTopics || []).includes(t)
+  );
+
+  let allowedActions;
+  let mustAdvanceStage = false;
+  if (isAbsoluteMaxReached) {
+    allowedActions = ['END_INTERVIEW'];
+  } else if (!nextStage && progressRatio >= 0.9) {
+    allowedActions = ['END_INTERVIEW'];
+  } else if (stageDone && canEnterNextStage) {
+    allowedActions = followUpAllowed ? ['FOLLOW_UP', 'CLARIFY', 'NEXT_STAGE'] : ['NEXT_STAGE'];
+    mustAdvanceStage = !followUpAllowed;
+  } else {
+    allowedActions = followUpAllowed ? ['FOLLOW_UP', 'CLARIFY', 'NEXT_TOPIC'] : ['NEXT_TOPIC'];
+  }
+
+  return {
+    allowedActions,
+    followUpAllowed,
+    mustAdvanceStage,
+    remainingStageTopics,
+    adaptiveTurnsUsed: adaptiveTotal,
+    adaptiveTurnsMax: maxAdaptive,
+  };
+};
+
+/**
+ * Deterministic, plan-based question used when the AI agent is unavailable or keeps
+ * ignoring the turn policy. It is a genuine planned question (topic from the interview
+ * plan), never a canned comment about the candidate's answer.
+ */
+const buildPlannedQuestion = ({ policy, stages, currStageIdx, state }) => {
+  const currStage = stages[currStageIdx] || {};
+  const nextStage = stages[currStageIdx + 1] || null;
+  if (policy.allowedActions.includes('END_INTERVIEW') && policy.allowedActions.length === 1) {
+    return {
+      action: 'END_INTERVIEW',
+      reasonCode: 'TIME_PROGRESS',
+      question: 'Thank you for your time today. That brings us to the end of this mock interview; your answers have been saved for your report.',
+      topic: state.currentTopic,
+    };
+  }
+  if (policy.allowedActions.includes('NEXT_STAGE') && nextStage) {
+    const topic = (nextStage.topics && nextStage.topics[0]) || nextStage.name || 'the next area';
+    return {
+      action: 'NEXT_STAGE',
+      reasonCode: 'STAGE_COMPLETE',
+      question: `Let's move on to ${topic}. Could you walk me through your hands-on experience there and one decision you made along the way?`,
+      topic,
+    };
+  }
+  const topic = policy.remainingStageTopics[0] || (currStage.topics || [])[0] || currStage.name || 'your recent work';
+  return {
+    action: 'NEXT_TOPIC',
+    reasonCode: 'MOVE_TO_NEXT_PRIORITY',
+    question: `Next, I'd like to hear about ${topic}. How have you approached it in your own work, and what would you do differently now?`,
+    topic,
+  };
+};
+
+/**
+ * Detect candidate clarification / repeat intent (Feature 2A)
+ */
+const isCandidateClarificationRequest = (text) => {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (trimmed.length > 200) return false;
+  const clarifyRegex = /\b(clarif(y|ication)|repeat|rephrase|didn't catch|did not catch|say that again|what do you mean|pardon|come again|what was the question|could you explain what you mean|say again|speak slower)\b/i;
+  return clarifyRegex.test(trimmed);
+};
+
+/**
  * Analyze candidate resume via the Google ADK AI Service and persist in DB.
  * POST /api/interview/:sessionId/analyze-resume
  */
@@ -207,6 +341,7 @@ exports.updateSession = async (req, res) => {
       'company',
       'jobDescription',
       'interviewType',
+      'interviewMode',
       'difficulty',
       'duration',
       'isGithubConnected',
@@ -218,6 +353,24 @@ exports.updateSession = async (req, res) => {
       if (req.body?.[field] !== undefined) {
         updates[field] = req.body[field];
       }
+    }
+
+    // Support both interviewMode or interviewType carrying the mode
+    if (updates.interviewType === 'HR_SIMULATION' || updates.interviewType === 'FEEDBACK_COACHING') {
+      updates.interviewMode = updates.interviewType;
+      updates.interviewType = 'Role-Specific';
+    }
+
+    if (updates.interviewMode) {
+      if (!['HR_SIMULATION', 'FEEDBACK_COACHING'].includes(updates.interviewMode)) {
+        updates.interviewMode = 'HR_SIMULATION';
+      }
+    }
+
+    // Guardrail: do not allow changing interviewMode once interview is in progress or completed
+    const existingSession = await InterviewSession.findOne({ sessionId });
+    if (existingSession && ['in_progress', 'completed', 'ended_by_user'].includes(existingSession.status)) {
+      delete updates.interviewMode;
     }
 
     const session = await InterviewSession.findOneAndUpdate(
@@ -235,6 +388,52 @@ exports.updateSession = async (req, res) => {
     return res.status(500).json({ message: 'Failed to update interview session', error: error.message });
   }
 };
+
+/**
+ * Get all interview sessions for current authenticated user with their real evaluation scores
+ * GET /api/interview/my-sessions
+ */
+exports.getMySessions = async (req, res) => {
+  try {
+    const sessions = await InterviewSession.find({ userId: req.user._id })
+      .sort({ updatedAt: -1 })
+      .select('sessionId targetRole company interviewType difficulty duration status evaluation createdAt updatedAt')
+      .lean();
+
+    const formatted = sessions.map((s) => {
+      const evalScore = s.evaluation?.overallScore ?? s.evaluation?.score ?? null;
+      return {
+        id: s.sessionId,
+        sessionId: s.sessionId,
+        title: s.targetRole || (s.company ? `${s.company} Interview` : 'New Interview'),
+        targetRole: s.targetRole || '',
+        company: s.company || '',
+        track: s.interviewType ? `${s.interviewType} Interview` : 'Role-Specific Interview',
+        interviewType: s.interviewType || 'Role-Specific',
+        difficulty: s.difficulty || 'Intermediate',
+        duration: s.duration || '30 min',
+        status: s.status || 'setup',
+        score: evalScore !== null ? `${evalScore}%` : null,
+        overallScore: evalScore,
+        evaluation: s.evaluation || null,
+        lastVisitedPath: (s.status === 'completed' || s.status === 'ended_by_user')
+          ? `/interview-report?id=${s.sessionId}`
+          : `/new-interview/${s.sessionId}`,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      sessions: formatted,
+    });
+  } catch (error) {
+    console.error('[Interview Controller] Error fetching user sessions:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch interview sessions', error: error.message });
+  }
+};
+
 
 /**
  * Analyze Job Description via Google ADK Job Description Analyzer Agent
@@ -366,6 +565,7 @@ exports.generateInterviewPlan = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const {
+      interviewMode,
       interviewType,
       difficulty,
       duration,
@@ -391,6 +591,14 @@ exports.generateInterviewPlan = async (req, res) => {
         message: 'Resume analysis is required before generating an interview plan. Please upload or select a resume first.',
         error: 'RESUME_ANALYSIS_MISSING',
       });
+    }
+
+    let resolvedMode = interviewMode || session.interviewMode || 'HR_SIMULATION';
+    if (interviewType === 'HR_SIMULATION' || interviewType === 'FEEDBACK_COACHING') {
+      resolvedMode = interviewType;
+    }
+    if (!['HR_SIMULATION', 'FEEDBACK_COACHING'].includes(resolvedMode)) {
+      resolvedMode = 'HR_SIMULATION';
     }
 
     // Parse duration in minutes (e.g. "15 min", "30 min", "60 min" -> 15, 30, 60)
@@ -509,6 +717,7 @@ exports.generateInterviewPlan = async (req, res) => {
     session.targetRole = resolvedRole;
     session.company = resolvedCompany;
     session.interviewType = resolvedType;
+    session.interviewMode = resolvedMode;
     session.difficulty = resolvedDifficulty;
     session.duration = `${parsedDuration} min`;
     session.isGithubConnected = resolvedGithubConnected;
@@ -706,10 +915,24 @@ exports.beginLiveInterview = async (req, res) => {
     // If session already started and has an opening question in chatMessages, return it (resume friendly)
     const existingInterviewerMessages = (session.chatMessages || []).filter((m) => m.role === 'interviewer');
     if (session.interviewState.startedAt && existingInterviewerMessages.length > 0 && session.status === 'in_progress' && session.interviewState.questionsAsked > 0) {
+      const lastQ = existingInterviewerMessages[existingInterviewerMessages.length - 1].content;
+      let resumedAudioUrl = null;
+      const isVoiceMode = req.body?.mode === 'voice' || req.query?.mode === 'voice' || req.body?.includeAudio;
+      if (isVoiceMode && lastQ) {
+        try {
+          const speechRes = await textToSpeechService.generateSpeech({ text: lastQ });
+          if (speechRes.success) {
+            resumedAudioUrl = speechRes.audioUrl;
+          }
+        } catch (e) {
+          console.warn('[Interview Controller] Error synthesizing speech for resumed session:', e);
+        }
+      }
       return res.status(200).json({
         success: true,
         resumed: true,
-        question: existingInterviewerMessages[existingInterviewerMessages.length - 1].content,
+        question: lastQ,
+        audioUrl: resumedAudioUrl,
         stage: session.interviewState.currentStageName || firstStage.name,
         interviewState: session.interviewState,
         chatMessages: session.chatMessages,
@@ -738,6 +961,12 @@ exports.beginLiveInterview = async (req, res) => {
     session.interviewState.coveredTopics = [];
     session.interviewState.coveredObjectives = [];
     session.interviewState.isProcessing = false;
+
+    const requestedInterviewMode = req.body?.interviewMode || req.query?.interviewMode;
+    if (requestedInterviewMode) {
+      session.interviewMode = requestedInterviewMode;
+      session.interviewState.interviewMode = requestedInterviewMode;
+    }
     session.status = 'in_progress';
 
     // Prepare payload for AI service
@@ -755,6 +984,7 @@ exports.beginLiveInterview = async (req, res) => {
       },
       interviewConfiguration: {
         type: session.interviewType || session.interviewPlan?.interviewType || 'Role-Specific',
+        mode: session.interviewMode || session.interviewPlan?.interviewMode || 'HR_SIMULATION',
         difficulty: session.difficulty || session.interviewPlan?.difficulty || 'Intermediate',
         durationMinutes: parsedDuration,
       },
@@ -820,9 +1050,13 @@ exports.beginLiveInterview = async (req, res) => {
     session.interviewState.currentTopic = topic;
     session.interviewState.questionsAsked = 1;
     session.interviewState.stageQuestionsAsked = 1;
+    session.interviewState.currentStageHops = 0;
+    session.interviewState.maxHopsPerStage = 2;
     session.interviewState.lastQuestion = openingQuestion;
     session.interviewState.lastAction = 'START_INTERVIEW';
     session.interviewState.lastReasonCode = 'RELEVANT_DEPTH';
+    const planStages = session.interviewPlan?.stages || [];
+    session.interviewState.agendaCoverage = calculateAgendaCoverage(planStages, 0, 0);
 
     await session.save();
 
@@ -853,6 +1087,42 @@ exports.beginLiveInterview = async (req, res) => {
  * and returns the ONE next question.
  * POST /api/interview/:sessionId/answer
  */
+/**
+ * Flatten resumeAnalysis.skills (array or { technical: [...], soft: [...] } object)
+ * into a plain list of strings; the evaluation agent rejects non-list payloads.
+ */
+const normalizeSkillList = (skills) => {
+  if (!skills) return [];
+  const raw = Array.isArray(skills)
+    ? skills
+    : Object.values(skills).flatMap((v) => (Array.isArray(v) ? v : [v]));
+  return raw
+    .map((v) => (typeof v === 'string' ? v : v?.name || v?.skill || ''))
+    .filter((v) => typeof v === 'string' && v.trim())
+    .slice(0, 30);
+};
+
+/**
+ * Whisper uses the prompt as preceding context: giving it the question and the
+ * role's vocabulary makes it spell names and technical terms correctly.
+ */
+const buildTranscriptionPrompt = (session) => {
+  const lastQuestion = [...(session.chatMessages || [])].reverse().find((m) => m.role === 'interviewer')?.content || '';
+  const skills = normalizeSkillList(session.resumeAnalysis?.skills).slice(0, 15).join(', ');
+  const parts = [
+    session.targetRole ? `Interview for a ${session.targetRole} role${session.company ? ` at ${session.company}` : ''}.` : '',
+    skills ? `Technologies: ${skills}.` : '',
+    lastQuestion ? `Question: ${lastQuestion}` : '',
+  ];
+  return parts.filter(Boolean).join(' ').slice(0, 800);
+};
+
+// When the coach model is unavailable, say so instead of showing a generic template
+const unavailableFeedback = () => ({
+  unavailable: true,
+  message: 'Feedback for this answer could not be generated right now. You can retry the evaluation or continue the interview.',
+});
+
 exports.submitLiveAnswer = async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -939,6 +1209,13 @@ exports.submitLiveAnswer = async (req, res) => {
     session.interviewState.progressPercentage = progressPercentage;
     session.interviewState.timingPhase = timingPhase;
 
+    // Identify question being answered from dialogue history
+    const previousInterviewerMsg = (session.chatMessages || [])
+      .filter((m) => m.role === 'interviewer')
+      .slice(-1)[0];
+    const questionBeingAnswered =
+      previousInterviewerMsg?.content || session.interviewState?.lastQuestion || 'Interview Question';
+
     // Save candidate answer
     const candidateMsg = {
       role: 'candidate',
@@ -953,10 +1230,92 @@ exports.submitLiveAnswer = async (req, res) => {
     session.chatMessages.push(candidateMsg);
     await session.save();
 
+    // Candidate Clarification / Repeat Handling (Feature 2A)
+    const isClarify = isCandidateClarificationRequest(answer);
+    if (isClarify) {
+      const candidateName = session.resumeAnalysis?.candidate_name || req.user?.firstName || 'there';
+      const clarifyPrefixes = [
+        `Certainly, ${candidateName}! To clarify: `,
+        `Of course, let me repeat that with more context: `,
+        `Happy to clarify, ${candidateName}. Here is what I mean: `,
+      ];
+      const clarifyPrefix = clarifyPrefixes[(session.interviewState.questionsAsked || 0) % clarifyPrefixes.length];
+      const clarifyQuestion = `${clarifyPrefix}${questionBeingAnswered}`;
+
+      const clarifyAction = 'CLARIFY';
+      const clarifyReason = 'CANDIDATE_CLARIFICATION';
+
+      session.interviewState.lastQuestion = clarifyQuestion;
+      session.interviewState.lastAction = clarifyAction;
+      session.interviewState.lastReasonCode = clarifyReason;
+      session.interviewState.isProcessing = false;
+
+      // Do NOT increment stage questions or hops for a clarification request
+      let audioUrl = null;
+      const isVoiceMode = mode === 'voice' || inputMode === 'voice' || req.body?.includeAudio;
+      if (isVoiceMode && clarifyQuestion) {
+        const speechRes = await textToSpeechService.generateSpeech({ text: clarifyQuestion });
+        if (speechRes.success) {
+          audioUrl = speechRes.audioUrl;
+        }
+      }
+
+      const interviewerMsg = {
+        role: 'interviewer',
+        content: clarifyQuestion,
+        audioUrl: '',
+        metrics: {
+          stageId: session.interviewState.currentStageId,
+          stageName: session.interviewState.currentStageName,
+          topic: session.interviewState.currentTopic,
+          action: clarifyAction,
+          reasonCode: clarifyReason,
+        },
+        timestamp: new Date(),
+      };
+      session.chatMessages.push(interviewerMsg);
+
+      const planStages = session.interviewPlan?.stages || [];
+      session.interviewState.agendaCoverage = calculateAgendaCoverage(
+        planStages,
+        session.interviewState.currentStageIndex || 0,
+        session.interviewState.currentStageHops || 0
+      );
+
+      await session.save();
+
+      return res.status(200).json({
+        success: true,
+        feedback: null,
+        questionBeingAnswered,
+        candidateAnswer: answer.trim(),
+        nextQuestion: clarifyQuestion,
+        question: clarifyQuestion,
+        audioUrl: audioUrl || null,
+        action: clarifyAction,
+        reasonCode: clarifyReason,
+        stage: session.interviewState.currentStageName,
+        topic: session.interviewState.currentTopic,
+        isComplete: false,
+        interviewState: session.interviewState,
+        chatMessages: session.chatMessages,
+        interviewMode: session.interviewMode || 'HR_SIMULATION',
+      });
+    }
+
     // Prepare payload for AI Service with authoritative timing
     const stages = session.interviewPlan?.stages || [];
     const currStageIdx = session.interviewState.currentStageIndex || 0;
     const currStage = stages[currStageIdx] || stages[0] || {};
+
+    const isAbsoluteMaxReached = elapsedMinutes >= absoluteMax;
+    const turnPolicy = computeTurnPolicy({
+      state: session.interviewState,
+      stages,
+      currStageIdx,
+      progressRatio,
+      isAbsoluteMaxReached,
+    });
 
     const turnPayload = {
       candidate: {
@@ -997,6 +1356,7 @@ exports.submitLiveAnswer = async (req, res) => {
         followUpDepth: session.interviewState.followUpDepth || 0,
         coveredTopics: session.interviewState.coveredTopics || [],
         coveredObjectives: session.interviewState.coveredObjectives || [],
+        turnPolicy,
       },
       conversationHistory: session.chatMessages.slice(-12).map((m) => ({
         role: m.role,
@@ -1004,6 +1364,51 @@ exports.submitLiveAnswer = async (req, res) => {
       })),
       latestAnswer: answer.trim(),
     };
+
+    // Feedback Interview Mode: start the evaluation now so it runs in parallel with the
+    // interview agent instead of after it (this used to add a full LLM call per turn).
+    const isVoiceMode = mode === 'voice' || inputMode === 'voice' || req.body?.includeAudio;
+    const isFeedbackMode = session.interviewMode === 'FEEDBACK_COACHING';
+    const savedCandidateMsgId = session.chatMessages[session.chatMessages.length - 1]?._id;
+    const evalTopic = session.interviewState.currentTopic || 'Core Competency';
+    const evalPayload = {
+      question: questionBeingAnswered,
+      answer: answer.trim(),
+      targetRole: session.targetRole || session.interviewPlan?.role || 'Software Engineer',
+      company: session.company || '',
+      stageName: session.interviewState.currentStageName || currStage.name || 'Technical Stage',
+      topic: evalTopic,
+      candidateSkills: normalizeSkillList(session.resumeAnalysis?.skills),
+      difficulty: session.difficulty || session.interviewPlan?.difficulty || 'Intermediate',
+      // Earlier answers (context only) so the coach does not call something "missing"
+      // that the candidate already explained in a previous turn
+      priorAnswers: (session.chatMessages || [])
+        .filter((m) => m.role === 'candidate')
+        .slice(-3, -1)
+        .map((m) => String(m.content || '').slice(0, 500)),
+    };
+    const callEvaluationAgent = async (path, timeoutMs) => {
+      try {
+        const evalRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/${path}`, {
+          method: 'POST',
+          headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(evalPayload),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (evalRes.ok) return await evalRes.json();
+        console.warn(`[Interview Controller] Evaluation agent ${path} status HTTP ${evalRes.status}`);
+      } catch (evalErr) {
+        console.warn(`[Interview Controller] Evaluation agent ${path} request note:`, evalErr.message);
+      }
+      return null;
+    };
+    const fullFeedbackPromise = isFeedbackMode
+      ? callEvaluationAgent('evaluate-answer', 35000).then((json) => json?.feedback || unavailableFeedback())
+      : null;
+    // Voice mode speaks a short summary instead of showing the detailed panel
+    const spokenFeedbackPromise = isFeedbackMode && isVoiceMode
+      ? callEvaluationAgent('quick-feedback', 15000).then((json) => (json?.spokenFeedback || '').trim())
+      : null;
 
     let aiResult = null;
     try {
@@ -1023,32 +1428,26 @@ exports.submitLiveAnswer = async (req, res) => {
       console.warn('[Interview Controller] Could not connect to AI service for turn:', aiErr.message);
     }
 
-    // Resilient fallback if AI service was offline or failed
-    if (!aiResult || !aiResult.question) {
-      const isTimeUp = elapsedMinutes >= absoluteMax;
-      if (isTimeUp) {
-        aiResult = {
-          action: 'END_INTERVIEW',
-          reasonCode: 'TIME_PROGRESS',
-          question: `Thank you for your time today. We have reached the time limit for this interview session. We have captured all your responses and will now proceed to complete the session. Have a great day!`,
-          stageId: currStage.id,
-          stageName: currStage.name,
-          topic: session.interviewState.currentTopic,
-          isComplete: true,
-        };
-      } else {
-        const topicLabel = session.interviewState.currentTopic || currStage.name || 'this area';
-        aiResult = {
-          action: 'FOLLOW_UP',
-          reasonCode: 'RELEVANT_DEPTH',
-          question: `Thank you for sharing your experience with ${topicLabel}. Could you elaborate on how you handled any edge cases or unexpected constraints in that scenario?`,
-          stageId: currStage.id,
-          stageName: currStage.name,
-          topic: session.interviewState.currentTopic,
-          isComplete: false,
-        };
+    // AI unavailable, or it ignored a mandatory stage change twice in a row:
+    // ask the next planned question from the interview plan instead.
+    const mustAdvanceIgnored =
+      aiResult?.policyViolation && turnPolicy.mustAdvanceStage && (session.interviewState.policyViolations || 0) >= 1;
+    if (!aiResult || !aiResult.question || mustAdvanceIgnored) {
+      if (mustAdvanceIgnored) {
+        console.warn('[TURN_POLICY] Agent ignored the required stage change again; using the planned stage question.');
       }
+      const planned = buildPlannedQuestion({ policy: turnPolicy, stages, currStageIdx, state: session.interviewState });
+      aiResult = {
+        ...planned,
+        stageId: currStage.id,
+        stageName: currStage.name,
+        isComplete: planned.action === 'END_INTERVIEW',
+        policyViolation: false,
+      };
     }
+    session.interviewState.policyViolations = aiResult.policyViolation
+      ? (session.interviewState.policyViolations || 0) + 1
+      : 0;
 
     // Apply state transitions
     let action = aiResult.action || 'FOLLOW_UP';
@@ -1056,7 +1455,6 @@ exports.submitLiveAnswer = async (req, res) => {
     let nextQuestion = (aiResult.question || '').trim();
 
     // 1. Authoritative Absolute Maximum Duration Check (+10 min buffer)
-    const isAbsoluteMaxReached = elapsedMinutes >= absoluteMax;
     if (isAbsoluteMaxReached) {
       console.log(`[DURATION_PACING] Absolute maximum duration reached (${elapsedMinutes}m >= ${absoluteMax}m). Concluding session.`);
       action = 'END_INTERVIEW';
@@ -1107,30 +1505,24 @@ exports.submitLiveAnswer = async (req, res) => {
       }
     }
 
-    // Deterministic Stage Transition Guardrail:
-    // If the current stage has asked its allocated questions (targetQuestionCount or max 2) OR reached follow-up depth 2,
-    // force promote to NEXT_STAGE so the candidate is guaranteed to experience all stages (Projects, Theory, Scenarios, Coding, GK).
-    const stageQuestionTarget = Math.max(1, currStage.targetQuestionCount || 2);
-    const questionsInCurrentStage = (session.interviewState.stageQuestionsAsked || 0) + 1;
-    const shouldAdvanceStage =
-      action === 'NEXT_STAGE' ||
-      questionsInCurrentStage >= stageQuestionTarget ||
-      (session.interviewState.followUpDepth || 0) >= 2;
-
-    if (shouldAdvanceStage && currStageIdx + 1 < stages.length && action !== 'END_INTERVIEW') {
-      action = 'NEXT_STAGE';
-      reasonCode = 'STAGE_COMPLETE';
-    }
+    // Stage/topic transitions follow the action the agent chose for its question.
+    // (The turn policy already limited which actions were allowed.)
+    session.interviewState.currentStageHops = (session.interviewState.currentStageHops || 0) + 1;
 
     // Advance Stage or Topic with Pacing-aware redistribution
     if (action === 'FOLLOW_UP' || action === 'CLARIFY' || action === 'DEEPEN') {
       session.interviewState.followUpDepth = (session.interviewState.followUpDepth || 0) + 1;
+      session.interviewState.adaptiveTurns = (session.interviewState.adaptiveTurns || 0) + 1;
+      session.interviewState.stageAdaptiveTurns = (session.interviewState.stageAdaptiveTurns || 0) + 1;
     } else if (action === 'NEXT_TOPIC') {
       session.interviewState.followUpDepth = 0;
+      session.interviewState.currentStageHops = 0;
       if (aiResult.topic) session.interviewState.currentTopic = aiResult.topic;
     } else if (action === 'NEXT_STAGE') {
       session.interviewState.followUpDepth = 0;
+      session.interviewState.currentStageHops = 0;
       session.interviewState.stageQuestionsAsked = 0;
+      session.interviewState.stageAdaptiveTurns = 0;
       const nextIdx = currStageIdx + 1;
 
       if (nextIdx < stages.length) {
@@ -1158,6 +1550,7 @@ exports.submitLiveAnswer = async (req, res) => {
         // Redistribute available time to deepen technical trade-offs, scenarios, and JD requirements.
         console.log(`[PACING] All stages visited but ${remainingTargetMinutes}m remaining. Redistributing time to deepen interview.`);
         session.interviewState.followUpDepth = 0;
+        session.interviewState.currentStageHops = 0;
         const topics = currStage.topics || [];
         if (topics.length > 0) {
           session.interviewState.currentTopic = topics[(session.interviewState.questionsAsked || 0) % topics.length];
@@ -1167,10 +1560,19 @@ exports.submitLiveAnswer = async (req, res) => {
 
     session.interviewState.questionsAsked = (session.interviewState.questionsAsked || 0) + 1;
     session.interviewState.stageQuestionsAsked = (session.interviewState.stageQuestionsAsked || 0) + 1;
+
+
     session.interviewState.lastQuestion = nextQuestion;
     session.interviewState.lastAction = action;
     session.interviewState.lastReasonCode = reasonCode;
     session.interviewState.isProcessing = false;
+
+    // Update Stage Agenda Coverage Matrix (Feature 2B)
+    session.interviewState.agendaCoverage = calculateAgendaCoverage(
+      stages,
+      session.interviewState.currentStageIndex || 0,
+      session.interviewState.currentStageHops || 0
+    );
 
     // Handle completion
     let demoAccessUpdate = null;
@@ -1181,14 +1583,65 @@ exports.submitLiveAnswer = async (req, res) => {
       demoAccessUpdate = await recordCompletedDemoInterview(session);
     }
 
-    // Generate audio if voice mode is active
+    // Spoken feedback (voice) and the next question's audio are synthesized in parallel
     let audioUrl = null;
-    const isVoiceMode = mode === 'voice' || inputMode === 'voice' || req.body?.includeAudio;
-    if (isVoiceMode && nextQuestion) {
-      const speechRes = await textToSpeechService.generateSpeech({ text: nextQuestion });
-      if (speechRes.success) {
-        audioUrl = speechRes.audioUrl;
+    let spokenFeedback = null;
+    let feedbackAudioUrl = null;
+    const synthesize = async (text) => {
+      if (!isVoiceMode || !text) return null;
+      try {
+        const speechRes = await textToSpeechService.generateSpeech({ text });
+        return speechRes.success ? speechRes.audioUrl : null;
+      } catch (_) {
+        return null;
       }
+    };
+    const questionAudioPromise = synthesize(nextQuestion);
+    if (spokenFeedbackPromise) {
+      spokenFeedback = await spokenFeedbackPromise;
+      [feedbackAudioUrl, audioUrl] = await Promise.all([synthesize(spokenFeedback), questionAudioPromise]);
+    } else {
+      audioUrl = await questionAudioPromise;
+    }
+
+    // Text mode shows the detailed coaching panel, so it needs the full evaluation now.
+    // Voice mode stores it in the background once ready (used by the final report).
+    let feedbackData = null;
+    const recordFeedback = (doc, fb) => {
+      const savedCandidateMsg = doc.chatMessages.find((m) => savedCandidateMsgId && String(m._id) === String(savedCandidateMsgId));
+      if (savedCandidateMsg) {
+        savedCandidateMsg.feedback = fb;
+        if (!savedCandidateMsg.metrics) savedCandidateMsg.metrics = {};
+        savedCandidateMsg.metrics.feedback = fb;
+      }
+    };
+    const perAnswerEntry = (fb) => ({
+      turnIndex: session.interviewState.questionsAsked || 1,
+      question: questionBeingAnswered,
+      answer: answer.trim(),
+      feedback: fb,
+      timestamp: new Date(),
+    });
+
+    if (fullFeedbackPromise && !spokenFeedbackPromise) {
+      feedbackData = await fullFeedbackPromise;
+      recordFeedback(session, feedbackData);
+      if (!session.perAnswerFeedbacks) session.perAnswerFeedbacks = [];
+      session.perAnswerFeedbacks.push(perAnswerEntry(feedbackData));
+    } else if (fullFeedbackPromise) {
+      const entryTemplate = perAnswerEntry(null);
+      fullFeedbackPromise
+        .then(async (fb) => {
+          // Atomic update: the session document may already have moved on to later turns
+          const update = { $push: { perAnswerFeedbacks: { ...entryTemplate, feedback: fb } } };
+          const filter = { sessionId };
+          if (savedCandidateMsgId) {
+            filter['chatMessages._id'] = savedCandidateMsgId;
+            update.$set = { 'chatMessages.$.feedback': fb, 'chatMessages.$.metrics.feedback': fb };
+          }
+          await InterviewSession.updateOne(filter, update);
+        })
+        .catch((bgErr) => console.warn('[Interview Controller] Background feedback save note:', bgErr.message));
     }
 
     // Append interviewer's next question (or closing statement) to chatMessages (omit base64 from DB)
@@ -1209,10 +1662,15 @@ exports.submitLiveAnswer = async (req, res) => {
 
     await session.save();
 
-    console.log(`[VOICE_TURN_COMPLETED] sessionId=${sessionId}, turn=${session.interviewState.questionsAsked}, mode=${inputMode || mode || 'text'}`);
+    console.log(`[VOICE_TURN_COMPLETED] sessionId=${sessionId}, turn=${session.interviewState.questionsAsked}, mode=${inputMode || mode || 'text'}, interviewMode=${session.interviewMode || 'HR_SIMULATION'}`);
 
     return res.status(200).json({
       success: true,
+      feedback: isFeedbackMode ? feedbackData : null,
+      spokenFeedback,
+      feedbackAudioUrl,
+      questionBeingAnswered,
+      candidateAnswer: answer.trim(),
       nextQuestion,
       question: nextQuestion,
       audioUrl: audioUrl || null,
@@ -1224,6 +1682,7 @@ exports.submitLiveAnswer = async (req, res) => {
       demoAccess: demoAccessUpdate,
       interviewState: session.interviewState,
       chatMessages: session.chatMessages,
+      interviewMode: session.interviewMode || 'HR_SIMULATION',
     });
   } catch (error) {
     console.error('[Interview Controller] Error submitting live answer:', error);
@@ -1232,6 +1691,98 @@ exports.submitLiveAnswer = async (req, res) => {
       await InterviewSession.updateOne({ sessionId: req.params.sessionId }, { $set: { 'interviewState.isProcessing': false } });
     } catch (_) {}
     return res.status(500).json({ success: false, message: 'Failed to process interview answer', error: error.message });
+  }
+};
+
+/**
+ * Retry answer evaluation for the most recent candidate turn in Feedback Interview Mode.
+ * POST /api/interview/:sessionId/retry-answer-evaluation
+ */
+exports.retryAnswerEvaluation = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    let session = await InterviewSession.findOne({ sessionId });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Interview session not found.' });
+    }
+    if (session.userId && req.user?._id && session.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this session.' });
+    }
+
+    const candidateMsgs = (session.chatMessages || []).filter((m) => m.role === 'candidate');
+    if (candidateMsgs.length === 0) {
+      return res.status(400).json({ success: false, message: 'No candidate answer found to evaluate.' });
+    }
+    const lastCandidateMsg = candidateMsgs[candidateMsgs.length - 1];
+
+    // Find question asked immediately before this candidate answer
+    const candIdx = session.chatMessages.indexOf(lastCandidateMsg);
+    let questionText = 'Interview Question';
+    for (let i = candIdx - 1; i >= 0; i--) {
+      if (session.chatMessages[i].role === 'interviewer') {
+        questionText = session.chatMessages[i].content;
+        break;
+      }
+    }
+
+    let feedback = null;
+    try {
+      const evalRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/evaluate-answer`, {
+        method: 'POST',
+        headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          question: questionText,
+          answer: lastCandidateMsg.content,
+          targetRole: session.targetRole || session.interviewPlan?.role || 'Software Engineer',
+          company: session.company || '',
+          stageName: session.interviewState?.currentStageName || 'Technical Stage',
+          topic: session.interviewState?.currentTopic || 'Core Concept',
+          candidateSkills: normalizeSkillList(session.resumeAnalysis?.skills),
+          difficulty: session.difficulty || session.interviewPlan?.difficulty || 'Intermediate',
+        }),
+        signal: AbortSignal.timeout(35000),
+      });
+
+      if (evalRes.ok) {
+        const evalJson = await evalRes.json();
+        feedback = evalJson.feedback || null;
+      }
+    } catch (err) {
+      console.warn('[Retry Answer Eval] AI service error:', err.message);
+    }
+
+    if (!feedback) {
+      return res.status(503).json({
+        success: false,
+        error: 'FEEDBACK_UNAVAILABLE',
+        message: 'The answer coach is temporarily unavailable. Please retry in a moment.',
+      });
+    }
+
+    lastCandidateMsg.feedback = feedback;
+    if (!lastCandidateMsg.metrics) lastCandidateMsg.metrics = {};
+    lastCandidateMsg.metrics.feedback = feedback;
+
+    if (!session.perAnswerFeedbacks) session.perAnswerFeedbacks = [];
+    session.perAnswerFeedbacks.push({
+      turnIndex: session.interviewState?.questionsAsked || 1,
+      question: questionText,
+      answer: lastCandidateMsg.content,
+      feedback,
+      timestamp: new Date(),
+    });
+
+    await session.save();
+
+    return res.status(200).json({
+      success: true,
+      feedback,
+      questionBeingAnswered: questionText,
+      candidateAnswer: lastCandidateMsg.content,
+    });
+  } catch (err) {
+    console.error('[Retry Answer Eval] Error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to retry answer evaluation', error: err.message });
   }
 };
 
@@ -1261,6 +1812,17 @@ exports.manualEndLiveInterview = async (req, res) => {
     session.interviewState.isEndedByUser = true;
     session.interviewState.endedAt = new Date();
     session.interviewState.isProcessing = false;
+
+    // Calculate elapsed minutes and seconds for pro-rata evaluation
+    if (session.interviewState.startedAt) {
+      const startedAtMs = new Date(session.interviewState.startedAt).getTime();
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+      session.interviewState.elapsedSeconds = elapsedSeconds;
+      session.interviewState.elapsedMinutes = parseFloat((elapsedSeconds / 60).toFixed(1));
+    } else if (req.body?.elapsedMinutes) {
+      session.interviewState.elapsedMinutes = parseFloat(req.body.elapsedMinutes) || 0;
+      session.interviewState.elapsedSeconds = parseInt(req.body.elapsedSeconds, 10) || Math.round((session.interviewState.elapsedMinutes || 0) * 60);
+    }
 
     // Reset stale cached evaluation so fresh evaluation is generated on report page
     session.evaluation = null;
@@ -1332,6 +1894,7 @@ exports.getOrGenerateEvaluation = async (req, res) => {
           company,
           candidateName,
           interviewType: session.interviewType || 'Role-Specific',
+          interviewMode: session.interviewMode || 'HR_SIMULATION',
           difficulty: session.difficulty || 'Intermediate',
           duration: session.duration || '30 min',
           status: session.status,
@@ -1349,7 +1912,10 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         sessionId: session.sessionId,
         target_role: targetRole,
         targetRole,
-        targetJob: targetRole,
+        targetJob: {
+          role: targetRole,
+          company,
+        },
         company,
         interview_type: session.interviewType || 'Role-Specific',
         interviewType: session.interviewType || 'Role-Specific',
@@ -1362,6 +1928,7 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         },
         difficulty: session.difficulty || 'Intermediate',
         duration: parseInt(String(session.duration || '30').replace(/\D/g, ''), 10) || 30,
+        isEndedByUser: session.status === 'ended_by_user' || session.interviewState?.isEndedByUser === true,
         cv_analysis: session.resumeAnalysis,
         candidate: session.resumeAnalysis,
         jd_analysis: session.jdAnalysis,
@@ -1370,13 +1937,21 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         chatMessages: session.chatMessages || [],
         interview_state: session.interviewState || {},
         interviewState: session.interviewState || {},
+        // Feedback mode: the per-answer coach results, so the final report stays consistent with them
+        perAnswerFeedbacks: (session.perAnswerFeedbacks || [])
+          .filter((entry) => entry?.feedback && !entry.feedback.unavailable)
+          .map((entry) => ({
+            question: String(entry.question || '').slice(0, 300),
+            score: entry.feedback.overallScore ?? entry.feedback.score ?? null,
+            summary: String(entry.feedback.summary || '').slice(0, 400),
+          })),
       };
 
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/evaluate`, {
         method: 'POST',
         headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(90000),
       });
 
       if (aiRes.ok) {
@@ -1424,6 +1999,7 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         company,
         candidateName,
         interviewType: session.interviewType || 'Role-Specific',
+        interviewMode: session.interviewMode || 'HR_SIMULATION',
         difficulty: session.difficulty || 'Intermediate',
         duration: session.duration || '30 min',
         status: session.status,
@@ -1474,6 +2050,8 @@ exports.transcribeCandidateVoice = async (req, res) => {
       audioBuffer: req.file.buffer,
       filename: req.file.originalname || 'candidate_answer.webm',
       mimetype: req.file.mimetype || 'audio/webm',
+      prompt: buildTranscriptionPrompt(session),
+      language: 'en',
     });
 
     if (!result.success) {
@@ -1683,10 +2261,12 @@ Evaluate their solution concisely (1-2 sentences): acknowledge correctness, high
     session.interviewState.currentTopic = (nextStage.topics && nextStage.topics[0]) || 'General';
     session.interviewState.stageQuestionsAsked = 0;
     session.interviewState.followUpDepth = 0;
+    session.interviewState.currentStageHops = 0;
     session.interviewState.questionsAsked = (session.interviewState.questionsAsked || 0) + 1;
     session.interviewState.lastQuestion = aiReviewText;
     session.interviewState.lastAction = 'NEXT_STAGE';
     session.interviewState.lastReasonCode = 'STAGE_COMPLETE';
+    session.interviewState.agendaCoverage = calculateAgendaCoverage(stages, nextIdx, 0);
 
     // Generate interviewer voice if requested
     let audioUrl = null;

@@ -19,7 +19,7 @@ function hasAcceptedExtension(fileName) {
 export default function AboutYou() {
   const navigate = useNavigate()
   const inputRef = useRef(null)
-  const { resumeFile, setResumeFile, clearResume } = useProfileSetup()
+  const { resumeFile, setResumeFile, clearResume, extractSkillsFromResume } = useProfileSetup()
   const { user: authUser } = useAuth()
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState('')
@@ -39,6 +39,9 @@ export default function AboutYou() {
 
     setError('')
     setResumeFile(file)
+    if (extractSkillsFromResume) {
+      extractSkillsFromResume(file)
+    }
   }
 
   function onInputChange(event) {

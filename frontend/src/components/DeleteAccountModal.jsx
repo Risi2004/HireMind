@@ -41,24 +41,28 @@ function DeleteAccountModalContent({ isOpen, onClose }) {
 
   if (!isOpen) return null
 
-  const isFormValid = acknowledged && confirmWord.trim().toUpperCase() === 'DELETE'
+  const isFormValid = acknowledged && confirmWord.trim().toUpperCase() === 'DELETE' && Boolean(password && password.trim())
 
   const handleDelete = async (e) => {
     e.preventDefault()
+    if (!password || !password.trim()) {
+      setError('Please enter your account password to confirm deletion.')
+      return
+    }
     if (!isFormValid || isDeleting) return
 
     setIsDeleting(true)
     setError('')
 
     try {
-      await deleteAccount(password.trim() || null)
+      await deleteAccount(password.trim())
       setSuccess(true)
       setTimeout(() => {
         onClose()
         navigate('/signup')
       }, 1800)
     } catch (err) {
-      setError(err.message || 'Failed to delete account. Please verify your credentials and try again.')
+      setError(err.message || 'Failed to delete account. Please verify your password and try again.')
       setIsDeleting(false)
     }
   }
@@ -130,39 +134,63 @@ function DeleteAccountModalContent({ isOpen, onClose }) {
             {/* Impact Details Box */}
             <div className="del-modal-impact-box">
               <div className="del-impact-item">
-                <span className="del-impact-bullet">🗑️</span>
+                <span className="del-impact-icon del-impact-icon--red">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6h18" />
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                  </svg>
+                </span>
                 <div>
                   <strong>User Profile & Login:</strong> Your credentials, name, email ({user?.email || 'your account'}), and preferences will be permanently wiped.
                 </div>
               </div>
               <div className="del-impact-item">
-                <span className="del-impact-bullet">🤖</span>
+                <span className="del-impact-icon del-impact-icon--amber">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 8V4H8" />
+                    <rect width="16" height="12" x="4" y="8" rx="2" />
+                    <path d="M2 14h2" />
+                    <path d="M20 14h2" />
+                    <path d="M15 13v2" />
+                    <path d="M9 13v2" />
+                  </svg>
+                </span>
                 <div>
                   <strong>Interview Transcripts & Scores:</strong> All mock interview questions, AI coach performance analyses, and reports will be deleted.
                 </div>
               </div>
               <div className="del-impact-item">
-                <span className="del-impact-bullet">📁</span>
+                <span className="del-impact-icon del-impact-icon--blue">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                </span>
                 <div>
                   <strong>Uploaded Files & Documents:</strong> All profile photos, resumes, and uploaded documents will be permanently purged.
                 </div>
               </div>
             </div>
 
-            {/* Password Verification (Optional if user logged in, but verified if provided) */}
+            {/* Password Verification (Mandatory) */}
             <div className="del-input-group">
               <label className="del-input-label" htmlFor="del-password">
-                Account Password <span className="del-optional-tag">(Optional verification)</span>
+                Account Password <span className="del-required-tag">*Required</span>
               </label>
               <div className="del-password-wrapper">
                 <input
                   id="del-password"
                   type={showPassword ? 'text' : 'password'}
                   className="del-text-input"
-                  placeholder="Enter your password to confirm identity"
+                  placeholder="Enter your account password to confirm deletion"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    if (error) setError('')
+                  }}
                   disabled={isDeleting}
+                  required
                 />
                 <button
                   type="button"

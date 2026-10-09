@@ -96,6 +96,81 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  gap: 8px;
+}
+
+.your-field__label-title-group,
+.your-field__label-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.your-field__detecting-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 999px;
+  color: #38bdf8;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.your-field__spinner-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+  animation: pulseDot 0.9s infinite alternate;
+}
+
+@keyframes pulseDot {
+  0% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+.your-field__detected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 999px;
+  color: #4ade80;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.your-field__rescan-btn {
+  background: transparent;
+  border: none;
+  color: #7dd3fc;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.your-field__rescan-btn:hover {
+  color: #38bdf8;
+  text-decoration: underline;
 }
 
 .your-field__label-hint {
@@ -103,6 +178,7 @@
   color: #8da2c0;
   font-weight: 500;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .your-field__skill-input-wrap {

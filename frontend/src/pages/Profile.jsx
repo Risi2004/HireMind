@@ -38,6 +38,7 @@ export default function Profile() {
     updateUserProfile,
     uploadUserResume,
     uploadUserAvatar,
+    deleteUserAvatar,
     connectUserGithub,
     disconnectUserGithub,
     updateUserSkills,
@@ -52,6 +53,7 @@ export default function Profile() {
   const [toastMessage, setToastMessage] = useState(null)
   const [isUploadingResume, setIsUploadingResume] = useState(false)
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
+  const [isRemovingAvatar, setIsRemovingAvatar] = useState(false)
   const [isSavingCareer, setIsSavingCareer] = useState(false)
 
   // Toast Notification Helper
@@ -138,6 +140,23 @@ export default function Profile() {
     } finally {
       setIsUploadingAvatar(false)
       if (avatarInputRef.current) avatarInputRef.current.value = ''
+    }
+  }
+
+  // Handle Avatar Removal directly from DB & R2
+  const handleRemoveAvatar = async (e) => {
+    if (e) e.stopPropagation()
+    const confirmRemove = window.confirm('Are you sure you want to remove your profile picture?')
+    if (!confirmRemove) return
+
+    setIsRemovingAvatar(true)
+    try {
+      await deleteUserAvatar()
+      showToast('Profile picture removed successfully!')
+    } catch (err) {
+      showToast(err.message || 'Failed to remove profile picture', 'error')
+    } finally {
+      setIsRemovingAvatar(false)
     }
   }
 
@@ -445,49 +464,85 @@ export default function Profile() {
             1. HERO / PROFILE SUMMARY CARD (DYNAMIC DB SYNCED)
             ===================================================================== */}
         <section className="prof-hero-card">
-          {/* Left: User Identity Info with Live Avatar Upload */}
+          {/* Left: User Identity Info with Live Avatar Upload & Remove */}
           <div className="prof-hero-user">
-            <div
-              className="prof-avatar-wrap"
-              onClick={() => avatarInputRef.current?.click()}
-              title="Click to Change Profile Picture (JPG/PNG under 5MB)"
-            >
-              <input
-                type="file"
-                ref={avatarInputRef}
-                onChange={handleAvatarChange}
-                accept="image/png,image/jpeg,image/jpg"
-                style={{ display: 'none' }}
-              />
-
-              {candidateAvatar ? (
-                <img
-                  src={candidateAvatar}
-                  alt={candidateName}
-                  className="prof-avatar-img"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                  }}
+            <div className="prof-avatar-col">
+              <div
+                className="prof-avatar-wrap"
+                onClick={() => avatarInputRef.current?.click()}
+                title="Click to Change Profile Picture (JPG/PNG under 5MB)"
+              >
+                <input
+                  type="file"
+                  ref={avatarInputRef}
+                  onChange={handleAvatarChange}
+                  accept="image/png,image/jpeg,image/jpg"
+                  style={{ display: 'none' }}
                 />
-              ) : (
-                <div className="prof-avatar-initial">{candidateInitial}</div>
-              )}
 
-              {/* Hover overlay with camera icon */}
-              <div className="prof-avatar-overlay">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                  <circle cx="12" cy="13" r="4" />
-                </svg>
+                {candidateAvatar ? (
+                  <img
+                    src={candidateAvatar}
+                    alt={candidateName}
+                    className="prof-avatar-img"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none'
+                    }}
+                  />
+                ) : (
+                  <div className="prof-avatar-initial">{candidateInitial}</div>
+                )}
+
+                {/* Hover overlay with camera icon */}
+                <div className="prof-avatar-overlay">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </div>
+
+                {/* Floating delete button badge on top-right of avatar if picture exists */}
+                {candidateAvatar && (
+                  <button
+                    type="button"
+                    className="prof-avatar-remove-badge"
+                    onClick={handleRemoveAvatar}
+                    disabled={isUploadingAvatar || isRemovingAvatar}
+                    title="Remove Profile Picture"
+                    aria-label="Remove Profile Picture"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                )}
+
+                {(isUploadingAvatar || isRemovingAvatar) && (
+                  <div className="prof-avatar-loading">
+                    <div className="prof-mini-spinner" />
+                  </div>
+                )}
+
+                <div className="prof-avatar-badge" title="Active Account" />
               </div>
 
-              {isUploadingAvatar && (
-                <div className="prof-avatar-loading">
-                  <div className="prof-mini-spinner" />
-                </div>
+              {/* Text Remove Photo button below avatar */}
+              {candidateAvatar && (
+                <button
+                  type="button"
+                  className="prof-avatar-remove-btn"
+                  onClick={handleRemoveAvatar}
+                  disabled={isUploadingAvatar || isRemovingAvatar}
+                  title="Remove Profile Picture"
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                  <span>{isRemovingAvatar ? 'Removing...' : 'Remove Photo'}</span>
+                </button>
               )}
-
-              <div className="prof-avatar-badge" title="Active Account" />
             </div>
 
             <div className="prof-hero-meta">
@@ -1148,16 +1203,16 @@ export default function Profile() {
           <div className="prof-card-header">
             <div className="prof-card-title-group">
               <div className="prof-danger-icon-box">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                   <line x1="12" y1="9" x2="12" y2="13" />
                   <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
               </div>
               <div>
-                <h3 className="prof-card-title" style={{ color: '#f87171' }}>Danger Zone</h3>
-                <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8' }}>
-                  Permanently delete your candidate profile, interview histories, and all stored data.
+                <h3 className="prof-card-title prof-danger-title">Danger Zone</h3>
+                <p className="prof-danger-subtitle">
+                  Permanently delete your account, mock interview histories, and all stored data. Password verification is required.
                 </p>
               </div>
             </div>
@@ -1168,7 +1223,13 @@ export default function Profile() {
               onClick={() => setIsDeleteModalOpen(true)}
               title="Permanently delete account"
             >
-              DELETE ACCOUNT
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+              </svg>
+              <span>Delete Account</span>
             </button>
           </div>
         </section>

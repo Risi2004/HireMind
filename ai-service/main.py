@@ -334,24 +334,31 @@ def code_review_endpoint(payload: CodeReviewPayload):
 
 
 class EvaluationPayload(BaseModel):
-    candidate: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    targetJob: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    interviewConfiguration: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    candidate: Optional[Any] = Field(default_factory=dict)
+    targetJob: Optional[Any] = Field(default_factory=dict)
+    interviewConfiguration: Optional[Any] = Field(default_factory=dict)
     chatMessages: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
-    interviewState: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    interviewState: Optional[Any] = Field(default_factory=dict)
 
-    # Also accept backend snake_case variants
+    # Also accept backend snake_case variants and extra metadata
     session_id: Optional[str] = None
+    sessionId: Optional[str] = None
     target_role: Optional[str] = None
+    targetRole: Optional[str] = None
     company: Optional[str] = None
     interview_type: Optional[str] = None
+    interviewType: Optional[str] = None
     difficulty: Optional[str] = None
-    duration: Optional[int] = None
-    cv_analysis: Optional[Dict[str, Any]] = None
-    jd_analysis: Optional[Dict[str, Any]] = None
-    interview_plan: Optional[Dict[str, Any]] = None
+    duration: Optional[Any] = None
+    isEndedByUser: Optional[bool] = None
+    elapsedMinutes: Optional[float] = None
+    cv_analysis: Optional[Any] = None
+    jd_analysis: Optional[Any] = None
+    interview_plan: Optional[Any] = None
     chat_messages: Optional[List[Dict[str, Any]]] = None
-    interview_state: Optional[Dict[str, Any]] = None
+    interview_state: Optional[Any] = None
+    # Feedback mode: per-answer coach scores/summaries to keep the report consistent
+    perAnswerFeedbacks: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
 
 
 @app.post("/agents/evaluation-agent/evaluate")
@@ -362,8 +369,10 @@ def evaluation_agent_endpoint(payload: EvaluationPayload):
         # Normalize fields between camelCase and snake_case
         if not data.get("chatMessages") and data.get("chat_messages"):
             data["chatMessages"] = data["chat_messages"]
-        if not data.get("targetJob") and data.get("target_role"):
-            data["targetJob"] = {"role": data.get("target_role"), "company": data.get("company")}
+        if isinstance(data.get("targetJob"), str):
+            data["targetJob"] = {"role": data.get("targetJob"), "company": data.get("company") or ""}
+        elif not data.get("targetJob") and data.get("target_role"):
+            data["targetJob"] = {"role": data.get("target_role"), "company": data.get("company") or ""}
         if not data.get("candidate") and data.get("cv_analysis"):
             data["candidate"] = data["cv_analysis"]
         if not data.get("interviewConfiguration") and data.get("interview_type"):
@@ -388,6 +397,73 @@ def evaluation_agent_endpoint(payload: EvaluationPayload):
         raise HTTPException(status_code=500, detail=f"Failed to evaluate interview: {str(e)}")
 
 
+class SingleAnswerEvaluationPayload(BaseModel):
+    question: str = Field(..., description="The interview question that was asked")
+    answer: str = Field(..., description="Candidate's submitted answer")
+    target_role: Optional[str] = Field(default="", description="Target job title")
+    targetRole: Optional[str] = Field(default="", description="Alternative target job title")
+    company: Optional[str] = Field(default="", description="Target company name")
+    stage_name: Optional[str] = Field(default="", description="Interview stage name")
+    stageName: Optional[str] = Field(default="", description="Alternative stage name")
+    topic: Optional[str] = Field(default="", description="Topic being probed")
+    candidate_skills: Optional[List[str]] = Field(default_factory=list, description="Candidate skills")
+    candidateSkills: Optional[List[str]] = Field(default_factory=list, description="Alternative candidate skills")
+    difficulty: Optional[str] = Field(default="Intermediate", description="Interview difficulty level")
+    priorAnswers: Optional[List[str]] = Field(default_factory=list, description="Earlier candidate answers (context only)")
+
+
+@app.post("/agents/evaluation-agent/evaluate-answer")
+def evaluate_single_answer_endpoint(payload: SingleAnswerEvaluationPayload):
+    """Evaluate an individual candidate answer in real-time for Feedback Interview Mode."""
+    try:
+        resolved_role = payload.target_role or payload.targetRole or "Software Engineer"
+        resolved_stage = payload.stage_name or payload.stageName or "Technical Interview"
+        resolved_skills = payload.candidate_skills or payload.candidateSkills or []
+
+        feedback = evaluation_agent_instance.evaluate_single_answer(
+            question=payload.question,
+            answer=payload.answer,
+            target_role=resolved_role,
+            company=payload.company or "",
+            stage_name=resolved_stage,
+            topic=payload.topic or "",
+            candidate_skills=resolved_skills,
+            difficulty=payload.difficulty or "Intermediate",
+            prior_answers=payload.priorAnswers or [],
+        )
+        if not feedback:
+            # Honest failure: the backend shows "feedback unavailable" with a retry option
+            raise HTTPException(status_code=503, detail="Answer feedback is temporarily unavailable.")
+        return {
+            "status": "success",
+            "feedback": feedback,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to evaluate single answer:")
+        raise HTTPException(status_code=500, detail=f"Failed to evaluate answer: {str(e)}")
+
+
+@app.post("/agents/evaluation-agent/quick-feedback")
+def quick_feedback_endpoint(payload: SingleAnswerEvaluationPayload):
+    """Fast 2-3 sentence spoken coaching summary for voice Feedback Interview Mode."""
+    try:
+        from agents.evaluation_agent import quick_spoken_feedback
+        text = quick_spoken_feedback(
+            evaluation_agent_instance,
+            question=payload.question,
+            answer=payload.answer,
+            target_role=payload.target_role or payload.targetRole or "Software Engineer",
+            stage_name=payload.stage_name or payload.stageName or "Interview",
+            topic=payload.topic or "",
+        )
+        return {"status": "success", "spokenFeedback": text}
+    except Exception as e:
+        logger.exception("Failed to generate quick feedback:")
+        raise HTTPException(status_code=500, detail=f"Failed to generate quick feedback: {str(e)}")
+
+
 # -------------------------------------------------------------
 # Voice Interview Endpoints (STT & TTS)
 # -------------------------------------------------------------
@@ -398,7 +474,11 @@ class VoiceSynthesisPayload(BaseModel):
 
 
 @app.post("/voice/transcribe")
-async def voice_transcribe_endpoint(file: UploadFile = File(...)):
+async def voice_transcribe_endpoint(
+    file: UploadFile = File(...),
+    prompt: Optional[str] = Form(None),
+    language: Optional[str] = Form(None),
+):
     """Transcribe candidate speech audio to text using Whisper Large V3 Turbo."""
     try:
         content = await file.read()
@@ -408,7 +488,9 @@ async def voice_transcribe_endpoint(file: UploadFile = File(...)):
         result = stt_service_instance.transcribe_audio(
             audio_bytes=content,
             filename=filename,
-            mime_type=mime_type
+            mime_type=mime_type,
+            prompt=prompt,
+            language=language,
         )
         if not result.get("success"):
             return {
@@ -445,7 +527,7 @@ def voice_synthesize_endpoint(payload: VoiceSynthesisPayload):
         if payload.format == "audio":
             return Response(
                 content=audio_bytes,
-                media_type="audio/wav",
+                media_type=result.get("media_type") or "audio/wav",
                 headers={
                     "X-Latency-Ms": str(result.get("latencyMs", 0)),
                     "X-Cached": str(result.get("cached", False)),
@@ -456,7 +538,7 @@ def voice_synthesize_endpoint(payload: VoiceSynthesisPayload):
         audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
         return {
             "status": "success",
-            "audioUrl": f"data:audio/wav;base64,{audio_b64}",
+            "audioUrl": f"data:{result.get('media_type') or 'audio/wav'};base64,{audio_b64}",
             "voice": result.get("voice"),
             "model": result.get("model"),
             "cached": result.get("cached", False),

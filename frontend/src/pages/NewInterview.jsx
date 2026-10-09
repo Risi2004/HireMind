@@ -49,6 +49,7 @@ export default function NewInterview() {
   const [company, setCompany] = useState('')
   const [jobDescription, setJobDescription] = useState('')
   const [interviewType, setInterviewType] = useState('Role-Specific')
+  const [interviewMode, setInterviewMode] = useState(null) // 'HR_SIMULATION' | 'FEEDBACK_COACHING'
   const [difficulty, setDifficulty] = useState('Intermediate')
   const [duration, setDuration] = useState('30 min')
   const [uploadedResume, setUploadedResume] = useState(null)
@@ -94,6 +95,7 @@ export default function NewInterview() {
       if (cached.company) setCompany(cached.company)
       if (cached.jobDescription) setJobDescription(cached.jobDescription)
       if (cached.interviewType) setInterviewType(cached.interviewType)
+      if (cached.interviewMode) setInterviewMode(cached.interviewMode)
       if (cached.difficulty) setDifficulty(cached.difficulty)
       if (cached.duration) setDuration(cached.duration)
       if (cached.uploadedResume) setUploadedResume(cached.uploadedResume)
@@ -197,6 +199,7 @@ export default function NewInterview() {
     if (s.company) setCompany(s.company)
     if (s.jobDescription) setJobDescription(s.jobDescription)
     if (s.interviewType) setInterviewType(s.interviewType)
+    if (s.interviewMode) setInterviewMode(s.interviewMode)
     if (s.difficulty) setDifficulty(s.difficulty)
     if (s.duration) setDuration(s.duration)
     if (s.resumeFileName) setUploadedResume(s.resumeFileName.replace(/^resumes\//, ''))
@@ -247,6 +250,7 @@ export default function NewInterview() {
       company: company || '',
       jobDescription,
       interviewType,
+      interviewMode: interviewMode || undefined,
       difficulty,
       duration,
       uploadedResume,
@@ -273,6 +277,7 @@ export default function NewInterview() {
             company: company || '',
             jobDescription,
             interviewType,
+            interviewMode: interviewMode || undefined,
             difficulty,
             duration,
             isGithubConnected,
@@ -286,7 +291,7 @@ export default function NewInterview() {
     }, 300)
 
     return () => clearTimeout(syncTimer)
-  }, [id, targetRole, company, jobDescription, interviewType, difficulty, duration, uploadedResume, resumeAnalysis, jdAnalysis, isGithubConnected, isAnalyzingResume, isAnalyzingJd, authUser, authToken])
+  }, [id, targetRole, company, jobDescription, interviewType, interviewMode, difficulty, duration, uploadedResume, resumeAnalysis, jdAnalysis, isGithubConnected, isAnalyzingResume, isAnalyzingJd, authUser, authToken])
 
   const handleStartToggle = async () => {
     if (isAnalyzingResume || isAnalyzingJd) return
@@ -326,6 +331,7 @@ export default function NewInterview() {
           company: company || '',
           jobDescription,
           interviewType,
+          interviewMode: interviewMode || 'HR_SIMULATION',
           difficulty,
           duration,
           isGithubConnected,
@@ -344,6 +350,7 @@ export default function NewInterview() {
           company: company || '',
           jobDescription,
           interviewType,
+          interviewMode,
           difficulty,
           duration,
           uploadedResume,
@@ -372,6 +379,7 @@ export default function NewInterview() {
     saveInterviewSession({
       id: interviewId,
       status: 'in_progress',
+      interviewMode: interviewMode || undefined,
       lastVisitedPath: `/new-interview/${interviewId}/room`,
     })
 
@@ -385,6 +393,7 @@ export default function NewInterview() {
         },
         body: JSON.stringify({
           status: 'in_progress',
+          interviewMode: interviewMode || undefined,
         }),
       }).catch(() => {})
     } catch { /* non-critical; safe to ignore */ }
@@ -744,12 +753,20 @@ export default function NewInterview() {
 
           {/* Demo Access Quota Pill */}
           {isAdmin ? (
-            <span style={{ fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.35)', color: '#60a5fa', padding: '4px 10px', borderRadius: '12px', fontWeight: 600 }}>
-              👑 Admin Session
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.35)', color: '#60a5fa', padding: '4px 10px', borderRadius: '12px', fontWeight: 600 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14" />
+              </svg>
+              Admin Session
             </span>
           ) : hasDemoAccess ? (
-            <span style={{ fontSize: '11px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.35)', color: '#34d399', padding: '4px 10px', borderRadius: '12px', fontWeight: 600 }}>
-              🎯 Demo Pass: {remainingInterviews} of {allowedInterviews} attempts left
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.35)', color: '#34d399', padding: '4px 10px', borderRadius: '12px', fontWeight: 600 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="6" />
+                <circle cx="12" cy="12" r="2" />
+              </svg>
+              Demo Pass: {remainingInterviews} of {allowedInterviews} attempts left
             </span>
           ) : null}
 
@@ -820,6 +837,20 @@ export default function NewInterview() {
               <div className="new-int-plan-meta-item">
                 <span className="new-int-plan-meta-label">INTERVIEW TYPE</span>
                 <span className="new-int-plan-meta-val">{planData.interviewType || interviewType}</span>
+              </div>
+              <div className="new-int-plan-meta-item">
+                <span className="new-int-plan-meta-label">INTERVIEW MODE</span>
+                <span
+                  className="new-int-plan-meta-val"
+                  style={{
+                    color: (planData.interviewMode || interviewMode) === 'FEEDBACK_COACHING' ? '#c084fc' : '#38bdf8',
+                    fontWeight: 700,
+                  }}
+                >
+                  {(planData.interviewMode || interviewMode) === 'FEEDBACK_COACHING'
+                    ? 'Feedback Interview (Coaching)'
+                    : 'HR Interview (Simulation)'}
+                </span>
               </div>
               <div className="new-int-plan-meta-item">
                 <span className="new-int-plan-meta-label">DIFFICULTY</span>
@@ -1434,9 +1465,9 @@ export default function NewInterview() {
             {/* START INTERVIEW ACTION (Placed below GitHub) */}
             <button
               type="button"
-              className={`new-int-card-start-btn ${isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete ? 'is-disabled' : ''} ${planData ? 'is-plan-ready' : ''}`}
+              className={`new-int-card-start-btn ${isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete || !interviewMode ? 'is-disabled' : ''} ${planData ? 'is-plan-ready' : ''}`}
               onClick={handleStartToggle}
-              disabled={isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete}
+              disabled={isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete || !interviewMode}
               title={
                 isAnalyzingResume
                   ? 'Analyzing resume... Start unlocks once analysis completes'
@@ -1444,10 +1475,12 @@ export default function NewInterview() {
                   ? 'Analyzing job description... Start unlocks once analysis completes'
                   : isOptionsLocked
                   ? 'Analyze Job Description above to unlock remaining options'
-                  : isPlanning
-                  ? 'Preparing your personalized interview plan...'
                   : !isSetupComplete
                   ? 'Complete all setup steps to enable Start'
+                  : !interviewMode
+                  ? 'Please select HR Interview Mode or Feedback Interview Mode above to continue'
+                  : isPlanning
+                  ? 'Preparing your personalized interview plan...'
                   : planData
                   ? 'View your personalized interview plan'
                   : 'Start Interview'
@@ -1596,7 +1629,19 @@ export default function NewInterview() {
                 onClick={() => !isAnalyzingResume && fileInputRef.current?.click()}
                 title="Step 1: Upload Resume"
               >
-                <div className="new-int-step-num">{hasResumeReady ? '✓' : isAnalyzingResume ? '⚡' : analysisError ? '!' : '1'}</div>
+                <div className="new-int-step-num">
+                  {hasResumeReady ? (
+                    '✓'
+                  ) : isAnalyzingResume ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                    </svg>
+                  ) : analysisError ? (
+                    '!'
+                  ) : (
+                    '1'
+                  )}
+                </div>
                 <div className="new-int-step-text">
                   <div className="new-int-step-title">1. Upload Resume</div>
                   <div className="new-int-step-sub">
@@ -1630,12 +1675,15 @@ export default function NewInterview() {
               <div
                 className={`new-int-step-item ${hasCompany ? 'is-done' : currentStep === 3 ? 'is-active' : ''}`}
                 onClick={() => document.getElementById('company-name')?.focus()}
-                title="Step 3: Enter Company Name"
+                title={hasCompany ? `Step 3: Company Name (${company})` : 'Step 3: Enter Company Name'}
               >
                 <div className="new-int-step-num">{hasCompany ? '✓' : '3'}</div>
                 <div className="new-int-step-text">
                   <div className="new-int-step-title">3. Company Name</div>
-                  <div className="new-int-step-sub">
+                  <div
+                    className="new-int-step-sub"
+                    title={hasCompany ? company : 'Company name (e.g. WSO2, Google)'}
+                  >
                     {hasCompany ? company : 'Company name (e.g. WSO2, Google)'}
                   </div>
                 </div>
@@ -1647,7 +1695,19 @@ export default function NewInterview() {
                 onClick={() => document.getElementById('job-desc')?.focus()}
                 title="Step 4: Job Description & Analysis"
               >
-                <div className="new-int-step-num">{hasJdAnalysis ? '✓' : isAnalyzingJd ? '⚡' : jdAnalysisError ? '!' : '4'}</div>
+                <div className="new-int-step-num">
+                  {hasJdAnalysis ? (
+                    '✓'
+                  ) : isAnalyzingJd ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                    </svg>
+                  ) : jdAnalysisError ? (
+                    '!'
+                  ) : (
+                    '4'
+                  )}
+                </div>
                 <div className="new-int-step-text">
                   <div className="new-int-step-title">4. Job Description & AI Analysis</div>
                   <div className="new-int-step-sub">

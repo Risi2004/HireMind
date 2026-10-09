@@ -152,11 +152,11 @@
   background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
   border: 1.5px solid rgba(255, 255, 255, 0.25);
   cursor: pointer;
-  transition: transform 0.2s ease;
+  transform: none !important;
 }
 
 .rep-nav__avatar:hover {
-  transform: scale(1.05);
+  transform: none !important;
 }
 
 .rep-nav__avatar-text {

@@ -19,6 +19,8 @@ from config.settings import (
     get_orchestrator_model,
 )
 
+from services.llm_client import chat_completion
+
 logger = logging.getLogger("InterviewAgent")
 
 
@@ -109,11 +111,27 @@ class InterviewStateContext(BaseModel):
     followUpDepth: int = Field(default=0)
     coveredTopics: List[str] = Field(default_factory=list)
     coveredObjectives: List[str] = Field(default_factory=list)
+    # Backend-computed rules for THIS turn: allowedActions, followUpAllowed, mustAdvanceStage, nextStage...
+    turnPolicy: Dict[str, Any] = Field(default_factory=dict)
 
 
 # -------------------------------------------------------------------------
 # Interview Agent Implementation
 # -------------------------------------------------------------------------
+def _ensure_closing_statement(text: str, candidate_name: Optional[str]) -> str:
+    """The final message of a finished interview must not ask anything: the session is
+    closed, so the candidate could never answer it. It also must not imply a real hiring
+    process ('we'll be in touch about next steps'): this is a mock interview."""
+    implies_real_process = re.search(r"\b(be in touch|next steps|hear from us|get back to you)\b", text or "", re.I)
+    if text and "?" not in text and not implies_real_process:
+        return text
+    name = f", {candidate_name}" if candidate_name and candidate_name != "Candidate" else ""
+    return (
+        f"Thank you for your time today{name}. That brings us to the end of this mock interview; "
+        "your answers and feedback are saved in your report."
+    )
+
+
 class InterviewAgent:
     """Adaptive Live Interview Agent that conducts text-based interviews
     one question at a time, probing candidate answers dynamically.
@@ -137,7 +155,7 @@ class InterviewAgent:
         "1. STRICTLY ONE CONCISE QUESTION PER TURN (1-2 sentences). Never combine multiple questions or ask compound multi-part questions.\n"
         "2. NO ROBOTIC TEMPLATES: Never use repetitive formulaic phrases like 'Regarding [Topic], could you describe your hands-on experience and typical workflow in this area?' or 'Regarding Collaboration...'. Formulate natural, conversational questions.\n"
         "3. NO MECHANICAL STAGE ANNOUNCEMENTS: Never announce internal database stage names (e.g. 'Let's move to our next section: Scenario & Problem Solving'). Instead, transition seamlessly (e.g. 'Let's move into problem solving. Tell me about a situation where something didn't work as expected and how you approached it.').\n"
-        "4. REDUCE REPETITIVE PRAISE: Do NOT constantly praise or evaluate answers ('That's a mature way to handle it', 'That's a well-structured approach'). Use brief, varied neutral acknowledgments ('Understood.', 'That makes sense.', 'Thanks.', 'Let's dig into that.', 'You mentioned X earlier...') or ask the question directly without any filler.\n"
+        "4. NO PRAISE OR GRADING: Never evaluate the answer ('Great answer', 'That's a solid approach', 'Fair point, that's a sound consideration'). Coaching feedback is delivered separately. An acknowledgment is optional; when used it must be under 10 words and reference something specific the candidate just said (e.g. 'A 10-minute TTL with invalidation on edits, okay.'). Never reuse the same opener twice in an interview, and often ask the question directly.\n"
         "5. ADAPTIVE FOLLOW-UPS & DEEPENING:\n"
         "   - Actively listen for specific technologies, architectures, business metrics, trade-offs, debugging steps, or outcomes in the candidate's response.\n"
         "   - Connect directly to what they said (e.g. 'You mentioned separating routes, controllers, and models. Did you run into any challenges keeping error handling consistent across those layers?').\n"
@@ -145,8 +163,9 @@ class InterviewAgent:
         "6. INCOMPLETE, SHORT, OR VAGUE ANSWERS:\n"
         "   - If the candidate gives a short or vague response (e.g. 'I had an API problem and fixed it' or 'I used React'), do NOT immediately abandon the topic. Ask ONE targeted clarification or expansion question (e.g. 'What was actually going wrong with the API, and how did you identify the root cause?').\n"
         "   - Do not trap or interrogate: if they struggle after 1-2 clarification attempts, transition forward gracefully.\n"
-        "7. AVOID FOLLOW-UP LOOPS:\n"
-        "   - Max 2 follow-ups per topic. Move to NEXT_TOPIC or NEXT_STAGE once sufficient evidence is gathered, or follow-up limit is reached.\n"
+        "7. BALANCE PLANNED AND ADAPTIVE QUESTIONS:\n"
+        "   - The interview mixes planned questions (from the plan's topics and question intents) with occasional adaptive follow-ups.\n"
+        "   - Each turn you receive THIS TURN'S ALLOWED ACTIONS. You MUST pick one of them, and your question MUST match the action you pick.\n"
         "8. CONVERSATION MEMORY:\n"
         "   - Remember details and tools the candidate introduced earlier in the same interview. When appropriate, naturally connect later questions back to those earlier details (e.g. 'You mentioned earlier that you used both Node.js and Spring Boot. What differences did you notice in how you structured backend applications with them?').\n"
         "9. CONVERSATION REFERENCE SAFETY (AVOID AMBIGUOUS PRONOUNS & LABELS):\n"
@@ -335,10 +354,12 @@ class InterviewAgent:
                     res_stage_id = validated.stageId or curr_stage.get("id", state.currentStageId)
                     res_topic = validated.topic or state.currentTopic
 
-                    # Force stage progression if model tries to stay stuck in deep follow-up loop
-                    if res_action == InterviewAction.FOLLOW_UP.value and state.followUpDepth >= 2:
-                        res_action = InterviewAction.NEXT_TOPIC.value
-                        res_reason = ReasonCode.TOPIC_SUFFICIENT.value
+                    # The question text was written for res_action, so the action is never
+                    # silently swapped here; a policy breach is reported to the backend instead.
+                    allowed_actions = state.turnPolicy.get("allowedActions") or []
+                    policy_violation = bool(allowed_actions) and res_action not in allowed_actions
+                    if policy_violation:
+                        logger.warning(f"Agent chose {res_action} but policy allows {allowed_actions}")
 
                     # Guardrail: Early completion prevention
                     # Selected duration is a TARGET experience. An interview must NOT conclude early if substantial target time remains (<88% elapsed)
@@ -351,13 +372,9 @@ class InterviewAgent:
                                 topic_label = res_topic or state.currentTopic or curr_stage.get("name") or "your recent work"
                                 res_question = f"Before we transition toward wrapping up, I'd like to explore your experience with {topic_label}: could you walk me through a specific technical trade-off or unexpected failure mode you had to resolve in that context?"
 
-                    # If timing is near or past target (>= 90%) and in final stage, allow natural conclusion
-                    if progress_ratio >= 0.90 and is_last_stage and res_action != InterviewAction.END_INTERVIEW.value:
-                        if state.stageQuestionsAsked >= 1:
-                            res_action = InterviewAction.END_INTERVIEW.value
-                            res_reason = ReasonCode.INTERVIEW_COMPLETE.value
-
                     is_complete = (res_action == InterviewAction.END_INTERVIEW.value)
+                    if is_complete:
+                        res_question = _ensure_closing_statement(res_question, candidate.get("candidateName"))
 
                     return {
                         "action": res_action,
@@ -368,6 +385,7 @@ class InterviewAgent:
                         "topic": res_topic,
                         "objectiveCovered": validated.objectiveCovered or "",
                         "isComplete": is_complete,
+                        "policyViolation": policy_violation,
                     }
                 except Exception as val_err:
                     logger.warning(f"Validation error on parsed action output: {val_err}. Using normalized dictionary.")
@@ -377,18 +395,18 @@ class InterviewAgent:
         else:
             logger.warning(f"LLM call failed for interview turn ({error_detail}). Using heuristic adaptive response.")
 
-        # Resilient heuristic fallback
-        return self._heuristic_adaptive_response(
-            candidate=candidate,
-            target_job=target_job,
-            config=config,
-            curr_stage=curr_stage,
-            next_stage=next_stage,
-            is_last_stage=is_last_stage,
-            timing=timing,
-            state=state,
-            latest_answer=latest_answer,
-        )
+        # No model output: return no question so the backend asks the next planned question
+        # from the interview plan (coherent and honest) instead of a canned template.
+        return {
+            "action": None,
+            "reasonCode": None,
+            "question": "",
+            "stageId": state.currentStageId,
+            "stageName": curr_stage.get("name", state.currentStageName),
+            "topic": state.currentTopic,
+            "isComplete": False,
+            "unavailable": True,
+        }
 
     def _build_turn_prompt(
         self,
@@ -486,6 +504,7 @@ class InterviewAgent:
 
         # Stage question count cap
         stage_target_q = curr_stage.get('targetQuestionCount', 2)
+        policy_text = self._format_turn_policy(state.turnPolicy, next_stage, is_last_stage)
 
         prompt = (
             f"TARGET ROLE: {role} at {company}\n"
@@ -526,75 +545,71 @@ class InterviewAgent:
             f"   - If the candidate just submitted code in their answer, evaluate their code: highlight its time/space complexity (Big-O), correctness, and any edge-case considerations, then transition to the next stage.\n"
             f"5. IF IN GK / INDUSTRY TRENDS / BEHAVIORAL STAGE ('stage_gk_behavioral' or 'GK' in stage name):\n"
             f"   - Ask about modern industry trends, technology ecosystem evolution (e.g. microservices vs modular monoliths, AI integration into development workflows), or a team collaboration dilemma.\n\n"
-            f"PACING & PROGRESSION DECISION RULES (Follow in priority order):\n"
-            f"1. STAGE PROGRESSION MANDATE:\n"
-            f"   - If questions asked in current stage >= {stage_target_q} OR followUpDepth >= 2:\n"
-            f"     You MUST select action='NEXT_STAGE' to keep the interview dynamic and well-rounded across all stages.\n"
-            f"     Do NOT stay in the same stage or loop on the same project.\n"
-            f"2. ACTION SELECTION:\n"
-            f"   - If questions asked in stage < {stage_target_q} and followUpDepth < 2:\n"
-            f"     * If answer is vague or incomplete: choose CLARIFY with reasonCode='ANSWER_TOO_VAGUE'.\n"
-            f"     * If answer has valuable details: choose FOLLOW_UP with reasonCode='VALUABLE_DETAIL_FOUND'.\n"
-            f"   - Otherwise: choose NEXT_STAGE with reasonCode='STAGE_COMPLETE'.\n"
-            f"   - If in closing/wrap-up AND elapsed time >= 90% of target duration: choose END_INTERVIEW with reasonCode='INTERVIEW_COMPLETE'.\n"
-            f"3. CRAFT THE ONE QUESTION:\n"
+            f"{policy_text}\n"
+            f"CRAFT THE ONE QUESTION:\n"
             f"   - Natural, human interviewer language. Strictly ONE question (1-2 sentences max).\n"
-            f"   - Avoid robotic transitions. Provide smooth, professional conversational shifts.\n"
+            f"   - Optional acknowledgment: under 10 words, referencing a specific detail they just said. No praise, no grading, no stock phrases like 'Understood, that makes good sense' or 'Fair point'.\n"
+            f"   - Never ask for something the candidate already explained in the latest answer.\n"
+            f"   - Exactly ONE question: no second clause like '..., and how did you ...?'.\n"
+            f"   - Say 'you mentioned' only for things the candidate said in this interview; for CV items say 'your CV lists'.\n"
+            f"   - Do not reveal or teach the correct answer when the candidate is wrong; probe their reasoning instead (coaching is given separately).\n"
+            f"   - When moving to a new stage or topic, open it with a planned question built from that stage's topics/intents and the candidate's CV; do not keep probing the previous topic.\n"
             f"Respond ONLY in valid JSON."
         )
 
         return prompt
 
+    def _format_turn_policy(
+        self,
+        policy: Dict[str, Any],
+        next_stage: Optional[Dict[str, Any]],
+        is_last_stage: bool,
+    ) -> str:
+        """Describe exactly which actions are allowed this turn (computed by the backend)."""
+        allowed = policy.get("allowedActions") or ["FOLLOW_UP", "CLARIFY", "NEXT_TOPIC", "NEXT_STAGE"]
+        lines = ["THIS TURN'S ALLOWED ACTIONS (you MUST choose one): " + ", ".join(allowed)]
+        if "FOLLOW_UP" in allowed or "CLARIFY" in allowed:
+            lines.append(
+                "- An adaptive follow-up is available. Use FOLLOW_UP only if the latest answer contains a specific detail "
+                "worth probing (a decision, trade-off, failure, metric or claim needing evidence). Use CLARIFY only if "
+                "the answer was vague, very short or missed the question. Otherwise prefer NEXT_TOPIC so the interview "
+                "keeps covering the plan."
+            )
+        elif not policy.get("mustAdvanceStage"):
+            lines.append(
+                "- No adaptive follow-up this turn (the follow-up budget is used). Ask the next PLANNED question."
+            )
+        if policy.get("mustAdvanceStage") and next_stage:
+            intents = "; ".join(next_stage.get("questionIntents", [])[:3])
+            lines.append(
+                f"- This stage is complete. Choose NEXT_STAGE and ask the opening question of the NEXT STAGE: "
+                f"'{next_stage.get('name', 'Next stage')}' (topics: {', '.join(next_stage.get('topics', [])[:4])}"
+                f"{f'; intents: {intents}' if intents else ''}). Do not continue the previous topic."
+            )
+        elif "NEXT_TOPIC" in allowed:
+            remaining = [t for t in policy.get("remainingStageTopics", []) if t]
+            if remaining:
+                lines.append(f"- For NEXT_TOPIC, move to an uncovered topic of this stage: {', '.join(remaining[:4])}.")
+        if "END_INTERVIEW" in allowed:
+            lines.append(
+                "- The interview is at its time limit: choose END_INTERVIEW and give a short, warm closing statement "
+                "(no question)."
+            )
+        return "\n".join(lines)
+
     def _call_llm(self, prompt: str) -> tuple[Optional[str], Optional[str]]:
-        """Call OpenRouter or configured model provider with structured system instructions."""
-        if MODEL_PROVIDER == "openrouter":
-            if not OPENROUTER_API_KEY or "your_openrouter_api_key_here" in OPENROUTER_API_KEY:
-                return None, "OPENROUTER_API_KEY is not configured"
-
-            try:
-                import requests
-                base_url = OPENROUTER_BASE_URL.rstrip("/")
-                chat_url = f"{base_url}/chat/completions"
-
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "https://hiremind.com",
-                    "X-Title": "HireMind Live Interview Agent",
-                }
-                payload = {
-                    "model": AI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": self.SYSTEM_INSTRUCTION},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 600,
-                    "reasoning": {"max_tokens": 100},
-                }
-
-                logger.info(f"Querying OpenRouter model '{AI_MODEL}' for live interview turn...")
-                response = requests.post(chat_url, headers=headers, json=payload, timeout=45)
-                if response.status_code == 200:
-                    data = response.json()
-                    choices = data.get("choices", [])
-                    if choices:
-                        msg = choices[0].get("message", {})
-                        content = msg.get("content") or ""
-                        if not content.strip() and msg.get("reasoning"):
-                            content = msg.get("reasoning")
-                        return content, None
-                    return None, "OpenRouter returned empty choices"
-                else:
-                    err_msg = f"OpenRouter returned HTTP {response.status_code}: {response.text[:200]}"
-                    logger.warning(err_msg)
-                    return None, err_msg
-            except Exception as e:
-                err_msg = f"Connection failed to OpenRouter endpoint: {e}"
-                logger.warning(err_msg)
-                return None, err_msg
-
-        return None, f"Unsupported MODEL_PROVIDER '{MODEL_PROVIDER}'"
+        """Call the model for one interview turn (reasoning disabled for low latency)."""
+        if MODEL_PROVIDER != "openrouter":
+            return None, f"Unsupported MODEL_PROVIDER '{MODEL_PROVIDER}'"
+        result = chat_completion(
+            self.SYSTEM_INSTRUCTION,
+            prompt,
+            max_tokens=350,
+            temperature=0.5,
+            timeout=25,
+            label="interview-turn",
+        )
+        return (result.content, None) if result.ok else (None, result.error)
 
     def _extract_json(self, raw_text: str) -> Optional[Dict[str, Any]]:
         """Clean markdown markers and parse JSON safely."""
@@ -645,9 +660,8 @@ class InterviewAgent:
         if not question:
             question = f"Could you elaborate on the key challenges or trade-offs you encountered when working with {topic}?"
 
-        if action in ["FOLLOW_UP", "DEEPEN"] and state.followUpDepth >= 2:
-            action = "NEXT_TOPIC"
-            reason_code = "FOLLOWUP_LIMIT_REACHED"
+        allowed_actions = state.turnPolicy.get("allowedActions") or []
+        policy_violation = bool(allowed_actions) and action not in allowed_actions
 
         # Early completion guardrail in normalization
         progress_ratio = (timing.elapsedMinutes / timing.targetDurationMinutes) if timing.targetDurationMinutes > 0 else 0.0
@@ -660,6 +674,8 @@ class InterviewAgent:
                     question = f"Before we begin transitioning toward wrapping up, I'd like to explore your experience with {topic}: could you walk me through a specific technical trade-off or unexpected failure mode you had to resolve in that context?"
 
         is_complete = (action == "END_INTERVIEW")
+        if is_complete:
+            question = _ensure_closing_statement(question, None)
 
         return {
             "action": action,
@@ -670,6 +686,7 @@ class InterviewAgent:
             "topic": topic,
             "objectiveCovered": parsed.get("objectiveCovered", ""),
             "isComplete": is_complete,
+            "policyViolation": policy_violation,
         }
 
     def _fallback_opening_question(

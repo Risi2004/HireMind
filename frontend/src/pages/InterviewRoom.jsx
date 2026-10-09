@@ -55,6 +55,7 @@ int main() {
 
 const VOICE_STATES = {
   INITIALIZING: 'INITIALIZING',
+  PREPARING_SPEECH: 'PREPARING_SPEECH',
   INTERVIEWER_SPEAKING: 'INTERVIEWER_SPEAKING',
   WAITING_FOR_CANDIDATE: 'WAITING_FOR_CANDIDATE',
   CANDIDATE_SPEAKING: 'CANDIDATE_SPEAKING',
@@ -62,6 +63,42 @@ const VOICE_STATES = {
   AI_PROCESSING: 'AI_PROCESSING',
   INTERVIEW_COMPLETE: 'INTERVIEW_COMPLETE',
   ERROR: 'ERROR',
+}
+
+// Silent clip played during the start click to unlock audio autoplay
+const SILENT_WAV = 'data:audio/wav;base64,UklGRsQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+
+// Voice activity detection: average analyser level that counts as speech,
+// and how long the candidate must stay quiet before their answer is sent
+const VAD_SPEECH_LEVEL = 18
+const SILENCE_AUTO_SEND_MS = 2500
+// After this much silence we start transcribing the recording in the background,
+// so the accurate (Whisper) transcript is usually ready when the answer is sent
+const SPECULATIVE_STT_DELAY_MS = 1000
+const monotonicNow = () => performance.now()
+
+const countWords = (text) => (text || '').trim().split(/\s+/).filter(Boolean).length
+
+// Whisper sometimes "hears" these on near-silent audio
+const WHISPER_HALLUCINATION = /^(thanks?( you)?( so much)?( for watching)?|you|bye|okay|\.+)[.!]*$/i
+
+// Prefer the server (Whisper) transcript: it is far more accurate than the browser's
+// live captions. Fall back to the live text if Whisper looks truncated or hallucinated.
+const chooseBestTranscript = (liveText, whisperText) => {
+  const live = (liveText || '').trim()
+  const whisper = (whisperText || '').trim()
+  if (!whisper || WHISPER_HALLUCINATION.test(whisper)) return live
+  if (!live) return whisper
+  const liveWords = countWords(live)
+  const whisperWords = countWords(whisper)
+  if (whisperWords < liveWords * 0.5 || whisperWords > liveWords * 2 + 8) return live
+  return whisper
+}
+
+// Browser speech recognition locale: the candidate's own English variant if they have one
+const getRecognitionLang = () => {
+  const langs = typeof navigator !== 'undefined' ? (navigator.languages || [navigator.language]) : []
+  return langs.find((l) => /^en-[A-Z]{2}$/i.test(l || '')) || 'en-US'
 }
 
 let messageIdCounter = 0
@@ -83,6 +120,17 @@ export default function InterviewRoom() {
   // Strict Interview Termination and Network Abort refs
   const isTerminatedRef = useRef(false)
   const inFlightAbortControllerRef = useRef(new AbortController())
+
+  // (Re)mount: React StrictMode unmounts and remounts once in development and refs
+  // survive that. Without this reset the room believed it was already terminated,
+  // so the interviewer never spoke and every answer request went out pre-aborted.
+  // Declared first so it runs before the effects that start requests.
+  useEffect(() => {
+    isTerminatedRef.current = false
+    if (inFlightAbortControllerRef.current.signal.aborted) {
+      inFlightAbortControllerRef.current = new AbortController()
+    }
+  }, [])
 
   // Track dynamic session details
   const [session, setSession] = useState(() => getInterviewSession(interviewId) || {})
@@ -142,6 +190,10 @@ export default function InterviewRoom() {
   const [isPaused, setIsPaused] = useState(false)
   const [isEndModalOpen, setIsEndModalOpen] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
+  const isPausedRef = useRef(false)
+  useEffect(() => {
+    isPausedRef.current = isPaused
+  }, [isPaused])
 
   // Audio / Microphone hardware references
   const [isAudioOn, setIsAudioOn] = useState(true)
@@ -151,8 +203,27 @@ export default function InterviewRoom() {
   const analyserRef = useRef(null)
   const animFrameRef = useRef(null)
 
-  // Start Microphone Hardware
-  const startMicrophone = async () => {
+  const micRequestRef = useRef(null)
+  const lastSpeechAtRef = useRef(0)
+  const hasSpokenRef = useRef(false)
+  // True while browser speech-to-text is running and producing results normally
+  const speechRecognitionOkRef = useRef(false)
+
+  // Start Microphone Hardware (concurrent callers share one permission request)
+  const startMicrophone = () => {
+    const existing = mediaStreamRef.current
+    if (existing && existing.getAudioTracks().some((t) => t.readyState === 'live')) {
+      return Promise.resolve(existing)
+    }
+    if (!micRequestRef.current) {
+      micRequestRef.current = acquireMicrophone().finally(() => {
+        micRequestRef.current = null
+      })
+    }
+    return micRequestRef.current
+  }
+
+  const acquireMicrophone = async () => {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Microphone is not supported by your browser')
@@ -200,15 +271,46 @@ export default function InterviewRoom() {
           source.connect(analyser)
           analyserRef.current = analyser
 
+          // Only one analyser loop may run at a time
+          if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+
           const dataArray = new Uint8Array(analyser.frequencyBinCount)
+          let lastMeterUpdate = 0
           const checkVolume = () => {
-            if (!analyserRef.current) return
+            if (analyserRef.current !== analyser) return
             analyser.getByteFrequencyData(dataArray)
             let sum = 0
             for (let i = 0; i < dataArray.length; i++) {
               sum += dataArray[i]
             }
-            setAudioVolume(sum / dataArray.length)
+            const avgVol = sum / dataArray.length
+            const now = performance.now()
+            if (now - lastMeterUpdate > 100) {
+              lastMeterUpdate = now
+              setAudioVolume(avgVol)
+            }
+
+            // Interruptions are manual ("Excuse Me / Interject"): auto-detecting them from
+            // mic volume picked up the interviewer's own voice through the speakers and
+            // cut every question off within a fraction of a second.
+
+            // Volume-based silence detection: used when live speech-to-text gives us
+            // nothing (unsupported browser or recognition service error)
+            if (voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING && !isVoiceMutedRef.current) {
+              if (avgVol > VAD_SPEECH_LEVEL) {
+                lastSpeechAtRef.current = now
+                hasSpokenRef.current = true
+              } else if (
+                hasSpokenRef.current &&
+                !speechRecognitionOkRef.current &&
+                !liveTranscriptRef.current &&
+                now - lastSpeechAtRef.current > SILENCE_AUTO_SEND_MS + 500
+              ) {
+                hasSpokenRef.current = false
+                voiceHandlersRef.current.handleCommitCandidateSpeech?.()
+              }
+            }
+
             animFrameRef.current = requestAnimationFrame(checkVolume)
           }
           checkVolume()
@@ -284,8 +386,224 @@ export default function InterviewRoom() {
   const [silenceCountdown, setSilenceCountdown] = useState(0)
   const silenceCountdownIntervalRef = useRef(null)
 
-  // Interview Mode Selection Modal state
+  // Dual Interview Mode - Feedback Coaching State
+  const [activeFeedback, setActiveFeedback] = useState(null)
+  const [feedbackContext, setFeedbackContext] = useState(null)
+  const [pendingTurnData, setPendingTurnData] = useState(null)
+  const [isRetryingFeedback, setIsRetryingFeedback] = useState(false)
+  const [feedbackError, setFeedbackError] = useState(null)
+
+  // =========================================================================
+  // FEATURE 1B: PRE-FLIGHT HARDWARE QUALITY CHECK ("GREEN ROOM") STATE
+  // =========================================================================
+  const [isHardwareModalOpen, setIsHardwareModalOpen] = useState(false)
+  const [micPermissionStatus, setMicPermissionStatus] = useState('checking')
+  const [isTestingMicRecording, setIsTestingMicRecording] = useState(false)
+  const [testRecordingCountdown, setTestRecordingCountdown] = useState(0)
+  const [testAudioBlob, setTestAudioBlob] = useState(null)
+  const [testAudioUrl, setTestAudioUrl] = useState(null)
+  const [isPlayingTestAudio, setIsPlayingTestAudio] = useState(false)
+  const [isPlayingSpeakerTest, setIsPlayingSpeakerTest] = useState(false)
+  const [speakerTestPassed, setSpeakerTestPassed] = useState(false)
+  const testMediaRecorderRef = useRef(null)
+  const testAudioPlayerRef = useRef(null)
+  const testAudioChunksRef = useRef([])
+
+  // =========================================================================
+  // FEATURE 2A: CANDIDATE BARGE-IN & INTERRUPTION STATE
+  // =========================================================================
+  const [bargeInToast, setBargeInToast] = useState(null)
+  const bargeInToastTimeoutRef = useRef(null)
+
+  // Query microphone permissions
+  useEffect(() => {
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions
+        .query({ name: 'microphone' })
+        .then((perm) => {
+          setMicPermissionStatus(perm.state)
+          perm.onchange = () => setMicPermissionStatus(perm.state)
+        })
+        .catch(() => {
+          setMicPermissionStatus('prompt')
+        })
+    } else {
+      setMicPermissionStatus('prompt')
+    }
+  }, [])
+
+  const triggerBargeInToast = (message) => {
+    if (bargeInToastTimeoutRef.current) clearTimeout(bargeInToastTimeoutRef.current)
+    setBargeInToast(message)
+    bargeInToastTimeoutRef.current = setTimeout(() => {
+      setBargeInToast(null)
+    }, 3500)
+  }
+
+  // Handle Candidate Barge-In / Interruption (Feature 2A)
+  const handleCandidateBargeIn = () => {
+    if (isCompletedRef.current || isTerminatedRef.current) return
+    if (
+      voiceStateRef.current !== VOICE_STATES.INTERVIEWER_SPEAKING &&
+      voiceStateRef.current !== VOICE_STATES.PREPARING_SPEECH
+    ) return
+
+    console.log('[BargeIn] Candidate interrupted interviewer speech')
+    speechQueueRef.current.splice(0)
+    stopCurrentAudio()
+
+    updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+    setPlayingMessageId(null)
+    triggerBargeInToast('Interviewer paused — Listening to your response...')
+
+    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice') {
+      startVoiceListening()
+    }
+  }
+
+  // Play a pleasant 3-tone harmonic chime for Speaker test (Feature 1B)
+  const handlePlaySpeakerTestTone = () => {
+    if (isPlayingSpeakerTest) return
+    setIsPlayingSpeakerTest(true)
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext
+      if (!AudioCtx) throw new Error('Web Audio API not supported')
+      const ctx = new AudioCtx()
+      if (ctx.state === 'suspended') ctx.resume()
+
+      const now = ctx.currentTime
+      const notes = [523.25, 659.25, 783.99] // C5, E5, G5 harmonic triad
+
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(freq, now + idx * 0.16)
+
+        gain.gain.setValueAtTime(0, now + idx * 0.16)
+        gain.gain.linearRampToValueAtTime(0.22, now + idx * 0.16 + 0.04)
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.16 + 0.45)
+
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+
+        osc.start(now + idx * 0.16)
+        osc.stop(now + idx * 0.16 + 0.5)
+      })
+
+      setTimeout(() => {
+        setIsPlayingSpeakerTest(false)
+        setSpeakerTestPassed(true)
+      }, 700)
+    } catch (err) {
+      console.warn('[SpeakerTest] Tone generation failed:', err)
+      setIsPlayingSpeakerTest(false)
+    }
+  }
+
+  // Record 3-second sample for Microphone clarity loopback test (Feature 1B)
+  const handleRecordTestSample = async () => {
+    if (isTestingMicRecording) return
+    try {
+      let stream = mediaStreamRef.current
+      if (!stream || !stream.getAudioTracks().some((t) => t.readyState === 'live')) {
+        stream = await startMicrophone()
+      }
+
+      if (!stream) {
+        alert('Please allow microphone permissions to test audio.')
+        return
+      }
+
+      testAudioChunksRef.current = []
+      let mimeType = 'audio/webm;codecs=opus'
+      if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
+      }
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      testMediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          testAudioChunksRef.current.push(e.data)
+        }
+      }
+
+      recorder.onstop = () => {
+        const blob = new Blob(testAudioChunksRef.current, { type: mimeType || 'audio/webm' })
+        setTestAudioBlob(blob)
+        if (testAudioUrl) URL.revokeObjectURL(testAudioUrl)
+        const url = URL.createObjectURL(blob)
+        setTestAudioUrl(url)
+        setIsTestingMicRecording(false)
+        setTestRecordingCountdown(0)
+      }
+
+      recorder.start()
+      setIsTestingMicRecording(true)
+      setTestRecordingCountdown(3)
+
+      let count = 3
+      const countInterval = setInterval(() => {
+        count -= 1
+        setTestRecordingCountdown(count)
+        if (count <= 0) {
+          clearInterval(countInterval)
+          if (recorder.state === 'recording') {
+            recorder.stop()
+          }
+        }
+      }, 1000)
+    } catch (err) {
+      console.warn('[TestRecording] Error starting sample recording:', err)
+      setIsTestingMicRecording(false)
+      setTestRecordingCountdown(0)
+    }
+  }
+
+  // Play candidate's test recorded sample
+  const handlePlayTestSample = () => {
+    if (!testAudioUrl || isPlayingTestAudio) return
+    setIsPlayingTestAudio(true)
+    const audio = new Audio(testAudioUrl)
+    testAudioPlayerRef.current = audio
+    audio.onended = () => {
+      setIsPlayingTestAudio(false)
+      testAudioPlayerRef.current = null
+    }
+    audio.onerror = () => {
+      setIsPlayingTestAudio(false)
+      testAudioPlayerRef.current = null
+    }
+    audio.play().catch(() => {
+      setIsPlayingTestAudio(false)
+    })
+  }
+
+  // Confirm hardware ready and proceed into interview (Feature 1B)
+  const handleConfirmHardwareReady = async () => {
+    setIsHardwareModalOpen(false)
+    unlockAudioPlayback()
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume().catch(() => {})
+    }
+
+    if (transcriptMessages.length === 0) {
+      await startOrResumeInterview('voice', true, chosenMode)
+    }
+  }
+
+  // Interview Mode & Format Selection Modal state
   const [isModeModalOpen, setIsModeModalOpen] = useState(false)
+  const [modalStep, setModalStep] = useState('mode') // 'mode' | 'format'
+  const [chosenMode, setChosenMode] = useState(() => {
+    return (
+      sessionStorage.getItem(`hiremind_int_mode_${interviewId}`) ||
+      session?.interviewMode ||
+      'HR_SIMULATION'
+    )
+  })
   const [liveTranscript, setLiveTranscript] = useState('')
   const liveTranscriptRef = useRef('')
   const recognitionRef = useRef(null)
@@ -294,6 +612,16 @@ export default function InterviewRoom() {
   useEffect(() => {
     voiceStateRef.current = voiceState
   }, [voiceState])
+
+  // Keep the ref in sync immediately: async callbacks read it before React re-renders
+  const updateVoiceState = (nextState) => {
+    voiceStateRef.current = nextState
+    setVoiceState(nextState)
+  }
+
+  // Latest handlers for long-lived callbacks (audio events, speech recognition,
+  // timers, analyser loop) so they never run a stale render's closure
+  const voiceHandlersRef = useRef({})
 
   const updateLiveTranscript = (text) => {
     liveTranscriptRef.current = text
@@ -304,18 +632,80 @@ export default function InterviewRoom() {
   const mediaRecorderRef = useRef(null)
   const recordedChunksRef = useRef([])
   const recordingTimerRef = useRef(null)
+  const recordingStartedAtRef = useRef(0)
+  // Incremented whenever a listening turn starts or is abandoned
+  const listenSessionRef = useRef(0)
+  // Transcript from earlier recognition sessions within the same answer
+  const committedTranscriptRef = useRef('')
+  const sessionFinalTranscriptRef = useRef('')
+  // Background Whisper transcription started during the silence countdown
+  const speculativeSttRef = useRef(null)
+  const speculativeTimerRef = useRef(null)
+  // Interviewer messages waiting to be spoken after the current one (e.g. feedback, then question)
+  const speechQueueRef = useRef([])
   const currentAudioPlayerRef = useRef(null)
   const currentUtteranceRef = useRef(null)
   const audioCacheRef = useRef(new Map())
 
+  // Playback session token: bumped on every start/stop so callbacks from an
+  // interrupted or superseded playback can never advance the turn.
+  const playbackTokenRef = useRef(0)
+  const playbackWatchdogRef = useRef(null)
+  const speechKeepAliveRef = useRef(null)
+  // A single <audio> element unlocked during the user's click, reused for every
+  // question so Safari/iOS autoplay rules don't silently block later playback.
+  const ttsAudioElRef = useRef(null)
+
+  const clearPlaybackTimers = () => {
+    if (playbackWatchdogRef.current) {
+      clearTimeout(playbackWatchdogRef.current)
+      playbackWatchdogRef.current = null
+    }
+    if (speechKeepAliveRef.current) {
+      clearInterval(speechKeepAliveRef.current)
+      speechKeepAliveRef.current = null
+    }
+  }
+
+  // Call inside a click handler: unlocks audio output for the rest of the session
+  const unlockAudioPlayback = () => {
+    try {
+      if (!ttsAudioElRef.current) {
+        ttsAudioElRef.current = new Audio()
+      }
+      const el = ttsAudioElRef.current
+      el.muted = true
+      el.src = SILENT_WAV
+      el.play().then(() => {
+        el.pause()
+        el.muted = false
+      }).catch(() => {
+        el.muted = false
+      })
+    } catch { /* non-critical; safe to ignore */ }
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const warmup = new SpeechSynthesisUtterance(' ')
+        warmup.volume = 0
+        window.speechSynthesis.speak(warmup)
+      }
+    } catch { /* non-critical; safe to ignore */ }
+  }
+
   // Stop any active TTS audio playback completely
   const stopCurrentAudio = () => {
+    playbackTokenRef.current += 1
+    clearPlaybackTimers()
     if (currentAudioPlayerRef.current) {
+      const audio = currentAudioPlayerRef.current
       try {
-        currentAudioPlayerRef.current.pause()
-        currentAudioPlayerRef.current.currentTime = 0
-        currentAudioPlayerRef.current.src = ''
-        currentAudioPlayerRef.current.load()
+        audio.onended = null
+        audio.onerror = null
+        audio.onplaying = null
+        audio.onloadedmetadata = null
+        audio.pause()
+        audio.removeAttribute('src')
+        audio.load()
       } catch { /* non-critical; safe to ignore */ }
       currentAudioPlayerRef.current = null
     }
@@ -336,165 +726,185 @@ export default function InterviewRoom() {
 
   // Transition from AI Speech to Candidate Listening
   const handleAiSpeakingFinished = () => {
+    clearPlaybackTimers()
     setPlayingMessageId(null)
     currentAudioPlayerRef.current = null
-    if (currentUtteranceRef.current) {
+    currentUtteranceRef.current = null
+
+    // Next queued interviewer message (e.g. the question after spoken feedback)
+    const next = speechQueueRef.current.shift()
+    if (next && !isTerminatedRef.current && !isPausedRef.current) {
+      playInterviewerAudio(next.audioUrl, next.id, next.text, { allowAfterComplete: true })
+      return
+    }
+
+    if (isCompletedRef.current || isTerminatedRef.current) return
+
+    updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+
+    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice' && !isPausedRef.current) {
+      voiceHandlersRef.current.startVoiceListening?.()
+    }
+  }
+
+  // Speak with the browser's built-in voice. Guards against the Chrome bugs where
+  // speak() right after cancel() is dropped, and long utterances stop without
+  // ever firing onend (which used to leave the room stuck on "Speaking...").
+  const speakWithBrowser = (text, messageId, token) => {
+    const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null
+    if (!synth || !text) {
+      handleAiSpeakingFinished()
+      return
+    }
+
+    let finished = false
+    const finish = () => {
+      if (finished || token !== playbackTokenRef.current) return
+      finished = true
       currentUtteranceRef.current = null
+      handleAiSpeakingFinished()
     }
 
-    if (isCompleted || isTerminatedRef.current) return
+    updateVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
+    setPlayingMessageId(messageId)
+    setVoiceError(null)
 
-    voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
-    setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+    // Let the preceding cancel() settle before queueing new speech
+    setTimeout(() => {
+      if (token !== playbackTokenRef.current) return
+      try {
+        const utterance = new SpeechSynthesisUtterance(text)
+        const voices = synth.getVoices() || []
+        const preferred =
+          voices.find((v) => /^en(-|_)/i.test(v.lang) && /natural|google|neural|samantha|aria|jenny/i.test(v.name)) ||
+          voices.find((v) => /^en(-|_)/i.test(v.lang))
+        if (preferred) utterance.voice = preferred
+        utterance.lang = preferred?.lang || 'en-US'
+        utterance.rate = 1.0
+        utterance.onend = finish
+        utterance.onerror = finish
+        currentUtteranceRef.current = utterance
+        synth.speak(utterance)
 
-    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice' && !isCompleted && !isTerminatedRef.current) {
-      startVoiceListening()
-    }
+        // Chrome pauses long utterances after ~15s; nudging it keeps speech alive
+        speechKeepAliveRef.current = setInterval(() => {
+          if (token !== playbackTokenRef.current) return
+          if (synth.speaking && !synth.paused) {
+            synth.pause()
+            synth.resume()
+          }
+        }, 10000)
+
+        // Watchdog: if onend never fires, hand the turn to the candidate anyway
+        const words = text.split(/\s+/).filter(Boolean).length
+        const expectedMs = Math.max(6000, (words / 2) * 1000 + 5000)
+        playbackWatchdogRef.current = setTimeout(() => {
+          if (token !== playbackTokenRef.current) return
+          try { synth.cancel() } catch { /* non-critical; safe to ignore */ }
+          finish()
+        }, expectedMs)
+      } catch (err) {
+        console.warn('[VoiceMode] Browser speech failed:', err)
+        finish()
+      }
+    }, 80)
   }
 
   // Play Interviewer TTS Audio with strict Turn-Taking and termination protection
-  const playInterviewerAudio = (audioUrl, messageId = null, fallbackText = null) => {
-    if (isCompleted || isTerminatedRef.current) return
+  const playInterviewerAudio = (audioUrl, messageId = null, fallbackText = null, options = {}) => {
+    if ((isCompletedRef.current && !options.allowAfterComplete) || isTerminatedRef.current) return
+
+    // Turn-taking: the candidate's mic is closed while the interviewer talks
+    stopCandidateCapture()
+    stopCurrentAudio()
+    const token = playbackTokenRef.current
 
     if (!audioUrl) {
-      if (fallbackText && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          if (isCompleted || isTerminatedRef.current) return
-          stopCurrentAudio()
-          if (isCompleted || isTerminatedRef.current) return
-
-          const utterance = new SpeechSynthesisUtterance(fallbackText)
-          currentUtteranceRef.current = utterance
-          utterance.rate = 1.0
-          setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
-          setPlayingMessageId(messageId)
-          utterance.onend = () => {
-            currentUtteranceRef.current = null
-            if (!isCompleted && !isTerminatedRef.current) {
-              handleAiSpeakingFinished()
-            }
-          }
-          utterance.onerror = () => {
-            currentUtteranceRef.current = null
-            if (!isCompleted && !isTerminatedRef.current) {
-              handleAiSpeakingFinished()
-            }
-          }
-          window.speechSynthesis.speak(utterance)
-          return
-        } catch {
-          currentUtteranceRef.current = null
-        }
-      }
-      if (!isCompleted && !isTerminatedRef.current) {
-        handleAiSpeakingFinished()
-      }
+      speakWithBrowser(fallbackText, messageId, token)
       return
     }
 
-    if (isCompleted || isTerminatedRef.current) return
-    stopCurrentAudio()
-    if (isCompleted || isTerminatedRef.current) return
+    let settled = false
+    const fallbackToBrowser = (reason) => {
+      if (settled || token !== playbackTokenRef.current) return
+      settled = true
+      console.warn('[VoiceMode] Interviewer audio unavailable, using browser voice:', reason)
+      clearPlaybackTimers()
+      if (currentAudioPlayerRef.current) {
+        try {
+          currentAudioPlayerRef.current.onended = null
+          currentAudioPlayerRef.current.onerror = null
+          currentAudioPlayerRef.current.pause()
+        } catch { /* non-critical; safe to ignore */ }
+        currentAudioPlayerRef.current = null
+      }
+      speakWithBrowser(fallbackText, messageId, token)
+    }
+    const finish = () => {
+      if (settled || token !== playbackTokenRef.current) return
+      settled = true
+      handleAiSpeakingFinished()
+    }
 
     try {
-      const audio = new Audio(audioUrl)
+      const audio = ttsAudioElRef.current || new Audio()
+      ttsAudioElRef.current = audio
+      audio.muted = false
+      audio.src = audioUrl
       currentAudioPlayerRef.current = audio
       setPlayingMessageId(messageId)
-      // Turn-taking rule: Disable candidate microphone while interviewer is speaking
-      setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
+      // Turn-taking rule: candidate microphone stays closed while interviewer is speaking
+      updateVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
       setVoiceError(null)
 
-      audio.onended = () => {
-        if (!isCompleted && !isTerminatedRef.current) {
-          handleAiSpeakingFinished()
-        }
+      audio.onended = finish
+      audio.onerror = () => fallbackToBrowser(audio.error)
+
+      // If playback never starts, don't leave the candidate staring at a silent screen
+      playbackWatchdogRef.current = setTimeout(() => fallbackToBrowser('playback did not start'), 6000)
+      audio.onplaying = () => {
+        if (token !== playbackTokenRef.current) return
+        if (playbackWatchdogRef.current) clearTimeout(playbackWatchdogRef.current)
+        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+          ? audio.duration * 1000
+          : 60000
+        playbackWatchdogRef.current = setTimeout(finish, durationMs + 3000)
       }
 
-      audio.onerror = (e) => {
-        if (isCompleted || isTerminatedRef.current) return
-        console.warn('[VoiceMode] Audio playback error:', e)
-        if (fallbackText && 'speechSynthesis' in window && !isCompleted && !isTerminatedRef.current) {
-          try {
-            const utterance = new SpeechSynthesisUtterance(fallbackText)
-            currentUtteranceRef.current = utterance
-            utterance.onend = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            utterance.onerror = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            window.speechSynthesis.speak(utterance)
-            return
-          } catch {
-            currentUtteranceRef.current = null
-          }
-        }
-        if (!isCompleted && !isTerminatedRef.current) {
-          handleAiSpeakingFinished()
-        }
-      }
-
-      audio.play().catch((err) => {
-        if (isCompleted || isTerminatedRef.current) return
-        console.warn('[VoiceMode] Audio autoplay was prevented or delayed:', err)
-        if (fallbackText && 'speechSynthesis' in window && !isCompleted && !isTerminatedRef.current) {
-          try {
-            const utterance = new SpeechSynthesisUtterance(fallbackText)
-            currentUtteranceRef.current = utterance
-            utterance.onend = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            utterance.onerror = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            window.speechSynthesis.speak(utterance)
-            return
-          } catch {
-            currentUtteranceRef.current = null
-          }
-        }
-        if (!isCompleted && !isTerminatedRef.current) {
-          handleAiSpeakingFinished()
-        }
-      })
+      audio.play().catch((err) => fallbackToBrowser(err))
     } catch (err) {
-      console.warn('[VoiceMode] playInterviewerAudio exception:', err)
-      if (!isCompleted && !isTerminatedRef.current) {
-        handleAiSpeakingFinished()
-      }
+      fallbackToBrowser(err)
     }
   }
 
-  // Synthesize and play speech on-demand for any AI message
+  // Synthesize and play speech on-demand for any AI message (Listen / Replay buttons)
   const handleSynthesizeSpeech = async (text, messageId) => {
-    if (!text || isCompleted || isTerminatedRef.current) return
-    setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
-    setPlayingMessageId(messageId)
+    if (!text || isCompletedRef.current || isTerminatedRef.current) return
 
-    if (audioCacheRef.current.has(messageId)) {
-      if (!isCompleted && !isTerminatedRef.current) {
-        playInterviewerAudio(audioCacheRef.current.get(messageId), messageId, text)
-      }
+    const existingAudio = audioCacheRef.current.get(messageId) || transcriptMessages.find((m) => m.id === messageId)?.audioUrl
+    if (existingAudio) {
+      audioCacheRef.current.set(messageId, existingAudio)
+      playInterviewerAudio(existingAudio, messageId, text)
       return
     }
 
+    // Close the mic while we fetch the voice so the candidate isn't recorded mid-request
+    speechQueueRef.current.splice(0)
+    stopCandidateCapture()
+    stopCurrentAudio()
+    updateVoiceState(VOICE_STATES.PREPARING_SPEECH)
+    setPlayingMessageId(messageId)
+    const requestToken = playbackTokenRef.current
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
+    const abortOnTerminate = () => controller.abort()
+    const terminateSignal = inFlightAbortControllerRef.current?.signal
+    terminateSignal?.addEventListener('abort', abortOnTerminate)
+
+    let audioUrl = null
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 3500)
-
       const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/speech`), {
         method: 'POST',
         headers: {
@@ -502,29 +912,40 @@ export default function InterviewRoom() {
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
         },
         body: JSON.stringify({ text }),
-        signal: inFlightAbortControllerRef.current?.signal || controller.signal,
+        signal: controller.signal,
       })
-      clearTimeout(timeoutId)
-
-      if (isCompleted || isTerminatedRef.current) return
-
       if (res.ok) {
         const data = await res.json()
-        if (isCompleted || isTerminatedRef.current) return
-        if (data.audioUrl) {
-          audioCacheRef.current.set(messageId, data.audioUrl)
-          playInterviewerAudio(data.audioUrl, messageId, text)
-        } else {
-          playInterviewerAudio(null, messageId, text)
-        }
-      } else {
-        playInterviewerAudio(null, messageId, text)
+        audioUrl = data.audioUrl || null
       }
     } catch (err) {
-      if (isCompleted || isTerminatedRef.current) return
       console.warn('[VoiceMode] TTS synthesis notice, using native speech:', err)
-      playInterviewerAudio(null, messageId, text)
+    } finally {
+      clearTimeout(timeoutId)
+      terminateSignal?.removeEventListener('abort', abortOnTerminate)
     }
+
+    // Candidate interrupted or ended the interview while we were waiting
+    if (isCompletedRef.current || isTerminatedRef.current || requestToken !== playbackTokenRef.current) return
+
+    if (audioUrl) audioCacheRef.current.set(messageId, audioUrl)
+    playInterviewerAudio(audioUrl, messageId, text)
+  }
+
+  // Speak a freshly received interviewer message. The backend already tried TTS,
+  // so when it sent no audio we go straight to the browser voice instead of
+  // waiting on a second synthesis round-trip.
+  const speakInterviewerMessage = (text, messageId, audioUrl) => {
+    if (isCompletedRef.current || isTerminatedRef.current) {
+      updateVoiceState(isCompletedRef.current ? VOICE_STATES.INTERVIEW_COMPLETE : VOICE_STATES.WAITING_FOR_CANDIDATE)
+      return
+    }
+    if (audioUrl) audioCacheRef.current.set(messageId, audioUrl)
+    if (interviewModeRef.current !== 'voice') {
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      return
+    }
+    playInterviewerAudio(audioUrl || null, messageId, text)
   }
 
   // Live Interview State from authoritative backend
@@ -537,6 +958,18 @@ export default function InterviewRoom() {
   const [activeMobileTab, setActiveMobileTab] = useState('center')
   const transcriptEndRef = useRef(null)
   const hasInitializedRef = useRef(false)
+  const isCompletedRef = useRef(false)
+  const isAiTypingRef = useRef(false)
+  useEffect(() => {
+    isCompletedRef.current = isCompleted
+  }, [isCompleted])
+  useEffect(() => {
+    isAiTypingRef.current = isAiTyping
+  }, [isAiTyping])
+  const setAiTyping = (value) => {
+    isAiTypingRef.current = value
+    setIsAiTyping(value)
+  }
 
   // Dynamic Live Timer effect (pauses when isPaused or isCompleted)
   useEffect(() => {
@@ -601,7 +1034,7 @@ export default function InterviewRoom() {
   }
 
   const handleSubmitCodeSolution = async () => {
-    if (!codeContent.trim() || isCodeSubmitting || isAiTyping || isCompleted || isTerminatedRef.current) return
+    if (!codeContent.trim() || isCodeSubmitting || isAiTyping || isCompletedRef.current || isTerminatedRef.current) return
     setIsCodeSubmitting(true)
     stopCurrentAudio()
 
@@ -619,8 +1052,8 @@ export default function InterviewRoom() {
     }
 
     setTranscriptMessages((prev) => [...prev, candidateCodeMsg])
-    setIsAiTyping(true)
-    setVoiceState(VOICE_STATES.AI_PROCESSING)
+    setAiTyping(true)
+    updateVoiceState(VOICE_STATES.AI_PROCESSING)
 
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
@@ -636,20 +1069,40 @@ export default function InterviewRoom() {
           explanation: codeExplanation,
           runOutput: codeOutput?.stdout || codeOutput?.compile_output || codeOutput?.stderr || '',
           durationSeconds: secondsElapsed,
-          mode: interviewMode,
-          includeAudio: interviewMode === 'voice',
+          mode: interviewModeRef.current,
+          includeAudio: interviewModeRef.current === 'voice',
         }),
         signal: inFlightAbortControllerRef.current?.signal,
       })
 
-      if (isCompleted || isTerminatedRef.current) return
+      if (isCompletedRef.current || isTerminatedRef.current) return
 
       if (res.ok) {
         const data = await res.json()
-        if (isCompleted || isTerminatedRef.current) return
+        if (isCompletedRef.current || isTerminatedRef.current) return
 
         if (data.interviewState) {
           setInterviewState(data.interviewState)
+        }
+
+        if (data.feedback) {
+          // Feedback Interview Mode: Hold next turn and display immediate coaching panel
+          setActiveFeedback(data.feedback)
+          setFeedbackContext({
+            question: latestAiQuestion?.text || 'Coding Task Solution',
+            answer: `[${codeLanguage.toUpperCase()}]\n${codeContent}\n\nExplanation: ${codeExplanation || 'None provided'}`,
+          })
+          setPendingTurnData({
+            nextQuestion: data.nextQuestion,
+            stage: data.stage || 'Evaluation & Next Stage',
+            audioUrl: data.audioUrl,
+            isComplete: Boolean(data.isComplete),
+            demoAccess: data.demoAccess,
+            interviewState: data.interviewState,
+          })
+          setAiTyping(false)
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          return
         }
 
         if (data.nextQuestion) {
@@ -664,16 +1117,9 @@ export default function InterviewRoom() {
             isCodeReview: true,
           }
           setTranscriptMessages((prev) => [...prev, aiMsg])
-          setIsAiTyping(false)
+          setAiTyping(false)
 
-          if (!isCompleted && !isTerminatedRef.current) {
-            if (data.audioUrl) {
-              audioCacheRef.current.set(aiMsgId, data.audioUrl)
-              playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
-            } else {
-              handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
-            }
-          }
+          speakInterviewerMessage(data.nextQuestion, aiMsgId, data.audioUrl)
           return
         }
 
@@ -685,8 +1131,8 @@ export default function InterviewRoom() {
             checkInterviewAccessStatus().catch(() => {})
           }
           setIsCompleted(true)
-          setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
-          setIsAiTyping(false)
+          updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+          setAiTyping(false)
           return
         }
       } else {
@@ -701,8 +1147,8 @@ export default function InterviewRoom() {
         canRetry: true,
         canSwitchToText: false,
       })
-      setVoiceState(VOICE_STATES.ERROR)
-      setIsAiTyping(false)
+      updateVoiceState(VOICE_STATES.ERROR)
+      setAiTyping(false)
     } finally {
       setIsCodeSubmitting(false)
     }
@@ -714,37 +1160,105 @@ export default function InterviewRoom() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
   }
 
-  // Handler when user selects mode from the Welcome Modal
-  const handleSelectMode = async (selectedMode) => {
-    setIsModeModalOpen(false)
-    setInterviewMode(selectedMode)
-    sessionStorage.setItem(`hiremind_mode_${interviewId}`, selectedMode)
+  // Handler when user selects interview mode (HR Simulation vs Feedback Coaching)
+  const handleChooseInterviewMode = (mode) => {
+    setChosenMode(mode)
+    sessionStorage.setItem(`hiremind_int_mode_${interviewId}`, mode)
+    setSession((prev) => ({
+      ...prev,
+      interviewMode: mode,
+      interviewState: {
+        ...(prev?.interviewState || {}),
+        interviewMode: mode,
+      },
+    }))
 
-    if (selectedMode === 'voice') {
-      // User gesture: unlock AudioContext immediately so autoplay succeeds
+    // Sync to MongoDB session
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      fetch(getApiUrl(`/api/interview/${interviewId}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({ interviewMode: mode }),
+      }).catch(() => {})
+    } catch { /* non-critical */ }
+
+    // Transition to Format Selection (Voice vs Text)
+    setModalStep('format')
+  }
+
+  // Handler when user selects format (Voice vs Text) from modal
+  const handleSelectMode = async (selectedFormat, modeToUse = chosenMode) => {
+    setIsModeModalOpen(false)
+    setInterviewMode(selectedFormat)
+    sessionStorage.setItem(`hiremind_mode_${interviewId}`, selectedFormat)
+    sessionStorage.setItem(`hiremind_int_mode_${interviewId}`, modeToUse)
+
+    // Ensure session state has latest mode
+    setSession((prev) => ({
+      ...prev,
+      interviewMode: modeToUse,
+      interviewState: {
+        ...(prev?.interviewState || {}),
+        interviewMode: modeToUse,
+      },
+    }))
+
+    // Sync to MongoDB
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      fetch(getApiUrl(`/api/interview/${interviewId}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({ interviewMode: modeToUse }),
+      }).catch(() => {})
+    } catch { /* non-critical */ }
+
+    if (selectedFormat === 'voice') {
+      // User gesture: unlock AudioContext and play a silent buffer so browser autoplay policy is cleared
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext
         if (AudioCtx) {
-          const ctx = new AudioCtx()
-          if (ctx.state === 'suspended') ctx.resume()
+          if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+            audioContextRef.current = new AudioCtx()
+          }
+          const ctx = audioContextRef.current
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(() => {})
+          }
+          // Micro silent buffer to warm up browser audio permissions
+          const buffer = ctx.createBuffer(1, 1, 22050)
+          const source = ctx.createBufferSource()
+          source.buffer = buffer
+          source.connect(ctx.destination)
+          source.start(0)
         }
       } catch { /* non-critical; safe to ignore */ }
+      // Must run inside this click so later interviewer audio is allowed to autoplay
+      unlockAudioPlayback()
 
-      // Prompt and initialize microphone
-      try {
-        await startMicrophone()
-      } catch { /* non-critical; safe to ignore */ }
+      // Ask for microphone permission now, while the opening question is being prepared
+      startMicrophone().catch((err) => {
+        console.warn('Microphone permission request deferred or denied:', err)
+      })
 
-      // Directly start asking questions and automatically read aloud
-      await startOrResumeInterview('voice', true)
+      // Directly begin live interview with voice mode and auto-play
+      await startOrResumeInterview('voice', true, modeToUse)
     } else {
-      await startOrResumeInterview('text', false)
+      await startOrResumeInterview('text', false, modeToUse)
     }
   }
 
-  const startOrResumeInterview = async (mode = 'voice', shouldAutoPlayAudio = true) => {
+  const startOrResumeInterview = async (mode = 'voice', shouldAutoPlayAudio = true, passedInterviewMode = null) => {
     try {
-      setVoiceState(VOICE_STATES.INITIALIZING)
+      const effectiveMode = passedInterviewMode || chosenMode || session?.interviewMode || 'HR_SIMULATION'
+      updateVoiceState(VOICE_STATES.INITIALIZING)
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
       const res = await fetch(getApiUrl(`/api/interview/${interviewId}/begin`), {
         method: 'POST',
@@ -752,7 +1266,11 @@ export default function InterviewRoom() {
           'Content-Type': 'application/json',
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
         },
-        body: JSON.stringify({ mode, includeAudio: mode === 'voice' }),
+        body: JSON.stringify({
+          mode,
+          includeAudio: mode === 'voice',
+          interviewMode: effectiveMode,
+        }),
       })
 
       if (res.ok) {
@@ -761,7 +1279,7 @@ export default function InterviewRoom() {
           setInterviewState(data.interviewState)
           if (data.interviewState.status === 'completed' || data.interviewState.status === 'ended_by_user') {
             setIsCompleted(true)
-            setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+            updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
             return
           }
         }
@@ -774,17 +1292,15 @@ export default function InterviewRoom() {
             time: new Date(m.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             stage: m.metrics?.stageName || data.stage || null,
             text: m.content,
+            audioUrl: m.audioUrl || (idx === data.chatMessages.length - 1 ? (data.audioUrl || null) : null),
           }))
           setTranscriptMessages(mapped)
           const lastMsg = mapped[mapped.length - 1]
+          const audioToPlay = lastMsg?.audioUrl || data.audioUrl || null
           if (lastMsg && lastMsg.sender === 'ai' && shouldAutoPlayAudio) {
-            if (lastMsg.audioUrl) {
-              playInterviewerAudio(lastMsg.audioUrl, lastMsg.id, lastMsg.text)
-            } else {
-              handleSynthesizeSpeech(lastMsg.text, lastMsg.id)
-            }
+            speakInterviewerMessage(lastMsg.text, lastMsg.id, audioToPlay)
           } else {
-            setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+            updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
           }
         } else if (data.question) {
           const openMsgId = createMessageId('ai-open')
@@ -796,25 +1312,25 @@ export default function InterviewRoom() {
               time: '00:00',
               stage: data.stage || 'Introduction',
               text: data.question,
+              audioUrl: data.audioUrl || null,
             },
           ])
 
           // AUTOMATICALLY READ OPENING QUESTION ALOUD IMMEDIATELY
-          if (data.audioUrl) {
-            audioCacheRef.current.set(openMsgId, data.audioUrl)
-            playInterviewerAudio(data.audioUrl, openMsgId, data.question)
+          if (shouldAutoPlayAudio) {
+            speakInterviewerMessage(data.question, openMsgId, data.audioUrl)
           } else {
-            handleSynthesizeSpeech(data.question, openMsgId)
+            updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
           }
         } else {
-          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
         }
       } else {
-        setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
       }
     } catch (err) {
       console.warn('[InterviewRoom] Live interview initialization notice:', err)
-      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     }
   }
 
@@ -830,9 +1346,13 @@ export default function InterviewRoom() {
         const data = await res.json()
         const sess = data.session || data
         if (sess) {
+          if (sess.interviewMode) {
+            setChosenMode(sess.interviewMode)
+          }
+
           if (sess.interviewState?.status === 'completed' || sess.interviewState?.status === 'ended_by_user') {
             setIsCompleted(true)
-            setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+            updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
             if (sess.chatMessages) {
               const mapped = sess.chatMessages.map((m, idx) => ({
                 id: m._id || createMessageId(`msg-${idx}`),
@@ -854,7 +1374,7 @@ export default function InterviewRoom() {
             // Resuming ongoing session with previous candidate interaction
             const modeToUse = savedMode || 'voice'
             setInterviewMode(modeToUse)
-            startOrResumeInterview(modeToUse, false)
+            startOrResumeInterview(modeToUse, false, sess.interviewMode)
             return
           }
         }
@@ -863,7 +1383,8 @@ export default function InterviewRoom() {
       console.warn('[InterviewRoom] Initial check error:', err)
     }
 
-    // Fresh interview: prompt user with Voice vs Text Modal
+    // Fresh interview: prompt user with Step 1 (Mode Selection: HR vs Feedback)
+    setModalStep('mode')
     setIsModeModalOpen(true)
   })
 
@@ -889,9 +1410,16 @@ export default function InterviewRoom() {
      ========================================================================= */
   const submitCandidateAnswer = async (answerText, inputMode = 'text', durationSeconds = 0, sttLatencyMs = null) => {
     const trimmed = (answerText || '').trim()
-    if (!trimmed || isAiTyping || isCompleted || isTerminatedRef.current) return
+    if (!trimmed || isAiTypingRef.current || isCompletedRef.current || isTerminatedRef.current) return
 
+    speechQueueRef.current.splice(0)
     stopCurrentAudio()
+    stopCandidateCapture()
+
+    const questionBeingAnswered =
+      latestAiQuestion?.text ||
+      transcriptMessages.slice().reverse().find((m) => m.sender === 'ai')?.text ||
+      'Current Question'
 
     const candidateMsg = {
       id: createMessageId('cand'),
@@ -904,8 +1432,8 @@ export default function InterviewRoom() {
 
     setTranscriptMessages((prev) => [...prev, candidateMsg])
     setInputValue('')
-    setIsAiTyping(true)
-    setVoiceState(VOICE_STATES.AI_PROCESSING)
+    setAiTyping(true)
+    updateVoiceState(VOICE_STATES.AI_PROCESSING)
     setVoiceError(null)
 
     try {
@@ -919,22 +1447,84 @@ export default function InterviewRoom() {
         body: JSON.stringify({
           answer: trimmed,
           inputMode,
-          mode: interviewMode,
-          includeAudio: interviewMode === 'voice',
+          mode: interviewModeRef.current,
+          includeAudio: interviewModeRef.current === 'voice',
           durationSeconds,
           sttLatencyMs,
         }),
         signal: inFlightAbortControllerRef.current?.signal,
       })
 
-      if (isCompleted || isTerminatedRef.current) return
+      if (isCompletedRef.current || isTerminatedRef.current) return
 
       if (res.ok) {
         const data = await res.json()
-        if (isCompleted || isTerminatedRef.current) return
+        if (isCompletedRef.current || isTerminatedRef.current) return
 
         if (data.interviewState) {
           setInterviewState(data.interviewState)
+        }
+
+        // Voice Feedback Mode: the interviewer says the coaching summary, then asks the
+        // next question; no popup interrupts the conversation
+        if (data.spokenFeedback && interviewModeRef.current === 'voice') {
+          const feedbackMsgId = createMessageId('ai-feedback')
+          const newMessages = [{
+            id: feedbackMsgId,
+            sender: 'ai',
+            senderName: 'HireMind AI Interviewer',
+            time: formatTimer(secondsElapsed + 1),
+            stage: 'Feedback',
+            text: data.spokenFeedback,
+            audioUrl: data.feedbackAudioUrl || null,
+            isFeedback: true,
+          }]
+          speechQueueRef.current.splice(0)
+          if (data.nextQuestion) {
+            const questionMsgId = createMessageId('ai')
+            newMessages.push({
+              id: questionMsgId,
+              sender: 'ai',
+              senderName: 'HireMind AI Interviewer',
+              time: formatTimer(secondsElapsed + 2),
+              stage: data.stage || data.interviewState?.currentStageName || null,
+              text: data.nextQuestion,
+              audioUrl: data.audioUrl || null,
+            })
+            if (data.audioUrl) audioCacheRef.current.set(questionMsgId, data.audioUrl)
+            speechQueueRef.current.push({ audioUrl: data.audioUrl || null, id: questionMsgId, text: data.nextQuestion })
+          }
+          setTranscriptMessages((prev) => [...prev, ...newMessages])
+          setAiTyping(false)
+
+          if (data.isComplete) {
+            if (data.demoAccess && updateDemoQuota) updateDemoQuota(data.demoAccess)
+            if (checkInterviewAccessStatus) checkInterviewAccessStatus().catch(() => {})
+            setIsCompleted(true)
+          }
+
+          speakInterviewerMessage(data.spokenFeedback, feedbackMsgId, data.feedbackAudioUrl)
+          return
+        }
+
+        if (data.feedback) {
+          // Feedback Interview Mode: Hold next turn and display immediate coaching panel
+          setActiveFeedback(data.feedback)
+          setFeedbackContext({
+            question: questionBeingAnswered,
+            answer: trimmed,
+          })
+          setPendingTurnData({
+            nextQuestion: data.nextQuestion,
+            stage: data.stage || data.interviewState?.currentStageName || null,
+            audioUrl: data.audioUrl,
+            isComplete: Boolean(data.isComplete),
+            demoAccess: data.demoAccess,
+            interviewState: data.interviewState,
+          })
+          setAiTyping(false)
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          return
         }
 
         if (data.nextQuestion) {
@@ -948,7 +1538,7 @@ export default function InterviewRoom() {
             text: data.nextQuestion,
           }
           setTranscriptMessages((prev) => [...prev, aiMsg])
-          setIsAiTyping(false)
+          setAiTyping(false)
 
           if (data.isComplete) {
             if (data.demoAccess && updateDemoQuota) {
@@ -961,14 +1551,7 @@ export default function InterviewRoom() {
           }
 
           // ONLY READ QUESTION ALOUD IF NOT TERMINATED OR COMPLETED
-          if (!isCompleted && !isTerminatedRef.current) {
-            if (data.audioUrl) {
-              audioCacheRef.current.set(aiMsgId, data.audioUrl)
-              playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
-            } else {
-              handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
-            }
-          }
+          speakInterviewerMessage(data.nextQuestion, aiMsgId, data.audioUrl)
           return
         }
 
@@ -980,14 +1563,14 @@ export default function InterviewRoom() {
             checkInterviewAccessStatus().catch(() => {})
           }
           setIsCompleted(true)
-          setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
-          setIsAiTyping(false)
+          updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+          setAiTyping(false)
           return
         }
       } else if (res.status === 409) {
         console.warn('[InterviewRoom] Duplicate turn detected, ignoring.')
-        setIsAiTyping(false)
-        setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+        setAiTyping(false)
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
         return
       } else {
         throw new Error(`Server returned status ${res.status}`)
@@ -1003,8 +1586,77 @@ export default function InterviewRoom() {
         canRetry: true,
         canSwitchToText: true,
       })
-      setVoiceState(VOICE_STATES.ERROR)
-      setIsAiTyping(false)
+      updateVoiceState(VOICE_STATES.ERROR)
+      setAiTyping(false)
+    }
+  }
+
+  // Continue to the next question from Feedback Coaching Panel
+  const handleContinueFromFeedback = () => {
+    if (!pendingTurnData) return
+    const { nextQuestion, stage, audioUrl, isComplete, demoAccess, interviewState: nextIntState } = pendingTurnData
+
+    setActiveFeedback(null)
+    setPendingTurnData(null)
+    setFeedbackError(null)
+
+    if (nextIntState) {
+      setInterviewState(nextIntState)
+    }
+
+    if (isComplete) {
+      if (demoAccess && updateDemoQuota) updateDemoQuota(demoAccess)
+      if (checkInterviewAccessStatus) checkInterviewAccessStatus().catch(() => {})
+      setIsCompleted(true)
+      updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+      return
+    }
+
+    if (nextQuestion) {
+      const aiMsgId = createMessageId('ai')
+      const aiMsg = {
+        id: aiMsgId,
+        sender: 'ai',
+        senderName: 'HireMind AI Interviewer',
+        time: formatTimer(secondsElapsed + 2),
+        stage: stage || interviewState?.currentStageName || null,
+        text: nextQuestion,
+      }
+      setTranscriptMessages((prev) => [...prev, aiMsg])
+      setAiTyping(false)
+
+      speakInterviewerMessage(nextQuestion, aiMsgId, audioUrl)
+    }
+  }
+
+  // Retry Answer Evaluation safely without re-submitting candidate answer
+  const handleRetryFeedback = async () => {
+    if (!feedbackContext || isRetryingFeedback) return
+    setIsRetryingFeedback(true)
+    setFeedbackError(null)
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/retry-answer-evaluation`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({
+          question: feedbackContext.question,
+          answer: feedbackContext.answer,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.success && data.feedback) {
+        setActiveFeedback(data.feedback)
+      } else {
+        setFeedbackError(data.message || 'Retry evaluation failed. Please check your connection.')
+      }
+    } catch (err) {
+      setFeedbackError(err.message || 'Network error retrying evaluation.')
+    } finally {
+      setIsRetryingFeedback(false)
     }
   }
 
@@ -1019,6 +1671,10 @@ export default function InterviewRoom() {
      VOICE ACTIVITY DETECTION (VAD), 3s SILENCE AUTO-SEND, & MUTE CONTROLS
      ========================================================================= */
   const resetSilenceDetection = () => {
+    if (speculativeTimerRef.current) {
+      clearTimeout(speculativeTimerRef.current)
+      speculativeTimerRef.current = null
+    }
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current)
       silenceTimerRef.current = null
@@ -1034,8 +1690,13 @@ export default function InterviewRoom() {
     resetSilenceDetection()
     if (isVoiceMutedRef.current) return
 
-    let secondsRemaining = 3
+    let secondsRemaining = Math.ceil(SILENCE_AUTO_SEND_MS / 1000)
     setSilenceCountdown(secondsRemaining)
+
+    speculativeTimerRef.current = setTimeout(() => {
+      speculativeTimerRef.current = null
+      startSpeculativeTranscription()
+    }, SPECULATIVE_STT_DELAY_MS)
 
     silenceCountdownIntervalRef.current = setInterval(() => {
       secondsRemaining -= 1
@@ -1054,15 +1715,64 @@ export default function InterviewRoom() {
       resetSilenceDetection()
       const textToSend = (liveTranscriptRef.current || '').trim()
       if (textToSend && !isVoiceMutedRef.current) {
-        console.log('[VoiceMode] 3s silence reached, auto-submitting answer:', textToSend)
-        handleCommitCandidateSpeech(textToSend)
+        console.log('[VoiceMode] Silence reached, auto-submitting answer:', textToSend)
+        voiceHandlersRef.current.handleCommitCandidateSpeech?.(textToSend)
       }
-    }, 3000)
+    }, SILENCE_AUTO_SEND_MS)
   }
 
-  // Finalize speech and commit to transcript / backend
-  const handleCommitCandidateSpeech = (explicitText = null) => {
+  // Send recorded audio to Whisper. Never throws: resolves to '' on any failure.
+  const transcribeRecording = async (audioBlob, timeoutMs) => {
+    if (!audioBlob || audioBlob.size < 1000) return ''
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const formData = new FormData()
+      formData.append('audio', audioBlob, 'candidate_answer.webm')
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/transcribe`), {
+        method: 'POST',
+        headers: {
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: formData,
+        signal: controller.signal,
+      })
+      if (!res.ok) return ''
+      const data = await res.json()
+      return data.success === false ? '' : (data.text || '').trim()
+    } catch (err) {
+      if (err.name !== 'AbortError') console.warn('[VoiceMode] Whisper transcription notice:', err)
+      return ''
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  // Transcribe what has been recorded so far while the silence countdown runs
+  const startSpeculativeTranscription = () => {
+    const recorder = mediaRecorderRef.current
+    const liveText = (liveTranscriptRef.current || '').trim()
+    if (
+      voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING ||
+      !recorder ||
+      !liveText ||
+      recordedChunksRef.current.length === 0
+    ) return
+    const audioBlob = new Blob(recordedChunksRef.current.slice(), { type: recorder.mimeType || 'audio/webm' })
+    speculativeSttRef.current = {
+      words: countWords(liveText),
+      promise: transcribeRecording(audioBlob, 15000),
+    }
+  }
+
+  // Stop recognition + recording WITHOUT submitting anything (mute, pause, replay, end)
+  const stopCandidateCapture = () => {
     resetSilenceDetection()
+    speculativeSttRef.current = null
+    listenSessionRef.current += 1
+    speechRecognitionOkRef.current = false
+    hasSpokenRef.current = false
 
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
@@ -1070,125 +1780,191 @@ export default function InterviewRoom() {
     }
 
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop()
-      } catch { /* non-critical; safe to ignore */ }
+      const recognition = recognitionRef.current
       recognitionRef.current = null
+      try {
+        recognition.onresult = null
+        recognition.onerror = null
+        recognition.onend = null
+        recognition.abort()
+      } catch { /* non-critical; safe to ignore */ }
     }
 
-    const candidateText = (explicitText !== null ? explicitText : (liveTranscriptRef.current || '')).trim()
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop()
-    } else if (candidateText) {
-      finalizeCandidateSpeech(candidateText)
-    } else {
-      finalizeCandidateSpeech('')
+    if (mediaRecorderRef.current) {
+      const recorder = mediaRecorderRef.current
+      mediaRecorderRef.current = null
+      try {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        if (recorder.state !== 'inactive') recorder.stop()
+      } catch { /* non-critical; safe to ignore */ }
     }
+  }
+
+  const getRecordingDurationSeconds = () => {
+    if (!recordingStartedAtRef.current) return 0
+    return Math.max(1, Math.round((monotonicNow() - recordingStartedAtRef.current) / 1000))
+  }
+
+  // Finalize speech and commit to transcript / backend
+  const handleCommitCandidateSpeech = (explicitText = null) => {
+    // Silence timer, volume detector and "Send Now" can race; only the first commit counts
+    if (voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING) return
+
+    const liveText = (explicitText !== null ? explicitText : (liveTranscriptRef.current || '')).trim()
+    const durationSeconds = getRecordingDurationSeconds()
+    const recorder = mediaRecorderRef.current
+    const mimeType = recorder?.mimeType || 'audio/webm'
+    const hasRecording = Boolean(recorder && recorder.state !== 'inactive')
+
+    // A background transcription is reusable if the candidate hasn't said more since it started
+    const speculative = speculativeSttRef.current
+    const speculativeUsable = Boolean(speculative && liveText && countWords(liveText) <= speculative.words + 1)
+
+    if (hasRecording && !speculativeUsable) {
+      // Detach the recorder so stopCandidateCapture lets it finish and flush its audio
+      mediaRecorderRef.current = null
+    }
+    stopCandidateCapture()
+
+    if (!hasRecording && !speculativeUsable) {
+      finalizeCandidateSpeech(liveText, durationSeconds)
+      return
+    }
+
+    updateVoiceState(VOICE_STATES.TRANSCRIBING)
+
+    const whisperPromise = speculativeUsable
+      ? speculative.promise
+      : new Promise((resolve) => {
+          recorder.onstop = () => resolve(new Blob(recordedChunksRef.current, { type: mimeType }))
+          try {
+            recorder.stop()
+          } catch {
+            resolve(null)
+          }
+        }).then((audioBlob) => transcribeRecording(audioBlob, liveText ? 8000 : 30000))
+
+    whisperPromise.then((whisperText) => {
+      if (isCompletedRef.current || isTerminatedRef.current) return
+      if (voiceStateRef.current !== VOICE_STATES.TRANSCRIBING) return
+      voiceHandlersRef.current.finalizeCandidateSpeech?.(chooseBestTranscript(liveText, whisperText), durationSeconds)
+    })
   }
 
   // Start continuous listening when candidate's turn begins
   const startVoiceListening = async () => {
     if (
       isVoiceMutedRef.current ||
+      isPausedRef.current ||
+      isCompletedRef.current ||
+      isTerminatedRef.current ||
+      isAiTypingRef.current ||
       voiceStateRef.current === VOICE_STATES.AI_PROCESSING ||
       voiceStateRef.current === VOICE_STATES.TRANSCRIBING ||
-      isAiTyping ||
-      isCompleted
+      voiceStateRef.current === VOICE_STATES.PREPARING_SPEECH
     ) {
       return
     }
 
+    speechQueueRef.current.splice(0)
     stopCurrentAudio()
+    stopCandidateCapture()
     setVoiceError(null)
     updateLiveTranscript('')
-    resetSilenceDetection()
+    committedTranscriptRef.current = ''
+    sessionFinalTranscriptRef.current = ''
+    lastSpeechAtRef.current = monotonicNow()
     setIsAudioOn(true)
-    voiceStateRef.current = VOICE_STATES.CANDIDATE_SPEAKING
-    setVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+    updateVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+    const listenSession = listenSessionRef.current
 
     try {
-      let stream = mediaStreamRef.current
-      const hasLiveTrack = stream && stream.getAudioTracks().some((t) => t.readyState === 'live')
-      if (!hasLiveTrack) {
-        stream = await startMicrophone()
-      } else {
-        stream.getAudioTracks().forEach((t) => {
-          t.enabled = true
-        })
-        setIsAudioOn(true)
+      const stream = await startMicrophone()
+      // Turn changed while we were waiting for microphone permission
+      if (listenSession !== listenSessionRef.current || voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING) {
+        return
       }
+      stream.getAudioTracks().forEach((t) => {
+        t.enabled = true
+      })
+      setIsAudioOn(true)
 
-      // 1. Initialize Web Speech API for real-time live typing directly into the UI
+      // 1. Web Speech API for real-time live typing directly into the UI
       const SpeechRecognition = typeof window !== 'undefined'
         ? (window.SpeechRecognition || window.webkitSpeechRecognition)
         : null
 
       if (SpeechRecognition) {
         try {
-          if (recognitionRef.current) {
-            try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-          }
-
           const recognition = new SpeechRecognition()
           recognition.continuous = true
           recognition.interimResults = true
-          recognition.lang = 'en-US'
+          recognition.lang = getRecognitionLang()
+          recognition.maxAlternatives = 1
 
           recognition.onresult = (event) => {
-            if (isVoiceMutedRef.current) return
+            if (recognitionRef.current !== recognition || isVoiceMutedRef.current) return
+            speechRecognitionOkRef.current = true
 
-            let final = ''
+            let sessionFinal = ''
             let interim = ''
             for (let i = 0; i < event.results.length; i++) {
               if (event.results[i].isFinal) {
-                final += event.results[i][0].transcript + ' '
+                sessionFinal += event.results[i][0].transcript + ' '
               } else {
                 interim += event.results[i][0].transcript
               }
             }
-            const combined = (final + interim).trim()
+            sessionFinalTranscriptRef.current = sessionFinal.trim()
+            // Chrome restarts recognition after pauses; keep what was said before the restart
+            const combined = [committedTranscriptRef.current, sessionFinal, interim]
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim()
             if (combined) {
               updateLiveTranscript(combined)
-              // Reset and restart 3-second silence auto-send timer
+              // Reset and restart the silence auto-send timer
               startSilenceDetection()
             }
           }
 
           recognition.onerror = (e) => {
-            console.warn('[WebSpeech] Recognition notice:', e.error)
+            if (recognitionRef.current !== recognition) return
+            if (e.error === 'no-speech' || e.error === 'aborted') return
+            console.warn('[WebSpeech] Recognition unavailable, using recorded audio instead:', e.error)
+            // Fatal (blocked, offline, unsupported): fall back to volume detection + server transcription
+            speechRecognitionOkRef.current = false
+            recognitionRef.current = null
           }
 
           recognition.onend = () => {
-            // Auto-restart if candidate is still speaking/unmuted
-            if (
-              !isVoiceMutedRef.current &&
-              voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING &&
-              recognitionRef.current
-            ) {
-              try {
-                recognitionRef.current.start()
-              } catch { /* non-critical; safe to ignore */ }
+            if (recognitionRef.current !== recognition) return
+            committedTranscriptRef.current = [committedTranscriptRef.current, sessionFinalTranscriptRef.current]
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+            sessionFinalTranscriptRef.current = ''
+            // Auto-restart while it is still the candidate's turn
+            if (!isVoiceMutedRef.current && voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
+              setTimeout(() => {
+                if (recognitionRef.current !== recognition) return
+                try { recognition.start() } catch { /* already running */ }
+              }, 200)
             }
           }
 
-          try {
-            recognition.start()
-          } catch (recStartErr) {
-            console.warn('[WebSpeech] SpeechRecognition start warning, retrying:', recStartErr)
-            setTimeout(() => {
-              if (!isVoiceMutedRef.current && voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
-                try { recognition.start() } catch { /* non-critical; safe to ignore */ }
-              }
-            }, 150)
-          }
           recognitionRef.current = recognition
+          recognition.start()
+          speechRecognitionOkRef.current = true
         } catch (recErr) {
           console.warn('[WebSpeech] SpeechRecognition start notice:', recErr)
+          speechRecognitionOkRef.current = false
+          recognitionRef.current = null
         }
       }
 
-      // 2. Initialize MediaRecorder as reliable audio capture fallback
+      // 2. MediaRecorder: server-side transcription fallback when live typing captures nothing
       try {
         if (typeof MediaRecorder !== 'undefined' && stream) {
           let mimeType = 'audio/webm;codecs=opus'
@@ -1200,42 +1976,35 @@ export default function InterviewRoom() {
 
           recordedChunksRef.current = []
           const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
-          mediaRecorderRef.current = recorder
-
           recorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
               recordedChunksRef.current.push(event.data)
             }
           }
-
-          recorder.onstop = () => {
-            const audioBlob = new Blob(recordedChunksRef.current, { type: mimeType || 'audio/webm' })
-            handleRecordedAudioStop(audioBlob)
-          }
-
+          mediaRecorderRef.current = recorder
           recorder.start(250)
         }
       } catch (recorderErr) {
         console.warn('[VoiceMode] MediaRecorder fallback init note:', recorderErr)
       }
 
-      setVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+      recordingStartedAtRef.current = monotonicNow()
       setRecordingSeconds(0)
-
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1)
       }, 1000)
     } catch (err) {
       console.error('[VoiceMode] Failed to start microphone:', err)
-      setVoiceState(VOICE_STATES.ERROR)
+      if (listenSession !== listenSessionRef.current) return
+      updateVoiceState(VOICE_STATES.ERROR)
 
       let errorMessage = 'Microphone permission was denied or microphone hardware is unavailable.'
       let errorDetails = ''
 
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         errorMessage = 'Microphone permission is blocked in your browser.'
-        errorDetails = 'Click the lock or tune icon 🔒 in your browser address bar (next to the URL), change Microphone to "Allow", and then click "Try Turning ON Mic Again".'
+        errorDetails = 'Click the lock or tune icon in your browser address bar (next to the URL), change Microphone to "Allow", and then click "Try Turning ON Mic Again".'
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         errorMessage = 'No microphone device was detected on your computer.'
         errorDetails = 'Please ensure your microphone or headset is connected and enabled in your sound settings, then click "Try Turning ON Mic Again".'
@@ -1257,75 +2026,57 @@ export default function InterviewRoom() {
     }
   }
 
-  // Toggle Mute / Unmute
-  const handleToggleMute = () => {
-    if (isVoiceMuted) {
-      setIsVoiceMuted(false)
-      isVoiceMutedRef.current = false
-      setIsAudioOn(true)
-
-      // Stop interviewer audio immediately so candidate can speak without overlap
-      stopCurrentAudio()
-      voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
-      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
-
-      if (!mediaStreamRef.current || !mediaStreamRef.current.getAudioTracks().some((t) => t.readyState === 'live')) {
-        startMicrophone()
-          .then(() => {
-            if (interviewModeRef.current === 'voice' && !isCompleted) {
-              startVoiceListening()
-            }
-          })
-          .catch((err) => {
-            console.warn('Microphone start on unmute notice:', err)
-          })
-      } else {
-        try {
-          mediaStreamRef.current.getAudioTracks().forEach((track) => {
-            track.enabled = true
-          })
-        } catch { /* non-critical; safe to ignore */ }
-        if (
-          voiceStateRef.current !== VOICE_STATES.AI_PROCESSING &&
-          voiceStateRef.current !== VOICE_STATES.TRANSCRIBING &&
-          !isAiTyping &&
-          !isCompleted
-        ) {
-          startVoiceListening()
-        }
-      }
-    } else {
-      setIsVoiceMuted(true)
-      isVoiceMutedRef.current = true
-      resetSilenceDetection()
-      if (mediaStreamRef.current) {
-        try {
-          mediaStreamRef.current.getAudioTracks().forEach((track) => {
-            track.enabled = false
-          })
-        } catch { /* non-critical; safe to ignore */ }
-      }
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-      }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        try { mediaRecorderRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-      }
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current)
-        recordingTimerRef.current = null
-      }
-      voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
-      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+  const unmuteMicrophone = () => {
+    setIsVoiceMuted(false)
+    isVoiceMutedRef.current = false
+    setIsAudioOn(true)
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = true
+        })
+      } catch { /* non-critical; safe to ignore */ }
     }
   }
 
-  // Backwards-compatible toggle bridge
+  // Toggle Mute / Unmute (acts as "Interject" while the interviewer is speaking)
+  const handleToggleMute = () => {
+    const state = voiceStateRef.current
+    if (state === VOICE_STATES.INTERVIEWER_SPEAKING || state === VOICE_STATES.PREPARING_SPEECH) {
+      if (isVoiceMutedRef.current) unmuteMicrophone()
+      handleCandidateBargeIn()
+      return
+    }
+
+    if (isVoiceMutedRef.current) {
+      unmuteMicrophone()
+      startVoiceListening()
+      return
+    }
+
+    // Muting discards the in-progress capture instead of submitting a half answer
+    setIsVoiceMuted(true)
+    isVoiceMutedRef.current = true
+    stopCandidateCapture()
+    updateLiveTranscript('')
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = false
+        })
+      } catch { /* non-critical; safe to ignore */ }
+    }
+    if (state === VOICE_STATES.CANDIDATE_SPEAKING || state === VOICE_STATES.ERROR) {
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+    }
+  }
+
+  // Explicit "Start Answering" / retry action
   const handleToggleVoiceMic = (turnOn) => {
     if (turnOn) {
-      if (isVoiceMuted) {
-        setIsVoiceMuted(false)
-        isVoiceMutedRef.current = false
+      if (isVoiceMutedRef.current) unmuteMicrophone()
+      if (voiceStateRef.current === VOICE_STATES.ERROR) {
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
       }
       startVoiceListening()
     } else {
@@ -1333,116 +2084,53 @@ export default function InterviewRoom() {
     }
   }
 
-  // Handle MediaRecorder completion
-  const handleRecordedAudioStop = async (audioBlob) => {
-    const candidateText = (liveTranscriptRef.current || '').trim()
-    if (candidateText) {
-      finalizeCandidateSpeech(candidateText)
-      return
-    }
-
-    // Fallback: If Web Speech API captured no text, transcribe audio with Whisper
-    setVoiceState(VOICE_STATES.TRANSCRIBING)
-    handleProcessRecordedAudio(audioBlob)
-  }
-
   // Finalize authentic candidate speech and dispatch to AI Interview Agent
-  const finalizeCandidateSpeech = (text) => {
+  const finalizeCandidateSpeech = (text, durationSeconds = 0) => {
     const trimmed = (text || '').trim()
     if (!trimmed) {
-      setVoiceState(VOICE_STATES.ERROR)
-      setVoiceError({
-        code: 'EMPTY_SPEECH',
-        message: "We couldn't hear any speech. Please turn on your microphone and try speaking again.",
-        canRetry: true,
-        canSwitchToText: true,
-      })
+      // Nothing was heard: gently re-open the mic instead of showing an error
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      triggerBargeInToast("We didn't catch that — please go ahead and answer again.")
+      startVoiceListening()
       return
     }
 
     updateLiveTranscript('')
-    submitCandidateAnswer(trimmed, 'voice', recordingSeconds)
+    voiceHandlersRef.current.submitCandidateAnswer?.(trimmed, 'voice', durationSeconds)
   }
 
-  // Fallback: Process Recorded Audio Blob via Whisper STT
-  const handleProcessRecordedAudio = async (audioBlob) => {
-    if (!audioBlob || audioBlob.size < 1000) {
-      setVoiceState(VOICE_STATES.ERROR)
-      setVoiceError({
-        code: 'EMPTY_AUDIO',
-        message: "We couldn't clearly capture that answer. Recording was empty or too brief. Please try again.",
-        canRetry: true,
-        canSwitchToText: true,
-      })
-      return
+  // Keep long-lived callbacks pointed at the latest render's handlers
+  useEffect(() => {
+    voiceHandlersRef.current = {
+      startVoiceListening,
+      handleCommitCandidateSpeech,
+      finalizeCandidateSpeech,
+      submitCandidateAnswer,
     }
-
-    const durationSnapshot = recordingSeconds || 1
-
-    try {
-      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'candidate_answer.webm')
-      formData.append('duration', durationSnapshot)
-
-      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/transcribe`), {
-        method: 'POST',
-        headers: {
-          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
-        },
-        body: formData,
-      })
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        throw new Error(errData.message || `Transcription failed with status ${res.status}`)
-      }
-
-      const data = await res.json()
-      const transcript = (data.text || '').trim()
-
-      if (!transcript || data.success === false) {
-        setVoiceState(VOICE_STATES.ERROR)
-        setVoiceError({
-          code: 'EMPTY_TRANSCRIPT',
-          message: "We couldn't clearly capture that answer. Please try turning on your microphone and answering again.",
-          canRetry: true,
-          canSwitchToText: true,
-        })
-        return
-      }
-
-      submitCandidateAnswer(transcript, 'voice', durationSnapshot, data.latencyMs)
-    } catch (err) {
-      console.warn('[VoiceMode] STT processing error:', err)
-      setVoiceState(VOICE_STATES.ERROR)
-      setVoiceError({
-        code: 'STT_FAILED',
-        message: 'Speech recognition was unable to transcribe your response. Please try recording again or switch to text mode.',
-        canRetry: true,
-        canSwitchToText: true,
-      })
-    }
-  }
+  })
 
   // Pause / Resume interview session
   const handleTogglePause = () => {
     if (isCompleted) return
 
     if (!isPaused) {
+      const wasInterviewerTalking =
+        voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING ||
+        voiceStateRef.current === VOICE_STATES.PREPARING_SPEECH
+      speechQueueRef.current.splice(0)
       stopCurrentAudio()
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop()
-        } catch { /* non-critical; safe to ignore */ }
-      }
-      resetSilenceDetection()
+      stopCandidateCapture()
+      isPausedRef.current = true
       setIsPaused(true)
       setIsRecording(false)
+      if (wasInterviewerTalking || voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      }
     } else {
+      isPausedRef.current = false
       setIsPaused(false)
       setIsRecording(true)
-      if (interviewMode === 'voice' && !isVoiceMuted && !isAiTyping && !isCompleted) {
+      if (interviewModeRef.current === 'voice' && !isVoiceMutedRef.current && !isAiTypingRef.current && !isCompletedRef.current) {
         startVoiceListening()
       }
     }
@@ -1451,21 +2139,19 @@ export default function InterviewRoom() {
   // Open modal to safely confirm interview conclusion mid-way or completely
   const handleEndCall = () => {
     // Immediately silence any interviewer voice playback and pause speech recognition
+    speechQueueRef.current.splice(0)
     stopCurrentAudio()
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
+    stopCandidateCapture()
+    if (voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING || voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING) {
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-    }
-    resetSilenceDetection()
     setIsEndModalOpen(true)
   }
 
   // Cancel conclusion modal and resume listening if voice mode active
   const handleCancelEndModal = () => {
     setIsEndModalOpen(false)
-    if (interviewMode === 'voice' && !isVoiceMuted && !isCompleted && !isPaused && !isTerminatedRef.current) {
+    if (interviewModeRef.current === 'voice' && !isVoiceMutedRef.current) {
       startVoiceListening()
     }
   }
@@ -1479,6 +2165,7 @@ export default function InterviewRoom() {
 
     // 2. Kill all active voice, speech synthesis, and audio buffers
     stopCurrentAudio()
+    stopCandidateCapture()
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
     }
@@ -1682,6 +2369,25 @@ export default function InterviewRoom() {
         </div>
 
         <div className="int-room-nav__right">
+          {/* Audio & Hardware Green Room Check Button (Feature 1B) */}
+          <button
+            type="button"
+            className="int-room-nav__hw-btn"
+            onClick={() => {
+              setIsHardwareModalOpen(true)
+              startMicrophone().catch(() => {})
+            }}
+            title="Microphone & Speaker Hardware Quality Check"
+            aria-label="Hardware Audio Check"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+            </svg>
+            <span>Audio Check</span>
+          </button>
+
           {/* Chatbot Toggle Button */}
           <button
             type="button"
@@ -1753,7 +2459,11 @@ export default function InterviewRoom() {
             className={`int-room-mobile-tab ${activeMobileTab === 'code' ? 'is-active' : ''}`}
             onClick={() => setActiveMobileTab('code')}
           >
-            💻 Code IDE
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px', verticalAlign: '-1px' }}>
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+            Code IDE
           </button>
         )}
       </div>
@@ -1867,28 +2577,59 @@ export default function InterviewRoom() {
               </div>
             </div>
 
-            {/* Interview Stages Roadmap */}
+            {/* FEATURE 2B: ENHANCED STAGE AGENDA COVERAGE MATRIX */}
             {stages.length > 0 && (
-              <div className="int-room-roadmap-group">
-                <div className="int-room-roadmap-header">
-                  <span className="int-room-roadmap-label">INTERVIEW ROADMAP</span>
-                  <span className="int-room-roadmap-counter">{currentStageNumber}/{totalStages}</span>
+              <div className="int-room-agenda-matrix">
+                <div className="int-room-agenda-header">
+                  <span className="int-room-agenda-label">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 11 12 14 22 4" />
+                      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                    </svg>
+                    STAGE AGENDA COVERAGE
+                  </span>
+                  <span className="int-room-agenda-counter">
+                    {currentStageIndex + 1}/{totalStages} ({Math.min(100, Math.round(((currentStageIndex + 1) / Math.max(1, totalStages)) * 100))}%)
+                  </span>
                 </div>
-                <div className="int-room-roadmap-list">
+
+                <div className="int-room-agenda-progress-track">
+                  <div
+                    className="int-room-agenda-progress-fill"
+                    style={{
+                      width: `${Math.min(100, Math.round(((currentStageIndex + (interviewState?.currentStageHops || 0) * 0.4) / Math.max(1, totalStages)) * 100))}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="int-room-agenda-list">
                   {stages.map((stg, idx) => {
                     const isPast = idx < currentStageIndex
                     const isCurrent = idx === currentStageIndex
+                    const hops = isCurrent ? (interviewState?.currentStageHops || 1) : (isPast ? 2 : 0)
                     return (
                       <div
                         key={stg.id || idx}
-                        className={`int-room-roadmap-item ${isPast ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''}`}
+                        className={`int-room-agenda-item ${isPast ? 'is-completed' : ''} ${isCurrent ? 'is-current' : ''}`}
                       >
-                        <div className="int-room-roadmap-step-circle">
-                          {isPast ? '✓' : idx + 1}
-                        </div>
-                        <div className="int-room-roadmap-text">
-                          <span className="int-room-roadmap-name">{stg.name || stg.title}</span>
-                          {isCurrent && <span className="int-room-roadmap-live-tag">Active</span>}
+                        <div className="int-room-agenda-row">
+                          <div className="int-room-agenda-row-left">
+                            <div className={`int-room-agenda-step-dot ${isPast ? 'is-completed' : isCurrent ? 'is-current' : 'is-upcoming'}`}>
+                              {isPast ? '✓' : idx + 1}
+                            </div>
+                            <span className="int-room-agenda-name">{stg.name || stg.title || `Stage ${idx + 1}`}</span>
+                          </div>
+                          <div>
+                            {isPast ? (
+                              <span className="int-room-agenda-hop-pill is-done">✓ Covered</span>
+                            ) : isCurrent ? (
+                              <span className="int-room-agenda-hop-pill" title="Follow-up questioning depth (max 2 hops per stage)">
+                                Hop {Math.min(2, hops)} of 2
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '10.5px', color: '#64748b' }}>Planned</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     )
@@ -1925,6 +2666,23 @@ export default function InterviewRoom() {
               </div>
 
               <div className="int-room-stage-actions">
+                {/* Active Interview Mode Badge */}
+                <div
+                  className={`int-room-mode-pill ${session?.interviewMode === 'FEEDBACK_COACHING' ? 'int-room-mode-pill--feedback' : 'int-room-mode-pill--hr'}`}
+                  title={
+                    session?.interviewMode === 'FEEDBACK_COACHING'
+                      ? 'Feedback Interview Mode: Immediate Coaching & Answer Evaluation'
+                      : 'HR Interview Mode: Realistic Simulation Without Immediate Interruptions'
+                  }
+                >
+                  <span className={`int-room-mode-dot ${session?.interviewMode === 'FEEDBACK_COACHING' ? 'is-purple' : 'is-cyan'}`} />
+                  <span>
+                    {session?.interviewMode === 'FEEDBACK_COACHING'
+                      ? 'Feedback Interview Mode'
+                      : 'HR Interview Mode'}
+                  </span>
+                </div>
+
                 {/* Active Stage Indicator */}
                 {currentStage && (
                   <div className="int-room-stage-pill">
@@ -1941,7 +2699,12 @@ export default function InterviewRoom() {
                   title={isCodeStudioOpen ? 'Close Code Studio' : 'Open in-browser Code IDE'}
                   aria-label="Toggle Code Editor"
                 >
-                  <span className="int-room-code-btn-icon">💻</span>
+                  <span className="int-room-code-btn-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  </span>
                   <span>{isCodeStudioOpen ? 'Close IDE' : 'Code IDE'}</span>
                   {isCodingStage && <span className="int-room-code-live-pill">Coding Task</span>}
                 </button>
@@ -1988,41 +2751,94 @@ export default function InterviewRoom() {
                 =============================================================== */}
             {interviewMode === 'voice' && !isCompleted && (
               <div className="int-room-voice-deck">
+                {/* Candidate Barge-in Floating Alert Toast (Feature 2A) */}
+                {bargeInToast && (
+                  <div className="int-room-bargein-toast" role="alert">
+                    <span className="int-room-bargein-toast-dot" />
+                    <span>{bargeInToast}</span>
+                  </div>
+                )}
+
                 <div className="int-room-voice-status-bar">
-                  {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
-                    <span className="int-room-voice-badge is-speaking">
-                      <span className="int-room-pulse-dot is-cyan" />
-                      🔊 AI Interviewer Speaking... (Please Listen)
+                  {voiceState === VOICE_STATES.INITIALIZING && (
+                    <span className="int-room-voice-badge is-thinking">
+                      <span className="int-room-pulse-dot is-yellow" />
+                      Your interviewer is joining the room...
                     </span>
+                  )}
+                  {voiceState === VOICE_STATES.PREPARING_SPEECH && (
+                    <span className="int-room-voice-badge is-thinking">
+                      <span className="int-room-pulse-dot is-cyan" />
+                      Interviewer is about to speak...
+                    </span>
+                  )}
+                  {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span className="int-room-voice-badge is-speaking">
+                        <span className="int-room-pulse-dot is-cyan" />
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                        AI Interviewer Speaking... (Please Listen)
+                      </span>
+                      {/* Feature 2A: On-Screen Candidate Barge-In Button */}
+                      <button
+                        type="button"
+                        className="int-room-bargein-pill-btn"
+                        onClick={() => handleCandidateBargeIn()}
+                        title="Interrupt the AI interviewer and speak immediately"
+                      >
+                        <span>✋</span>
+                        <span>Excuse Me / Interject</span>
+                      </button>
+                    </div>
                   )}
                   {voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && (
                     <span className="int-room-voice-badge is-waiting">
                       <span className="int-room-pulse-dot is-green" />
-                      🎤 Ready for your answer (Turn ON mic below)
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                      {isVoiceMuted ? 'Your turn — unmute your microphone to answer' : 'Your turn — press "Start Answering" below'}
                     </span>
                   )}
                   {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (
                     <span className="int-room-voice-badge is-recording">
                       <span className="int-room-pulse-dot is-red" />
-                      🔴 Microphone ON • Speech typing live...
+                      Microphone ON • Speech typing live...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.TRANSCRIBING && (
                     <span className="int-room-voice-badge is-transcribing">
                       <span className="int-room-pulse-dot is-purple" />
-                      ⚡ Finalizing speech transcription...
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                      Finalizing speech transcription...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.AI_PROCESSING && (
                     <span className="int-room-voice-badge is-thinking">
                       <span className="int-room-pulse-dot is-yellow" />
-                      🧠 HireMind AI thinking...
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04Z" />
+                        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04Z" />
+                      </svg>
+                      HireMind AI thinking...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.ERROR && (
                     <span className="int-room-voice-badge is-error">
                       <span className="int-room-pulse-dot is-red" />
-                      ⚠️ Attention Needed
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      Attention Needed
                     </span>
                   )}
 
@@ -2062,7 +2878,13 @@ export default function InterviewRoom() {
                           className="int-room-voice-error-btn"
                           onClick={() => handleToggleVoiceMic(true)}
                         >
-                          🔄 Try Turning ON Mic Again
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                            <path d="M3 3v5h5" />
+                            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                            <path d="M16 21h5v-5" />
+                          </svg>
+                          {voiceError.code === 'MICROPHONE_PERMISSION_DENIED' ? 'Try Turning ON Mic Again' : 'Answer Again'}
                         </button>
                       )}
                       {voiceError.canSwitchToText && (
@@ -2074,7 +2896,10 @@ export default function InterviewRoom() {
                             setInterviewMode('text')
                           }}
                         >
-                          💬 Type Answer Instead
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                          </svg>
+                          Type Answer Instead
                         </button>
                       )}
                     </div>
@@ -2089,7 +2914,11 @@ export default function InterviewRoom() {
               {isCodingStage && !isCodeStudioOpen && !isCompleted && (
                 <div className="int-room-coding-alert-banner">
                   <div className="int-room-coding-alert-left">
-                    <span className="int-room-coding-alert-pulse">⚡</span>
+                    <span className="int-room-coding-alert-pulse">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                    </span>
                     <div className="int-room-coding-alert-info">
                       <strong>Interactive Coding Challenge Active</strong>
                       <span>Solve the problem, test with custom inputs, and submit to the AI interviewer.</span>
@@ -2100,7 +2929,11 @@ export default function InterviewRoom() {
                     className="int-room-coding-alert-open-btn"
                     onClick={() => setIsCodeStudioOpen(true)}
                   >
-                    Open In-Browser IDE 💻
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                    Open In-Browser IDE
                   </button>
                 </div>
               )}
@@ -2145,7 +2978,10 @@ export default function InterviewRoom() {
                         )}
                       </div>
                     ) : (
-                      <div className="int-room-chat-msg__bubble">
+                      <div className={`int-room-chat-msg__bubble ${msg.isFeedback ? 'is-feedback-bubble' : ''}`}>
+                        {msg.isFeedback && (
+                          <span className="int-room-feedback-inline-label">Coaching feedback</span>
+                        )}
                         <p className="int-room-chat-msg__text">{msg.text}</p>
                         {/* Inline Audio Replay Button for AI Questions */}
                         {msg.sender === 'ai' && (
@@ -2155,7 +2991,25 @@ export default function InterviewRoom() {
                             onClick={() => handleSynthesizeSpeech(msg.text, msg.id)}
                             title={playingMessageId === msg.id ? 'Playing audio...' : 'Play question audio'}
                           >
-                            <span>{playingMessageId === msg.id ? '🔊 Playing...' : '▶ Listen'}</span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                              {playingMessageId === msg.id ? (
+                                <>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                                  </svg>
+                                  Playing...
+                                </>
+                              ) : (
+                                <>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                  </svg>
+                                  Listen
+                                </>
+                              )}
+                            </span>
                           </button>
                         )}
                       </div>
@@ -2165,7 +3019,7 @@ export default function InterviewRoom() {
               ))}
 
               {/* Real-time candidate speech typing automatically into UI */}
-              {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (
+              {(voiceState === VOICE_STATES.CANDIDATE_SPEAKING || (voiceState === VOICE_STATES.TRANSCRIBING && liveTranscript)) && (
                 <div className="int-room-chat-msg is-candidate is-live-typing">
                   <div className={`int-room-chat-msg__avatar ${user?.avatarUrl ? 'has-image' : ''}`}>
                     {user?.avatarUrl ? (
@@ -2177,7 +3031,11 @@ export default function InterviewRoom() {
                   <div className="int-room-chat-msg__content-wrap">
                     <div className="int-room-chat-msg__meta">
                       <span className="int-room-chat-msg__sender">{user?.firstName || 'You'}</span>
-                      {silenceCountdown > 0 ? (
+                      {voiceState === VOICE_STATES.TRANSCRIBING ? (
+                        <span className="int-room-live-speaking-badge">
+                          <span className="int-room-live-speaking-dot" /> Finalizing...
+                        </span>
+                      ) : silenceCountdown > 0 ? (
                         <span className="int-room-live-speaking-badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', borderColor: 'rgba(234, 179, 8, 0.3)' }}>
                           <span className="int-room-live-speaking-dot" style={{ background: '#facc15' }} /> Sending in {silenceCountdown}s...
                         </span>
@@ -2199,6 +3057,24 @@ export default function InterviewRoom() {
                         )}
                         <span className="int-room-live-cursor">|</span>
                       </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {interviewMode === 'voice' && voiceState === VOICE_STATES.INITIALIZING && transcriptMessages.length === 0 && (
+                <div className="int-room-chat-msg is-ai is-typing">
+                  <div className="int-room-chat-msg__avatar">
+                    <img src={chatbotIcon} alt="AI" className="int-room-chat-msg__ai-icon" />
+                  </div>
+                  <div className="int-room-chat-msg__content-wrap">
+                    <div className="int-room-chat-msg__bubble is-typing-bubble">
+                      <div className="int-room-typing-indicator">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                      <span className="int-room-typing-label">Your interviewer is reviewing your profile and will greet you shortly...</span>
                     </div>
                   </div>
                 </div>
@@ -2270,29 +3146,90 @@ export default function InterviewRoom() {
               <div className="int-room-voice-dock">
                 <div className="int-room-voice-dock__status-bar">
                   <div className="int-room-voice-dock__status">
+                    {(voiceState === VOICE_STATES.INITIALIZING || voiceState === VOICE_STATES.PREPARING_SPEECH) && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span className="int-room-pulse-dot is-yellow" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
+                        {voiceState === VOICE_STATES.INITIALIZING
+                          ? 'Setting up your interview. Please allow microphone access if your browser asks.'
+                          : 'Preparing the interviewer\'s voice...'}
+                      </span>
+                    )}
                     {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
-                      <span>🔊 AI Interviewer is speaking... Please listen to the question.</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                        AI Interviewer is speaking... Please listen to the question.
+                      </span>
                     )}
                     {voiceState === VOICE_STATES.AI_PROCESSING && (
-                      <span>🧠 AI is processing your answer and formulating the next question...</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04Z" />
+                          <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04Z" />
+                        </svg>
+                        AI is processing your answer and formulating the next question...
+                      </span>
                     )}
                     {voiceState === VOICE_STATES.TRANSCRIBING && (
-                      <span>⚡ Finalizing speech transcription with Whisper...</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                        </svg>
+                        Polishing your transcript for accuracy...
+                      </span>
                     )}
                     {voiceState === VOICE_STATES.ERROR && (
-                      <span>⚠️ Microphone attention needed. Please check the permission prompt above.</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                          <line x1="12" y1="9" x2="12" y2="13" />
+                          <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                        Something needs your attention. See the message above to continue.
+                      </span>
                     )}
                     {isVoiceMuted && voiceState !== VOICE_STATES.INTERVIEWER_SPEAKING && voiceState !== VOICE_STATES.AI_PROCESSING && (
-                      <span>🔇 Microphone is MUTED. Click Unmute when you are ready to speak your answer.</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="2" y1="2" x2="22" y2="22" />
+                          <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" />
+                          <path d="M5 10v2a7 7 0 0 0 12 5" />
+                        </svg>
+                        Microphone is MUTED. Click Unmute when you are ready to speak your answer.
+                      </span>
                     )}
                     {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown > 0 && (
-                      <span>⏱️ Silence detected. Auto-sending your answer in <strong>{silenceCountdown}s</strong>...</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        Silence detected. Auto-sending your answer in <strong>{silenceCountdown}s</strong>...
+                      </span>
                     )}
                     {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown === 0 && liveTranscript && (
-                      <span>🔴 Microphone is LIVE. Speaking... (Auto-sends 3s after you finish talking)</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span className="int-room-pulse-dot is-red" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
+                        Microphone is LIVE. Speaking... (sends automatically when you pause)
+                      </span>
                     )}
-                    {!isVoiceMuted && (voiceState === VOICE_STATES.CANDIDATE_SPEAKING || voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE) && !liveTranscript && silenceCountdown === 0 && (
-                      <span>🎤 Microphone is LIVE and listening. Speak your answer anytime (auto-sends 3s after you finish).</span>
+                    {!isVoiceMuted && voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span className="int-room-pulse-dot is-green" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
+                        Your turn. Press <strong>Start Answering</strong> when you are ready, or replay the question.
+                      </span>
+                    )}
+                    {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && !liveTranscript && silenceCountdown === 0 && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                          <line x1="12" y1="19" x2="12" y2="22" />
+                        </svg>
+                        Microphone is LIVE and listening. Speak your answer now — press <strong>Done</strong> when you finish.
+                      </span>
                     )}
                   </div>
                 </div>
@@ -2317,24 +3254,70 @@ export default function InterviewRoom() {
                         : 'Click to Mute Microphone'
                     }
                   >
-                    <span>
-                      {isVoiceMuted
-                        ? '🎙️ Unmute Microphone'
-                        : voiceState === VOICE_STATES.INTERVIEWER_SPEAKING
-                        ? '🔊 Interviewer Speaking (Click to Answer)'
-                        : '🔇 Mute Microphone'}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      {isVoiceMuted ? (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="22" />
+                          </svg>
+                          Unmute Microphone
+                        </>
+                      ) : voiceState === VOICE_STATES.INTERVIEWER_SPEAKING ? (
+                        <>
+                          <span style={{ fontSize: '13px' }}>✋</span>
+                          Excuse Me / Interject & Answer
+                        </>
+                      ) : (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="2" y1="2" x2="22" y2="22" />
+                            <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" />
+                            <path d="M5 10v2a7 7 0 0 0 12 5" />
+                            <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" />
+                            <path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
+                            <line x1="12" y1="19" x2="12" y2="22" />
+                          </svg>
+                          Mute Microphone
+                        </>
+                      )}
                     </span>
                   </button>
 
-                  {/* Send Answer Now Button (Available if candidate has spoken text and doesn't want to wait 3s) */}
-                  {liveTranscript.trim().length > 0 && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (
+                  {/* Start Answering: opens the mic when it's the candidate's turn */}
+                  {!isVoiceMuted && voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && !isAiTyping && (
+                    <button
+                      type="button"
+                      className="int-room-voice-dock__send-btn"
+                      onClick={() => handleToggleVoiceMic(true)}
+                      title="Open your microphone and start answering"
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        </svg>
+                        Start Answering
+                      </span>
+                    </button>
+                  )}
+
+                  {/* Done / Send Now: always available while answering (works even if live typing captured nothing) */}
+                  {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (liveTranscript.trim().length > 0 || recordingSeconds >= 2) && (
                     <button
                       type="button"
                       className="int-room-voice-dock__send-btn"
                       onClick={() => handleCommitCandidateSpeech()}
                       title="Send answer immediately without waiting for 3s silence"
                     >
-                      <span>🚀 Send Now {silenceCountdown > 0 ? `(${silenceCountdown}s)` : ''}</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="22" y1="2" x2="11" y2="13" />
+                          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                        {liveTranscript.trim() ? 'Send Now' : 'Done Answering'} {silenceCountdown > 0 ? `(${silenceCountdown}s)` : ''}
+                      </span>
                     </button>
                   )}
 
@@ -2344,10 +3327,22 @@ export default function InterviewRoom() {
                       type="button"
                       className="int-room-voice-dock__replay-btn"
                       onClick={() => handleSynthesizeSpeech(latestAiQuestion.text, latestAiQuestion.id)}
-                      disabled={voiceState === VOICE_STATES.INTERVIEWER_SPEAKING || voiceState === VOICE_STATES.AI_PROCESSING}
+                      disabled={
+                        voiceState === VOICE_STATES.INTERVIEWER_SPEAKING ||
+                        voiceState === VOICE_STATES.PREPARING_SPEECH ||
+                        voiceState === VOICE_STATES.AI_PROCESSING ||
+                        voiceState === VOICE_STATES.TRANSCRIBING ||
+                        isAiTyping
+                      }
                       title="Replay interviewer's question aloud"
                     >
-                      <span>🔊 Replay Question</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                        Replay Question
+                      </span>
                     </button>
                   )}
                 </div>
@@ -2427,7 +3422,12 @@ export default function InterviewRoom() {
               {/* Code Studio Header */}
               <div className="int-room-code-header">
                 <div className="int-room-code-header-left">
-                  <span className="int-room-code-title-icon">💻</span>
+                  <span className="int-room-code-title-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  </span>
                   <div>
                     <div className="int-room-code-title">HireMind Code Studio</div>
                     <div className="int-room-code-subtitle">In-Browser Sandbox • Judge0 CE Powered</div>
@@ -2560,7 +3560,13 @@ export default function InterviewRoom() {
                       </>
                     ) : (
                       <>
-                        <span>🚀 Submit Solution to AI</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                          </svg>
+                          Submit Solution to AI
+                        </span>
                       </>
                     )}
                   </button>
@@ -2591,8 +3597,24 @@ export default function InterviewRoom() {
                       <span className={`int-room-term-status ${codeOutput.success ? 'is-success' : 'is-error'}`}>
                         {codeOutput.status || (codeOutput.success ? 'Success' : 'Failed')}
                       </span>
-                      {codeOutput.time && <span className="int-room-term-metric">⏱ {codeOutput.time}s</span>}
-                      {codeOutput.memory && <span className="int-room-term-metric">💾 {codeOutput.memory} KB</span>}
+                      {codeOutput.time && (
+                        <span className="int-room-term-metric" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                          </svg>
+                          {codeOutput.time}s
+                        </span>
+                      )}
+                      {codeOutput.memory && (
+                        <span className="int-room-term-metric" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect width="18" height="18" x="3" y="3" rx="2" />
+                            <path d="M7 7h10v10H7z" />
+                          </svg>
+                          {codeOutput.memory} KB
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2629,73 +3651,468 @@ export default function InterviewRoom() {
       </div>
 
       {/* =====================================================================
-          INTERVIEW MODE SELECTION MODAL (Prompted at begin of interview)
+          INTERVIEW MODE & FORMAT SELECTION MODAL (Prompted at begin of interview)
           ===================================================================== */}
       {isModeModalOpen && (
         <div className="int-room-mode-overlay" role="dialog" aria-modal="true" aria-labelledby="mode-modal-title">
           <div className="int-room-mode-modal">
-            <div className="int-room-mode-header">
-              <div className="int-room-mode-badge">HireMind AI Interview Experience</div>
-              <h2 id="mode-modal-title" className="int-room-mode-title">Choose Your Interview Format</h2>
-              <p className="int-room-mode-subtitle">
-                Select how you would like to interact with the AI interviewer for the <strong>{displayRole}</strong> position at <strong>{displayCompany}</strong>.
+            {modalStep === 'mode' ? (
+              <>
+                <div className="int-room-mode-header">
+                  <div className="int-room-mode-badge">Step 1 of 2 • Interview Style</div>
+                  <h2 id="mode-modal-title" className="int-room-mode-title">Select Interview Mode</h2>
+                  <p className="int-room-mode-subtitle">
+                    Choose how you would like to experience your interview for the <strong>{displayRole}</strong> position at <strong>{displayCompany}</strong>.
+                  </p>
+                </div>
+
+                <div className="int-room-mode-grid">
+                  {/* Card 1: HR Interview Mode */}
+                  <div
+                    className={`int-room-mode-card is-hr ${chosenMode === 'HR_SIMULATION' ? 'is-selected' : ''}`}
+                    onClick={() => handleChooseInterviewMode('HR_SIMULATION')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        handleChooseInterviewMode('HR_SIMULATION')
+                      }
+                    }}
+                  >
+                    <div className="int-room-mode-card__top">
+                      <div className="int-room-mode-card__icon-box">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                      </div>
+                      <span className="int-room-mode-card__badge-pill">Realistic Simulation</span>
+                    </div>
+
+                    <h3 className="int-room-mode-card__title">HR Interview Mode</h3>
+                    <p className="int-room-mode-card__desc">
+                      Experience a realistic interview with an AI interviewer. Answer HR, behavioral, and job-related questions while the AI asks relevant adaptive follow-up questions based on your responses.
+                    </p>
+
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Realistic interview conversation</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Adaptive follow-up questions</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check is-amber">✓</span>
+                        <span>No immediate feedback, scores, or coaching after individual answers</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Comprehensive performance report after the interview ends</span>
+                      </li>
+                    </ul>
+
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-hr"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleChooseInterviewMode('HR_SIMULATION')
+                      }}
+                    >
+                      Choose HR Mode →
+                    </button>
+                  </div>
+
+                  {/* Card 2: Feedback Interview Mode */}
+                  <div
+                    className={`int-room-mode-card is-feedback ${chosenMode === 'FEEDBACK_COACHING' ? 'is-selected is-selected--feedback' : ''}`}
+                    onClick={() => handleChooseInterviewMode('FEEDBACK_COACHING')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        handleChooseInterviewMode('FEEDBACK_COACHING')
+                      }
+                    }}
+                  >
+                    <div className="int-room-mode-card__top">
+                      <div className="int-room-mode-card__icon-box is-feedback">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                          <path d="M12 7v2" />
+                          <path d="M12 13h.01" />
+                        </svg>
+                      </div>
+                      <span className="int-room-mode-card__badge-pill is-purple">Interactive Coaching</span>
+                    </div>
+
+                    <h3 className="int-room-mode-card__title">Feedback Interview Mode</h3>
+                    <p className="int-room-mode-card__desc">
+                      Practise answering interview questions while receiving personalized AI feedback after every response. Learn from your mistakes, improve your answers, and continue practising with adaptive follow-up questions.
+                    </p>
+
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Personalized interview questions</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Immediate feedback after every answer</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Strengths and weaknesses identification</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Actionable suggestions for improving each answer</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Adaptive follow-up questions</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Comprehensive final performance report</span>
+                      </li>
+                    </ul>
+
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-feedback"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleChooseInterviewMode('FEEDBACK_COACHING')
+                      }}
+                    >
+                      Choose Feedback Mode →
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="int-room-mode-header">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      className="int-room-mode-back-btn"
+                      onClick={() => setModalStep('mode')}
+                      title="Change interview mode"
+                    >
+                      ← Back to Mode Selection
+                    </button>
+                    <div className={`int-room-mode-badge ${chosenMode === 'FEEDBACK_COACHING' ? 'is-purple' : ''}`}>
+                      {chosenMode === 'FEEDBACK_COACHING' ? '🟣 Feedback Interview Mode' : '🔵 HR Interview Mode'}
+                    </div>
+                  </div>
+                  <h2 id="mode-modal-title" className="int-room-mode-title">Choose Your Interview Format</h2>
+                  <p className="int-room-mode-subtitle">
+                    Select how you would like to interact with the AI interviewer for the <strong>{displayRole}</strong> position at <strong>{displayCompany}</strong>.
+                  </p>
+                </div>
+
+                <div className="int-room-mode-grid">
+                  {/* Voice-Based Interview Card */}
+                  <div className="int-room-mode-card is-voice" onClick={() => handleSelectMode('voice')}>
+                    <div className="int-room-mode-card__badge">Recommended • Hands-Free</div>
+                    <div className="int-room-mode-card__icon-wrap">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                    </div>
+                    <h3 className="int-room-mode-card__title">Voice-Based Interview</h3>
+                    <p className="int-room-mode-card__desc">
+                      The AI interviewer asks questions aloud automatically. You answer naturally using your microphone, with live speech transcription typed directly on screen.
+                    </p>
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        AI automatically reads questions aloud
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Real-time speech typing — words appear as you speak
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Simple microphone ON / OFF controls (no chatbox needed)
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Realistic, immersive conversational practice
+                      </li>
+                    </ul>
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-voice"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSelectMode('voice')
+                      }}
+                    >
+                      Start Voice Interview →
+                    </button>
+                  </div>
+
+                  {/* Text-Based Interview Card */}
+                  <div className="int-room-mode-card is-text" onClick={() => handleSelectMode('text')}>
+                    <div className="int-room-mode-card__badge is-muted">Standard Format</div>
+                    <div className="int-room-mode-card__icon-wrap">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="int-room-mode-card__title">Text-Based Interview</h3>
+                    <p className="int-room-mode-card__desc">
+                      Traditional format with on-screen reading and keyboard input. Type your responses and insert code snippets at your own pace.
+                    </p>
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Read questions on screen
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Type responses using the keyboard chatbox
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Insert formatted code snippets
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Self-paced response writing
+                      </li>
+                    </ul>
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-text"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSelectMode('text')
+                      }}
+                    >
+                      Start Text Interview →
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          FEATURE 1B: PRE-FLIGHT HARDWARE QUALITY CHECK ("GREEN ROOM") MODAL
+          ===================================================================== */}
+      {isHardwareModalOpen && (
+        <div className="int-room-hw-overlay" role="dialog" aria-modal="true" aria-labelledby="hw-modal-title">
+          <div className="int-room-hw-modal">
+            {/* Header */}
+            <div className="int-room-hw-header">
+              <div className="int-room-hw-badge">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                </svg>
+                PRE-FLIGHT HARDWARE CHECK • GREEN ROOM
+              </div>
+              <h2 id="hw-modal-title" className="int-room-hw-title">Audio & Microphone Quality Verification</h2>
+              <p className="int-room-hw-subtitle">
+                Ensure your microphone clarity, volume levels, and audio output are optimal before speaking with the AI interviewer for the <strong>{displayRole}</strong> position.
               </p>
             </div>
 
-            <div className="int-room-mode-grid">
-              {/* Voice-Based Interview Card */}
-              <div className="int-room-mode-card is-voice" onClick={() => handleSelectMode('voice')}>
-                <div className="int-room-mode-card__badge">Recommended • Hands-Free</div>
-                <div className="int-room-mode-card__icon-wrap">
-                  <span className="int-room-mode-card__icon">🎙️</span>
+            {/* Body */}
+            <div className="int-room-hw-body">
+              <div className="int-room-hw-grid">
+                {/* 1. Microphone Input & Level Test */}
+                <div className="int-room-hw-card">
+                  <div className="int-room-hw-card-header">
+                    <span className="int-room-hw-card-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                      Microphone Input
+                    </span>
+                    <span className={`int-room-hw-status-pill ${micPermissionStatus === 'granted' || isAudioOn ? 'is-ok' : micPermissionStatus === 'denied' ? 'is-error' : 'is-warn'}`}>
+                      {micPermissionStatus === 'granted' || isAudioOn ? '● Live & Connected' : micPermissionStatus === 'denied' ? 'Blocked' : 'Testing'}
+                    </span>
+                  </div>
+
+                  <p className="int-room-hw-card-desc">
+                    Speak into your microphone. Watch the live volume indicator below to ensure sufficient input gain.
+                  </p>
+
+                  {/* Live Volume Meter Bar */}
+                  <div className="int-room-hw-meter-wrap">
+                    <div
+                      className="int-room-hw-meter-bar"
+                      style={{ width: `${Math.min(100, Math.round(audioVolume * 2.8))}%` }}
+                    />
+                  </div>
+                  <div className="int-room-hw-meter-labels">
+                    <span>Silent</span>
+                    <span>{audioVolume > 15 ? 'Good Level' : 'Speak to test...'}</span>
+                    <span>Peak</span>
+                  </div>
+
+                  {/* 3s Voice Sample Recording & Loopback Playback */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                    <button
+                      type="button"
+                      className={`int-room-hw-action-btn ${isTestingMicRecording ? 'is-active-recording' : ''}`}
+                      onClick={handleRecordTestSample}
+                      disabled={isTestingMicRecording}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <circle cx="12" cy="12" r="4" fill="currentColor" />
+                      </svg>
+                      {isTestingMicRecording ? `Recording... (${testRecordingCountdown}s)` : 'Record 3s Voice Sample'}
+                    </button>
+
+                    {testAudioUrl && (
+                      <button
+                        type="button"
+                        className="int-room-hw-action-btn is-success"
+                        onClick={handlePlayTestSample}
+                        disabled={isPlayingTestAudio || isTestingMicRecording}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                        {isPlayingTestAudio ? 'Playing Back...' : 'Play Back Sample'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <h3 className="int-room-mode-card__title">Voice-Based Interview</h3>
-                <p className="int-room-mode-card__desc">
-                  The AI interviewer asks questions aloud automatically. You answer naturally using your microphone, with live speech transcription typed directly on screen.
-                </p>
-                <ul className="int-room-mode-card__features">
-                  <li>✓ AI automatically reads questions aloud</li>
-                  <li>✓ Real-time speech typing — words appear as you speak</li>
-                  <li>✓ Simple microphone ON / OFF controls (no chatbox needed)</li>
-                  <li>✓ Realistic, immersive conversational practice</li>
-                </ul>
+
+                {/* 2. Speaker Output Test */}
+                <div className="int-room-hw-card">
+                  <div className="int-room-hw-card-header">
+                    <span className="int-room-hw-card-title">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                      </svg>
+                      Speaker / Headphones
+                    </span>
+                    <span className={`int-room-hw-status-pill ${speakerTestPassed ? 'is-ok' : 'is-warn'}`}>
+                      {speakerTestPassed ? '✓ Tested' : 'Needs Test'}
+                    </span>
+                  </div>
+
+                  <p className="int-room-hw-card-desc">
+                    Click the button below to play a harmonic test chime. Make sure your headphones or speakers are unmuted so you can hear the AI interviewer.
+                  </p>
+
+                  <div style={{ marginTop: 'auto' }}>
+                    <button
+                      type="button"
+                      className={`int-room-hw-action-btn ${speakerTestPassed ? 'is-success' : ''}`}
+                      onClick={handlePlaySpeakerTestTone}
+                      disabled={isPlayingSpeakerTest}
+                      style={{ width: '100%' }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                      {isPlayingSpeakerTest ? 'Playing Test Sound...' : speakerTestPassed ? '✓ Play Test Sound Again' : 'Play Speaker Test Sound'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Troubleshooting Notice if mic is blocked */}
+              {micPermissionStatus === 'denied' && (
+                <div className="int-room-hw-alert-box" style={{ borderColor: '#ef4444', background: 'rgba(239, 68, 68, 0.1)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <span>
+                    <strong>Microphone access is blocked:</strong> Click the padlock icon in your browser address bar to allow microphone permissions, or switch to Text Mode below.
+                  </span>
+                </div>
+              )}
+
+              {/* Quality confirmation note */}
+              <div className="int-room-hw-alert-box">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="m9 12 2 2 4-4" />
+                </svg>
+                <span>
+                  <strong>Tip for Sri Lankan candidates:</strong> Natural pauses while gathering your thoughts are completely fine. The system waits 3 seconds of silence before finalizing each response.
+                </span>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="int-room-hw-footer">
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
-                  className="int-room-mode-card__action-btn is-voice"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleSelectMode('voice')
+                  className="int-room-hw-text-fallback-btn"
+                  onClick={() => {
+                    setIsHardwareModalOpen(false)
+                    setInterviewMode('text')
+                    startOrResumeInterview('text', false)
                   }}
                 >
-                  Start Voice Interview →
+                  Switch to Text Interview
                 </button>
               </div>
 
-              {/* Text-Based Interview Card */}
-              <div className="int-room-mode-card is-text" onClick={() => handleSelectMode('text')}>
-                <div className="int-room-mode-card__badge is-muted">Standard Format</div>
-                <div className="int-room-mode-card__icon-wrap">
-                  <span className="int-room-mode-card__icon">💬</span>
-                </div>
-                <h3 className="int-room-mode-card__title">Text-Based Interview</h3>
-                <p className="int-room-mode-card__desc">
-                  Traditional format with on-screen reading and keyboard input. Type your responses and insert code snippets at your own pace.
-                </p>
-                <ul className="int-room-mode-card__features">
-                  <li>✓ Read questions on screen</li>
-                  <li>✓ Type responses using the keyboard chatbox</li>
-                  <li>✓ Insert formatted code snippets</li>
-                  <li>✓ Self-paced response writing</li>
-                </ul>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                 <button
                   type="button"
-                  className="int-room-mode-card__action-btn is-text"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleSelectMode('text')
-                  }}
+                  className="int-room-hw-text-fallback-btn"
+                  onClick={handleConfirmHardwareReady}
+                  title="Skip check and start immediately"
                 >
-                  Start Text Interview →
+                  Skip Check
+                </button>
+
+                <button
+                  type="button"
+                  className="int-room-hw-primary-btn"
+                  onClick={handleConfirmHardwareReady}
+                >
+                  <span>Looks & Sounds Good — Enter Interview →</span>
                 </button>
               </div>
             </div>
@@ -2735,7 +4152,10 @@ export default function InterviewRoom() {
         <div className="int-room-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-modal-title">
           <div className="int-room-pause-modal">
             <div className="int-room-pause-modal__icon-wrap">
-              <span className="int-room-pause-modal__badge-icon">⏸</span>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" color="#38bdf8">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+              </svg>
             </div>
             <div className="int-room-pause-modal__badge">Session Paused</div>
             <h2 id="pause-modal-title" className="int-room-pause-modal__title">Interview Is On Pause</h2>
@@ -2757,8 +4177,12 @@ export default function InterviewRoom() {
                 type="button"
                 className="int-room-pause-modal__resume-btn"
                 onClick={handleTogglePause}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
-                ▶ Resume Interview
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Resume Interview
               </button>
               <button
                 type="button"
@@ -2790,7 +4214,11 @@ export default function InterviewRoom() {
               (<strong>Stage {currentStageNumber} of {totalStages}</strong>) will be safely preserved.
             </p>
             <div className="int-room-end-modal__ai-note">
-              <span className="int-room-end-modal__ai-sparkle">✨</span>
+              <span className="int-room-end-modal__ai-sparkle">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                </svg>
+              </span>
               <span>
                 <strong>Comprehensive AI Evaluation:</strong> Our evaluation agent will thoroughly analyze all topics and answers covered during this session and generate your domain skill breakdown without penalizing for unreached stages.
               </span>
@@ -2818,6 +4246,252 @@ export default function InterviewRoom() {
                   'Conclude & View Evaluation →'
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          FEEDBACK COACHING MODAL / PANEL (Active in Feedback Interview Mode)
+          ===================================================================== */}
+      {activeFeedback && (
+        <div
+          className="int-room-feedback-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="feedback-panel-title"
+        >
+          <div className="int-room-feedback-panel">
+            {/* Top Bar / Header */}
+            <div className="int-room-feedback-header">
+              <div className="int-room-feedback-header-left">
+                <div className="int-room-feedback-badge">
+                  <span className="int-room-feedback-badge-dot" />
+                  FEEDBACK COACHING MODE • ANSWER EVALUATION
+                </div>
+                <h2 id="feedback-panel-title" className="int-room-feedback-title">
+                  Immediate AI Feedback & Coaching
+                </h2>
+                <p className="int-room-feedback-subtitle">
+                  Review how your response performed on key interview dimensions, learn actionable improvements, and continue when ready.
+                </p>
+              </div>
+
+              {/* Overall Score Badge */}
+              <div className="int-room-feedback-score-card">
+                <div className="int-room-feedback-score-num">
+                  {activeFeedback.score ?? activeFeedback.overallScore ?? '—'}
+                  {(activeFeedback.score ?? activeFeedback.overallScore) != null && (
+                    <span className="int-room-feedback-score-pct">%</span>
+                  )}
+                </div>
+                <div className="int-room-feedback-score-label">ANSWER SCORE</div>
+              </div>
+            </div>
+
+            <div className="int-room-feedback-body">
+              {/* Coach unavailable: honest message + retry (no placeholder evaluation) */}
+              {activeFeedback.unavailable && (
+                <div className="int-room-feedback-err-banner" role="status">
+                  <span>{activeFeedback.message || 'Feedback for this answer could not be generated right now.'}</span>
+                  <button type="button" className="int-room-feedback-retry-btn" onClick={handleRetryFeedback} disabled={isRetryingFeedback}>
+                    {isRetryingFeedback ? 'Retrying...' : 'Retry Evaluation'}
+                  </button>
+                </div>
+              )}
+
+              {/* Executive Summary */}
+              {activeFeedback.summary && (
+                <div className="int-room-feedback-summary-box">
+                  <div className="int-room-feedback-summary-label">COACH SUMMARY</div>
+                  <p className="int-room-feedback-summary-text">{activeFeedback.summary}</p>
+                </div>
+              )}
+
+              {/* Reference Accordion: Question & Answer Context */}
+              {feedbackContext && (
+                <div className="int-room-feedback-context-block">
+                  <div className="int-room-feedback-context-row">
+                    <span className="int-room-feedback-context-label">QUESTION ASKED:</span>
+                    <p className="int-room-feedback-context-q">{feedbackContext.question}</p>
+                  </div>
+                  <div className="int-room-feedback-context-row">
+                    <span className="int-room-feedback-context-label">YOUR ANSWER:</span>
+                    <div className="int-room-feedback-context-a">{feedbackContext.answer}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION A: ANSWER EVALUATION CRITERIA METRICS */}
+              {activeFeedback.evaluation && (
+                <div className="int-room-feedback-section">
+                  <h3 className="int-room-feedback-section-title">
+                    <span className="int-room-feedback-section-num">A</span>
+                    Evaluation Criteria Breakdown
+                  </h3>
+                  <div className="int-room-feedback-metrics-grid">
+                    {[
+                      { key: 'relevance', label: 'Relevance to Question' },
+                      { key: 'technical_accuracy', label: 'Technical Accuracy & Depth' },
+                      { key: 'clarity', label: 'Clarity & Organization' },
+                      { key: 'completeness', label: 'Completeness of Response' },
+                      { key: 'supporting_examples', label: 'Quality of Examples (STAR)' },
+                      { key: 'communication', label: 'Communication Effectiveness' },
+                    ].map(({ key, label }) => {
+                      const item = activeFeedback.evaluation?.[key]
+                      if (!item) return null
+                      const scoreVal = typeof item === 'object' ? item.score : item
+                      const comment = typeof item === 'object' ? item.comment : ''
+                      return (
+                        <div key={key} className="int-room-feedback-metric-card">
+                          <div className="int-room-feedback-metric-header">
+                            <span className="int-room-feedback-metric-name">{label}</span>
+                            <span className={`int-room-feedback-metric-score ${scoreVal >= 75 ? 'is-high' : scoreVal >= 55 ? 'is-mid' : 'is-low'}`}>
+                              {scoreVal}%
+                            </span>
+                          </div>
+                          {comment && <p className="int-room-feedback-metric-comment">{comment}</p>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTIONS B & C: STRENGTHS & AREAS FOR IMPROVEMENT */}
+              {!activeFeedback.unavailable && (
+              <div className="int-room-feedback-columns-row">
+                {/* Strengths */}
+                <div className="int-room-feedback-card int-room-feedback-card--strengths">
+                  <div className="int-room-feedback-card-heading">
+                    <span className="int-room-feedback-card-badge is-green">B. Strengths</span>
+                    <span className="int-room-feedback-card-sub">What you did well</span>
+                  </div>
+                  <ul className="int-room-feedback-list">
+                    {!(activeFeedback.strengths && activeFeedback.strengths.length > 0) && (
+                      <li className="int-room-feedback-list-item">
+                        <span>No clear strengths were identified in this answer.</span>
+                      </li>
+                    )}
+                    {(activeFeedback.strengths || []).map((str, idx) => (
+                      <li key={idx} className="int-room-feedback-list-item">
+                        <span className="int-room-feedback-icon-check">✓</span>
+                        <span>{str}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Areas for Improvement */}
+                <div className="int-room-feedback-card int-room-feedback-card--improvements">
+                  <div className="int-room-feedback-card-heading">
+                    <span className="int-room-feedback-card-badge is-amber">C. Areas for Improvement</span>
+                    <span className="int-room-feedback-card-sub">Gaps & missing evidence</span>
+                  </div>
+                  <ul className="int-room-feedback-list">
+                    {(activeFeedback.areas_for_improvement || activeFeedback.areasForImprovement || []).map((imp, idx) => (
+                      <li key={idx} className="int-room-feedback-list-item">
+                        <span className="int-room-feedback-icon-target">→</span>
+                        <span>{imp}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              )}
+
+              {/* SECTION D: ACTIONABLE SUGGESTIONS */}
+              {activeFeedback.actionable_suggestions && activeFeedback.actionable_suggestions.length > 0 && (
+                <div className="int-room-feedback-section">
+                  <h3 className="int-room-feedback-section-title">
+                    <span className="int-room-feedback-section-num">D</span>
+                    Actionable Recommendations for Next Answers
+                  </h3>
+                  <div className="int-room-feedback-suggestions-box">
+                    {activeFeedback.actionable_suggestions.map((sug, idx) => (
+                      <div key={idx} className="int-room-feedback-suggestion-row">
+                        <span className="int-room-feedback-sug-num">{idx + 1}</span>
+                        <span className="int-room-feedback-sug-text">{sug}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION E: IMPROVED ANSWER GUIDANCE */}
+              {activeFeedback.improved_answer_guidance && (
+                <div className="int-room-feedback-section">
+                  <div className="int-room-feedback-guidance-card">
+                    <div className="int-room-feedback-guidance-header">
+                      <span className="int-room-feedback-section-num">E</span>
+                      <div>
+                        <h3 className="int-room-feedback-guidance-title">Improved Answer Guidance</h3>
+                        <span className="int-room-feedback-guidance-tag">
+                          Learning Example — Illustrative model structure, not candidate's original text
+                        </span>
+                      </div>
+                    </div>
+
+                    {activeFeedback.improved_answer_guidance.structure && (
+                      <div className="int-room-feedback-model-structure">
+                        <strong>Recommended Response Framework:</strong>{' '}
+                        <span>{activeFeedback.improved_answer_guidance.structure}</span>
+                      </div>
+                    )}
+
+                    {activeFeedback.improved_answer_guidance.example_model_answer && (
+                      <div className="int-room-feedback-model-quote">
+                        <div className="int-room-feedback-model-quote-lbl">ILLUSTRATIVE MODEL ANSWER:</div>
+                        <p>{activeFeedback.improved_answer_guidance.example_model_answer}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Error banner if retry failed */}
+              {feedbackError && (
+                <div className="int-room-feedback-err-banner">
+                  <span>{feedbackError}</span>
+                  <button type="button" className="int-room-feedback-retry-btn" onClick={handleRetryFeedback} disabled={isRetryingFeedback}>
+                    {isRetryingFeedback ? 'Retrying...' : 'Retry Evaluation'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* ACTION FOOTER */}
+            <div className="int-room-feedback-footer">
+              <div className="int-room-feedback-footer-left">
+                {pendingTurnData?.nextQuestion && (
+                  <span className="int-room-feedback-next-hint">
+                    Adaptive follow-up question ready: &ldquo;{pendingTurnData.nextQuestion.slice(0, 75)}...&rdquo;
+                  </span>
+                )}
+              </div>
+              <div className="int-room-feedback-footer-right">
+                <button
+                  type="button"
+                  className="int-room-feedback-retry-subtle-btn"
+                  onClick={handleRetryFeedback}
+                  disabled={isRetryingFeedback}
+                  title="Re-run AI evaluation on this answer"
+                >
+                  {isRetryingFeedback ? 'Re-evaluating...' : 'Re-evaluate Answer'}
+                </button>
+
+                <button
+                  type="button"
+                  className="int-room-feedback-continue-btn"
+                  onClick={handleContinueFromFeedback}
+                >
+                  <span>
+                    {pendingTurnData?.isComplete
+                      ? 'Complete Interview & View Final Report →'
+                      : 'Continue to Next Question →'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

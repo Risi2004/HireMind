@@ -6,7 +6,7 @@ import restartIcon from '../assets/icons/restart.svg'
 import company1Icon from '../assets/icons/company1.svg'
 import bulbIcon from '../assets/icons/bulb.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
-import { generateInterviewId } from '../utils/interviewUtils'
+import { generateInterviewId, saveInterviewSession } from '../utils/interviewUtils'
 import { getApiUrl } from '../config/api'
 import './InterviewReport.css'
 
@@ -61,6 +61,23 @@ export default function InterviewReport() {
           setSession(data.session)
           setChatMessages(data.chatMessages || [])
           setLoadError(null)
+
+          const evalScore = typeof data.evaluation?.overallScore === 'number'
+            ? data.evaluation.overallScore
+            : (typeof data.evaluation?.score === 'number' ? data.evaluation.score : null)
+
+          const targetId = data.session?.sessionId || sessionId
+          if (targetId && targetId !== 'default' && targetId !== 'latest') {
+            saveInterviewSession({
+              id: targetId,
+              sessionId: targetId,
+              score: evalScore !== null ? `${evalScore}%` : null,
+              overallScore: evalScore,
+              evaluation: data.evaluation,
+              status: 'completed',
+              lastVisitedPath: `/interview-report?id=${targetId}`,
+            })
+          }
         } else {
           if (data.session) setSession(data.session)
           setLoadError({
@@ -348,7 +365,24 @@ export default function InterviewReport() {
           {/* Top-Left Hero Card */}
           <div className="rep-hero-card">
             <div className="rep-hero-left">
-              {readinessBadge && <span className="rep-hero-badge">{readinessBadge}</span>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '6px' }}>
+                {readinessBadge && <span className="rep-hero-badge">{readinessBadge}</span>}
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '3px 9px',
+                    borderRadius: '12px',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    background: session?.interviewMode === 'FEEDBACK_COACHING' ? 'rgba(168, 85, 247, 0.16)' : 'rgba(56, 189, 248, 0.14)',
+                    border: `1px solid ${session?.interviewMode === 'FEEDBACK_COACHING' ? 'rgba(168, 85, 247, 0.35)' : 'rgba(56, 189, 248, 0.3)'}`,
+                    color: session?.interviewMode === 'FEEDBACK_COACHING' ? '#c084fc' : '#38bdf8',
+                  }}
+                >
+                  {session?.interviewMode === 'FEEDBACK_COACHING' ? 'Feedback Coaching Mode' : 'HR Simulation Mode'}
+                </span>
+              </div>
               <h2 className="rep-hero-role">{displayRole}</h2>
               {displayCompany && (
                 <div className="rep-hero-company">

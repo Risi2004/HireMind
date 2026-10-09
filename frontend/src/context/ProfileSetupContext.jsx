@@ -23,23 +23,127 @@ export function ProfileSetupProvider({ children }) {
   const [skills, setSkills] = useState([])
   const [careerInterests, setCareerInterests] = useState([])
 
+  // Automatic skill detection state from CV
+  const [isExtractingSkills, setIsExtractingSkills] = useState(false)
+  const [extractedSkills, setExtractedSkills] = useState([])
+  const [extractionError, setExtractionError] = useState(null)
+  const [lastExtractedSource, setLastExtractedSource] = useState(null)
+
   const { user: authUser, token, setUser: setAuthUser } = useAuth()
 
-  // Helper to add a skill (avoids duplicates, trims whitespace)
+  // Helper to add a skill (strictly avoids duplicates, trims whitespace, supports comma-separated input)
   const addSkill = (skill) => {
     if (!skill) return
-    const trimmed = typeof skill === 'string' ? skill.trim() : ''
-    if (!trimmed) return
+    const items = typeof skill === 'string' ? skill.split(',') : [skill]
     setSkills((prev) => {
-      const exists = prev.some((s) => s.toLowerCase() === trimmed.toLowerCase())
-      if (exists) return prev
-      return [...prev, trimmed]
+      const existingLower = new Set(
+        prev.map((s) => (typeof s === 'string' ? s.trim().toLowerCase() : '')).filter(Boolean)
+      )
+      const toAdd = []
+      for (const item of items) {
+        if (!item || typeof item !== 'string') continue
+        const trimmed = item.trim()
+        if (!trimmed) continue
+        const lower = trimmed.toLowerCase()
+        if (!existingLower.has(lower)) {
+          existingLower.add(lower)
+          toAdd.push(trimmed)
+        }
+      }
+      return toAdd.length > 0 ? [...prev, ...toAdd] : prev
     })
   }
 
-  // Helper to remove a skill
+  // Helper to remove a skill (case-insensitive exact match)
   const removeSkill = (skillToRemove) => {
-    setSkills((prev) => prev.filter((s) => s !== skillToRemove))
+    if (!skillToRemove) return
+    const target = String(skillToRemove).trim().toLowerCase()
+    setSkills((prev) => prev.filter((s) => s.trim().toLowerCase() !== target))
+  }
+
+  // Extract skills automatically from CV without duplicating any existing skills
+  const extractSkillsFromResume = async (fileToUse = undefined, force = false) => {
+    const file = fileToUse !== undefined ? fileToUse : resumeFile
+    const sourceKey = file
+      ? `${file.name}_${file.size}_${file.lastModified}`
+      : (authUser?.resumeFileName || authUser?.resumeUrl || '')
+
+    if (!sourceKey) return []
+    // Skip if already extracted for this resume source unless force is true
+    if (!force && sourceKey === lastExtractedSource && extractedSkills.length > 0) {
+      return extractedSkills
+    }
+
+    setIsExtractingSkills(true)
+    setExtractionError(null)
+
+    try {
+      const activeToken = token || localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const formData = new FormData()
+
+      if (file) {
+        formData.append('resume', file)
+      } else {
+        formData.append('useProfileResume', 'true')
+      }
+
+      const res = await apiFetch('/api/profile/extract-skills', {
+        method: 'POST',
+        headers: {
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: formData,
+      })
+
+      const data = await res.json()
+      if (res.ok && data.success && Array.isArray(data.skills)) {
+        const detected = data.skills
+
+        // Merge detected skills into existing skills without ANY duplicates (case-insensitive)
+        setSkills((prev) => {
+          const existingLower = new Set(
+            prev.map((s) => (typeof s === 'string' ? s.trim().toLowerCase() : '')).filter(Boolean)
+          )
+          const newUnique = []
+          for (const item of detected) {
+            if (!item || typeof item !== 'string') continue
+            const trimmed = item.trim()
+            if (!trimmed) continue
+            const lower = trimmed.toLowerCase()
+            if (!existingLower.has(lower)) {
+              existingLower.add(lower)
+              newUnique.push(trimmed)
+            }
+          }
+          return newUnique.length > 0 ? [...prev, ...newUnique] : prev
+        })
+
+        setExtractedSkills(detected)
+        setLastExtractedSource(sourceKey)
+
+        // If field is empty and role is detected, auto-fill field if matched
+        if (!field && data.detectedRole) {
+          const matched = FIELD_OPTIONS.find(
+            (fo) =>
+              fo.toLowerCase().includes(data.detectedRole.toLowerCase()) ||
+              data.detectedRole.toLowerCase().includes(fo.toLowerCase())
+          )
+          if (matched) setField(matched)
+        }
+
+        return detected
+      } else {
+        const msg = data.message || 'Could not extract skills from resume.'
+        setExtractionError(msg)
+        return []
+      }
+    } catch (err) {
+      console.warn('Skill extraction error:', err.message)
+      setExtractionError(err.message)
+      return []
+    } finally {
+      setIsExtractingSkills(false)
+    }
   }
 
   // Helper to add a career interest
@@ -210,11 +314,17 @@ export function ProfileSetupProvider({ children }) {
     return data
   }
 
+  const clearResume = () => {
+    setResumeFile(null)
+    setLastExtractedSource(null)
+    setExtractedSkills([])
+  }
+
   const value = {
     user,
     resumeFile,
     setResumeFile,
-    clearResume: () => setResumeFile(null),
+    clearResume,
     field,
     setField,
     customField,
@@ -242,6 +352,11 @@ export function ProfileSetupProvider({ children }) {
     disconnectGithub,
     startGithubOAuth,
     submitProfileSetup,
+    isExtractingSkills,
+    extractedSkills,
+    extractionError,
+    lastExtractedSource,
+    extractSkillsFromResume,
   }
 
   return (

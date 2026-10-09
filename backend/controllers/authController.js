@@ -522,12 +522,14 @@ const deleteAccount = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Verify password if provided
-    if (password) {
-      const isMatch = await user.comparePassword(password);
-      if (!isMatch) {
-        return res.status(400).json({ message: 'Incorrect password. Account deletion aborted.' });
-      }
+    // Verify password is provided (strictly mandatory)
+    if (!password || typeof password !== 'string' || !password.trim()) {
+      return res.status(400).json({ message: 'Account password is required to confirm deletion.' });
+    }
+
+    const isMatch = await user.comparePassword(password.trim());
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Incorrect password. Account deletion aborted.' });
     }
 
     // Delete candidate profile picture from storage if present
