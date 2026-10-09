@@ -834,10 +834,24 @@ exports.beginLiveInterview = async (req, res) => {
     // If session already started and has an opening question in chatMessages, return it (resume friendly)
     const existingInterviewerMessages = (session.chatMessages || []).filter((m) => m.role === 'interviewer');
     if (session.interviewState.startedAt && existingInterviewerMessages.length > 0 && session.status === 'in_progress' && session.interviewState.questionsAsked > 0) {
+      const lastQ = existingInterviewerMessages[existingInterviewerMessages.length - 1].content;
+      let resumedAudioUrl = null;
+      const isVoiceMode = req.body?.mode === 'voice' || req.query?.mode === 'voice' || req.body?.includeAudio;
+      if (isVoiceMode && lastQ) {
+        try {
+          const speechRes = await textToSpeechService.generateSpeech({ text: lastQ });
+          if (speechRes.success) {
+            resumedAudioUrl = speechRes.audioUrl;
+          }
+        } catch (e) {
+          console.warn('[Interview Controller] Error synthesizing speech for resumed session:', e);
+        }
+      }
       return res.status(200).json({
         success: true,
         resumed: true,
-        question: existingInterviewerMessages[existingInterviewerMessages.length - 1].content,
+        question: lastQ,
+        audioUrl: resumedAudioUrl,
         stage: session.interviewState.currentStageName || firstStage.name,
         interviewState: session.interviewState,
         chatMessages: session.chatMessages,

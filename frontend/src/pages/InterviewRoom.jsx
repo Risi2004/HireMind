@@ -501,7 +501,9 @@ export default function InterviewRoom() {
       }
     } catch { /* non-critical */ }
 
-    await startOrResumeInterview('voice', true, chosenMode)
+    if (transcriptMessages.length === 0) {
+      await startOrResumeInterview('voice', true, chosenMode)
+    }
   }
 
   // Interview Mode & Format Selection Modal state
@@ -711,9 +713,11 @@ export default function InterviewRoom() {
     setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
     setPlayingMessageId(messageId)
 
-    if (audioCacheRef.current.has(messageId)) {
+    const existingAudio = audioCacheRef.current.get(messageId) || transcriptMessages.find((m) => m.id === messageId)?.audioUrl
+    if (existingAudio) {
       if (!isCompleted && !isTerminatedRef.current) {
-        playInterviewerAudio(audioCacheRef.current.get(messageId), messageId, text)
+        audioCacheRef.current.set(messageId, existingAudio)
+        playInterviewerAudio(existingAudio, messageId, text)
       }
       return
     }
@@ -721,7 +725,7 @@ export default function InterviewRoom() {
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 3500)
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
 
       const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/speech`), {
         method: 'POST',
@@ -1023,22 +1027,36 @@ export default function InterviewRoom() {
     } catch { /* non-critical */ }
 
     if (selectedFormat === 'voice') {
-      // User gesture: unlock AudioContext immediately so autoplay succeeds
+      // User gesture: unlock AudioContext and play a silent buffer so browser autoplay policy is cleared
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext
         if (AudioCtx) {
-          const ctx = new AudioCtx()
-          if (ctx.state === 'suspended') ctx.resume()
+          if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+            audioContextRef.current = new AudioCtx()
+          }
+          const ctx = audioContextRef.current
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(() => {})
+          }
+          // Micro silent buffer to warm up browser audio permissions
+          const buffer = ctx.createBuffer(1, 1, 22050)
+          const source = ctx.createBufferSource()
+          source.buffer = buffer
+          source.connect(ctx.destination)
+          source.start(0)
+        }
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          window.speechSynthesis.resume()
         }
       } catch { /* non-critical; safe to ignore */ }
 
-      // Open the Pre-Flight Hardware Quality Check ("Green Room") Modal (Feature 1B)
-      setIsHardwareModalOpen(true)
+      // Prompt and initialize microphone in background
+      startMicrophone().catch((err) => {
+        console.warn('Microphone permission request deferred or denied:', err)
+      })
 
-      // Prompt and initialize microphone
-      try {
-        await startMicrophone()
-      } catch { /* non-critical; safe to ignore */ }
+      // Directly begin live interview with voice mode and auto-play
+      await startOrResumeInterview('voice', true, modeToUse)
     } else {
       await startOrResumeInterview('text', false, modeToUse)
     }
@@ -1081,12 +1099,15 @@ export default function InterviewRoom() {
             time: new Date(m.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             stage: m.metrics?.stageName || data.stage || null,
             text: m.content,
+            audioUrl: m.audioUrl || (idx === data.chatMessages.length - 1 ? (data.audioUrl || null) : null),
           }))
           setTranscriptMessages(mapped)
           const lastMsg = mapped[mapped.length - 1]
+          const audioToPlay = lastMsg?.audioUrl || data.audioUrl || null
           if (lastMsg && lastMsg.sender === 'ai' && shouldAutoPlayAudio) {
-            if (lastMsg.audioUrl) {
-              playInterviewerAudio(lastMsg.audioUrl, lastMsg.id, lastMsg.text)
+            if (audioToPlay) {
+              audioCacheRef.current.set(lastMsg.id, audioToPlay)
+              playInterviewerAudio(audioToPlay, lastMsg.id, lastMsg.text)
             } else {
               handleSynthesizeSpeech(lastMsg.text, lastMsg.id)
             }
@@ -1103,6 +1124,7 @@ export default function InterviewRoom() {
               time: '00:00',
               stage: data.stage || 'Introduction',
               text: data.question,
+              audioUrl: data.audioUrl || null,
             },
           ])
 
