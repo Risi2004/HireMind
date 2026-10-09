@@ -131,6 +131,11 @@ const interviewSessionSchema = new mongoose.Schema(
       followUpDepth: { type: Number, default: 0 },
       currentStageHops: { type: Number, default: 0 },
       maxHopsPerStage: { type: Number, default: 2 },
+      // Adaptive follow-up budget (planned vs adaptive question mix)
+      adaptiveTurns: { type: Number, default: 0 },
+      stageAdaptiveTurns: { type: Number, default: 0 },
+      // Consecutive turns where the agent ignored a required stage change
+      policyViolations: { type: Number, default: 0 },
       coveredTopics: [{ type: String }],
       coveredObjectives: [{ type: String }],
       startedAt: { type: Date, default: null },

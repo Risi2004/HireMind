@@ -17,6 +17,8 @@ from config.settings import (
     get_orchestrator_model,
 )
 
+from services.llm_client import chat_completion
+
 logger = logging.getLogger("ResumeAnalyzerAgent")
 
 try:
@@ -190,49 +192,17 @@ class ResumeAnalyzerAgent:
             if not OPENROUTER_API_KEY or "your_openrouter_api_key_here" in OPENROUTER_API_KEY:
                 return None, "OPENROUTER_API_KEY is not configured or still set to placeholder in ai-service/.env"
 
-            try:
-                import requests
-                base_url = OPENROUTER_BASE_URL.rstrip("/")
-                chat_url = f"{base_url}/chat/completions"
-
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "https://hiremind.com",
-                    "X-Title": "HireMind AI Service"
-                }
-                payload = {
-                    "model": AI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": self.SYSTEM_INSTRUCTION},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 1500,
-                    "reasoning": {"max_tokens": 150}
-                }
-
-                logger.info(f"Querying OpenRouter model '{AI_MODEL}' at '{chat_url}'...")
-                response = requests.post(chat_url, headers=headers, json=payload, timeout=90)
-                if response.status_code == 200:
-                    data = response.json()
-                    choices = data.get("choices", [])
-                    if choices:
-                        msg = choices[0].get("message", {})
-                        content = msg.get("content") or ""
-                        # If content is empty or model output reasoning, check reasoning
-                        if not content.strip() and msg.get("reasoning"):
-                            content = msg.get("reasoning")
-                        return content, None
-                    return None, "OpenRouter returned empty choices list."
-                else:
-                    err_msg = f"OpenRouter endpoint returned HTTP {response.status_code}: {response.text[:200]}"
-                    logger.warning(err_msg)
-                    return None, err_msg
-            except Exception as e:
-                err_msg = f"Connection failed to OpenRouter endpoint '{OPENROUTER_BASE_URL}': {e}"
-                logger.warning(err_msg)
-                return None, err_msg
+            # Shared client: reasoning disabled, fastest provider, hedged retry, hard deadline
+            result = chat_completion(
+                self.SYSTEM_INSTRUCTION,
+                prompt,
+                max_tokens=2000,
+                temperature=0.2,
+                timeout=60,
+                hedge_after=20,
+                label="resume-analyzer",
+            )
+            return (result.content, None) if result.ok else (None, result.error)
 
         return None, "No active LLM model provider configured."
 

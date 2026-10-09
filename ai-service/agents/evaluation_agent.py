@@ -22,6 +22,8 @@ from config.settings import (
     get_orchestrator_model,
 )
 
+from services.llm_client import chat_completion
+
 logger = logging.getLogger("InterviewEvaluationAgent")
 
 
@@ -153,6 +155,25 @@ class InterviewEvaluationAgent:
         interview_type = str(config.get("type") or config.get("interviewType") or context.get("interview_type") or "Role-Specific")
 
         chat_messages = context.get("chatMessages") or context.get("chat_messages") or []
+
+        # Feedback mode: the report must agree with the per-answer coaching already shown
+        per_answer = [
+            f for f in (context.get("perAnswerFeedbacks") or [])
+            if isinstance(f, dict) and isinstance(f.get("score"), (int, float))
+        ]
+        per_answer_text = ""
+        if per_answer:
+            avg = round(sum(f["score"] for f in per_answer) / len(per_answer))
+            lines = "\n".join(
+                f"- Q: {str(f.get('question', ''))[:160]} | score {f['score']} | {str(f.get('summary', ''))[:220]}"
+                for f in per_answer
+            )
+            per_answer_text = (
+                f"PER-ANSWER COACH RESULTS ALREADY SHOWN TO THE CANDIDATE (average {avg}):\n{lines}\n"
+                "Your overallScore and summary MUST be consistent with these results: stay within about 10 points "
+                "of their average unless the transcript clearly justifies otherwise, and mention weak or off-topic "
+                "answers rather than describing every answer as accurate.\n\n"
+            )
         state = context.get("interviewState") or context.get("interview_state") or {}
         if not isinstance(state, dict):
             state = {}
@@ -211,6 +232,7 @@ class InterviewEvaluationAgent:
             f"STATUS: {status_label}\n"
             f"QUESTIONS ANSWERED: {candidate_turns}\n"
             f"CODE SUBMITTED: {'Yes' if has_code_submission else 'No'}\n\n"
+            f"{per_answer_text}"
             f"INTERVIEW TRANSCRIPT (Completed dialogue up to conclusion):\n"
             f"{transcript_text}\n\n"
             f"CRITICAL EVALUATION INSTRUCTIONS:\n"
@@ -239,61 +261,37 @@ class InterviewEvaluationAgent:
                 except Exception as val_err:
                     logger.warning(f"Evaluation normalization note: {val_err}. Using grounded synthesis.")
 
-        # Fallback to grounded transcript-based synthesis if LLM returned nothing or malformed data
-        logger.info("Using grounded evaluation synthesis engine based on actual interview dialogue.")
-        return self._generate_grounded_evaluation(
-            role=role,
-            company=company,
-            candidate_name=candidate_name,
-            candidate_answers=candidate_answers,
-            candidate_turns=candidate_turns,
-            has_code_submission=has_code_submission,
-            is_early_end=is_early_end,
-            elapsed_minutes=elapsed_minutes,
-            target_duration=target_duration,
-            difficulty=difficulty,
+        # No made-up report: if the model produced nothing usable, fail honestly so the
+        # backend can tell the candidate to retry instead of showing invented scores.
+        raise EvaluationUnavailableError(
+            "The evaluation model did not return a valid assessment. Please try again shortly."
         )
 
-    def _call_llm(self, prompt: str, system_instruction: Optional[str] = None, max_tokens: int = 3500) -> Optional[str]:
+    def _call_llm(
+        self,
+        prompt: str,
+        system_instruction: Optional[str] = None,
+        max_tokens: int = 3500,
+        temperature: float = 0.2,
+        timeout: float = 80.0,
+        label: str = "evaluation",
+    ) -> Optional[str]:
         """Query LLM (OpenRouter or Gemini) for evaluation synthesis."""
         sys_instruction = system_instruction or self.SYSTEM_INSTRUCTION
 
-        # 1. Try OpenRouter
-        if MODEL_PROVIDER == "openrouter" or (OPENROUTER_API_KEY and "your_openrouter_api_key_here" not in OPENROUTER_API_KEY):
-            try:
-                import requests
-                base_url = OPENROUTER_BASE_URL.rstrip("/")
-                chat_url = f"{base_url}/chat/completions"
-
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "https://hiremind.com",
-                    "X-Title": "HireMind Evaluation Agent",
-                }
-                payload = {
-                    "model": AI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": sys_instruction},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": max_tokens,
-                }
-
-                logger.info(f"Synthesizing evaluation via OpenRouter '{AI_MODEL}' (max_tokens={max_tokens})...")
-                response = requests.post(chat_url, headers=headers, json=payload, timeout=80)
-                if response.status_code == 200:
-                    data = response.json()
-                    choices = data.get("choices", [])
-                    if choices:
-                        content = choices[0].get("message", {}).get("content")
-                        if content and content.strip():
-                            return content
-                else:
-                    logger.warning(f"OpenRouter returned status {response.status_code}: {response.text[:200]}")
-            except Exception as e:
-                logger.warning(f"OpenRouter evaluation call note: {e}")
+        # 1. OpenRouter (reasoning disabled so the token budget goes to the answer itself)
+        result = chat_completion(
+            sys_instruction,
+            prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            timeout=timeout,
+            # Long outputs (final report) legitimately take longer before a hedge is worth it
+            hedge_after=min(timeout / 2, max(6.0, timeout / 3)),
+            label=label,
+        )
+        if result.ok:
+            return result.content
 
         # 2. Try Gemini Fallback if configured
         if is_gemini_configured():
@@ -365,253 +363,71 @@ class InterviewEvaluationAgent:
         elapsed_minutes: float,
         target_duration: int,
     ) -> Dict[str, Any]:
-        """Normalize and enrich model evaluation output to ensure all schema fields are present and robust."""
+        """Normalize the model's report. Only data the model actually produced is kept:
+        missing sections stay empty instead of being filled with invented scores or text."""
 
-        def clamp_score(value: Any, default: int = 75) -> int:
+        def clamp_score(value: Any) -> Optional[int]:
             try:
                 return max(0, min(100, int(round(float(value)))))
             except (TypeError, ValueError):
-                return default
+                return None
 
-        def clean_items(items: Any, default_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def clean_items(items: Any) -> List[Dict[str, Any]]:
             cleaned = []
             for item in items if isinstance(items, list) else []:
                 if not isinstance(item, dict) or not item.get("name"):
                     continue
-                score_val = clamp_score(item.get("score"), 75)
+                score_val = clamp_score(item.get("score"))
+                if score_val is None:
+                    continue
                 name = str(item["name"]).strip()
                 is_flagged = bool(item.get("isFlagged", score_val < 70))
                 if is_flagged and not name.startswith("!"):
                     name = f"!{name}"
                 elif not is_flagged and name.startswith("!"):
                     name = name.lstrip("!")
-                cleaned.append({
-                    "name": name,
-                    "score": score_val,
-                    "isFlagged": is_flagged,
-                })
-            return cleaned if cleaned else default_items
+                cleaned.append({"name": name, "score": score_val, "isFlagged": is_flagged})
+            return cleaned
 
-        # Technical skills defaults
-        default_skills = [
-            {"name": f"{role} Core Principles", "score": 82, "isFlagged": False},
-            {"name": "Architecture & Structure", "score": 78, "isFlagged": False},
-            {"name": "Problem Solving & Trade-offs", "score": 80, "isFlagged": False},
-            {"name": "!Advanced Edge Cases", "score": 65, "isFlagged": True},
-        ]
+        tech_skills = clean_items(parsed.get("technicalSkills"))
+        perf_breakdown = clean_items(parsed.get("performanceBreakdown"))
+        comm_analysis = clean_items(parsed.get("communicationAnalysis"))
 
-        # Performance breakdown defaults
-        default_performance = [
-            {"name": "Technical Knowledge", "score": 82, "isFlagged": False},
-            {"name": "Problem Solving", "score": 80, "isFlagged": False},
-            {"name": "Communication", "score": 76, "isFlagged": False},
-            {"name": "Practical Reasoning", "score": 78, "isFlagged": False},
-            {"name": "Domain Depth", "score": 80, "isFlagged": False},
-        ]
+        overall_score = clamp_score(parsed.get("overallScore"))
+        if overall_score is None:
+            scored = [item["score"] for item in perf_breakdown + comm_analysis]
+            if not scored:
+                raise EvaluationUnavailableError("The evaluation model returned no usable scores.")
+            overall_score = round(sum(scored) / len(scored))
 
-        # Communication analysis defaults
-        default_comm = [
-            {"name": "Clarity", "score": 80, "isFlagged": False},
-            {"name": "Answer Structure", "score": 75, "isFlagged": False},
-            {"name": "Technical Articulation", "score": 82, "isFlagged": False},
-            {"name": "Pacing & Conciseness", "score": 74, "isFlagged": False},
-        ]
-
-        tech_skills = clean_items(parsed.get("technicalSkills"), default_skills)
-        perf_breakdown = clean_items(parsed.get("performanceBreakdown"), default_performance)
-        comm_analysis = clean_items(parsed.get("communicationAnalysis"), default_comm)
-
-        # Compute overall score if missing or invalid
-        raw_score = parsed.get("overallScore")
-        if raw_score is not None:
-            overall_score = clamp_score(raw_score)
-        else:
-            all_scores = [s["score"] for s in (perf_breakdown + comm_analysis)]
-            overall_score = round(sum(all_scores) / len(all_scores)) if all_scores else 78
-
-        # Readiness badge
         readiness_badge = parsed.get("readinessBadge") or (
             "Strong Candidate" if overall_score >= 80 else "Good Progress" if overall_score >= 65 else "Needs Practice"
         )
 
-        # Summary text
-        summary = str(parsed.get("summary") or "").strip()
-        if not summary or len(summary) < 20:
-            time_note = f"completed ~{elapsed_minutes} minutes of the {target_duration}-minute session" if is_early_end and elapsed_minutes > 0 else "concluded the session early" if is_early_end else "completed the full interview"
-            summary = (
-                f"{candidate_name} {time_note} for the {role} position. "
-                f"The candidate demonstrated solid technical understanding and practical reasoning across answered questions, "
-                f"with an overall evaluated readiness score of {overall_score}%."
-            )
-
-        # Strongest & Needs Attention competencies
         strongest = parsed.get("strongestSkill") or (
-            max(tech_skills, key=lambda x: x["score"])["name"].lstrip("!") if tech_skills else "Core Domain Knowledge"
+            max(tech_skills, key=lambda x: x["score"])["name"].lstrip("!") if tech_skills else ""
         )
         needs_attention = parsed.get("needsAttentionSkill") or (
-            min(tech_skills, key=lambda x: x["score"])["name"].lstrip("!") if tech_skills else "Depth in Edge Scenarios"
+            min(tech_skills, key=lambda x: x["score"])["name"].lstrip("!") if tech_skills else ""
         )
 
-        # AI Recommendation
-        ai_rec = parsed.get("aiRecommendation")
-        if not isinstance(ai_rec, dict) or not ai_rec.get("headline"):
-            ai_rec = {
-                "headline": f"Deepen Technical Articulation for {role}",
-                "insight": f"Strengthen structured responses by anchoring system trade-offs and real-world edge cases to demonstrate senior-level domain mastery.",
-                "primaryFocus": f"Structured Communication & Architecture",
-            }
-        else:
-            ai_rec = {
-                "headline": str(ai_rec.get("headline") or "Focus on Structured Explanations"),
-                "insight": str(ai_rec.get("insight") or "Provide concrete architectural reasoning and measurable impacts when discussing past engineering decisions."),
-                "primaryFocus": str(ai_rec.get("primaryFocus") or "Technical Communication"),
-            }
+        ai_rec = parsed.get("aiRecommendation") if isinstance(parsed.get("aiRecommendation"), dict) else {}
+        ai_rec = {k: str(v) for k, v in ai_rec.items() if k in ("headline", "insight", "primaryFocus") and v}
 
-        # Trend scores
-        raw_trend = parsed.get("trendScores")
-        if isinstance(raw_trend, list) and len(raw_trend) >= 2:
-            trend_scores = [clamp_score(s, 75) for s in raw_trend]
-        else:
-            turns_count = max(len(candidate_answers), 3)
-            trend_scores = [
-                min(95, max(50, round(overall_score - 6 + (i * (12 / max(1, turns_count - 1))))))
-                for i in range(turns_count)
-            ]
+        trend_scores = [
+            score for score in (clamp_score(v) for v in (parsed.get("trendScores") or [])) if score is not None
+        ]
 
         return {
             "overallScore": overall_score,
             "readinessBadge": readiness_badge,
-            "summary": summary,
+            "summary": str(parsed.get("summary") or "").strip(),
             "technicalSkills": tech_skills,
             "strongestSkill": strongest,
             "needsAttentionSkill": needs_attention,
             "performanceBreakdown": perf_breakdown,
             "communicationAnalysis": comm_analysis,
             "aiRecommendation": ai_rec,
-            "trendScores": trend_scores,
-        }
-
-    def _generate_grounded_evaluation(
-        self,
-        role: str,
-        company: str,
-        candidate_name: str,
-        candidate_answers: List[str],
-        candidate_turns: int,
-        has_code_submission: bool,
-        is_early_end: bool,
-        elapsed_minutes: float,
-        target_duration: int,
-        difficulty: str,
-    ) -> Dict[str, Any]:
-        """Synthesizes an authentic, high-end evaluation report directly from transcript metrics
-        when the external LLM provider is temporarily unreachable.
-        """
-        total_words = sum(len(a.split()) for a in candidate_answers)
-        avg_words = total_words / max(1, len(candidate_answers)) if candidate_answers else 0
-
-        # Calibrate base scores based on answer depth and vocabulary
-        if avg_words > 60:
-            depth_score = 85
-            clarity_score = 83
-            structure_score = 81
-        elif avg_words > 25:
-            depth_score = 78
-            clarity_score = 80
-            structure_score = 76
-        elif avg_words > 10:
-            depth_score = 72
-            clarity_score = 74
-            structure_score = 70
-        else:
-            depth_score = 65
-            clarity_score = 68
-            structure_score = 62
-
-        if has_code_submission:
-            code_bonus = 4
-        else:
-            code_bonus = 0
-
-        tech_score = min(94, depth_score + code_bonus)
-        problem_score = min(92, depth_score - 2 + code_bonus)
-        comm_score = min(90, round((clarity_score + structure_score) / 2))
-        reasoning_score = min(92, depth_score - 1)
-        domain_score = min(95, depth_score + 1)
-
-        overall_score = round((tech_score * 0.35) + (problem_score * 0.25) + (comm_score * 0.2) + (reasoning_score * 0.2))
-
-        readiness_badge = (
-            "Strong Candidate" if overall_score >= 82 else "Good Progress" if overall_score >= 68 else "Needs Practice"
-        )
-
-        time_descriptor = (
-            f"concluded early at approximately {elapsed_minutes} minutes into a {target_duration}-minute session"
-            if is_early_end and elapsed_minutes > 0
-            else "concluded early" if is_early_end
-            else "completed the full interview"
-        )
-
-        summary = (
-            f"{candidate_name} participated in the {difficulty} interview for {role} at {company} and {time_descriptor}. "
-            f"Across {candidate_turns} answered question{'s' if candidate_turns != 1 else ''}, the candidate demonstrated "
-            f"{'compelling technical clarity and structured practical reasoning' if overall_score >= 75 else 'solid foundational awareness with opportunities for deeper elaboration'}. "
-            f"Evaluated readiness is {overall_score}% based on the completed dialogue."
-        )
-
-        technical_skills = [
-            {"name": f"{role} Core Fundamentals", "score": min(95, tech_score + 2), "isFlagged": False},
-            {"name": "Architecture & Practical Decisions", "score": min(92, reasoning_score), "isFlagged": False},
-            {"name": "Problem Solving & Trade-offs", "score": min(90, problem_score), "isFlagged": False},
-            {"name": "!Edge Cases & Deep Optimization", "score": max(55, tech_score - 15), "isFlagged": (tech_score - 15 < 70)},
-        ]
-
-        if has_code_submission:
-            technical_skills.insert(2, {"name": "Live Coding & Algorithm Execution", "score": min(92, tech_score + 3), "isFlagged": False})
-
-        performance_breakdown = [
-            {"name": "Technical Knowledge", "score": tech_score, "isFlagged": tech_score < 70},
-            {"name": "Problem Solving", "score": problem_score, "isFlagged": problem_score < 70},
-            {"name": "Communication", "score": comm_score, "isFlagged": comm_score < 70},
-            {"name": "Practical Reasoning", "score": reasoning_score, "isFlagged": reasoning_score < 70},
-            {"name": "Domain Depth", "score": domain_score, "isFlagged": domain_score < 70},
-        ]
-
-        communication_analysis = [
-            {"name": "Clarity", "score": clarity_score, "isFlagged": clarity_score < 70},
-            {"name": "Answer Structure", "score": structure_score, "isFlagged": structure_score < 70},
-            {"name": "Technical Articulation", "score": min(92, depth_score), "isFlagged": depth_score < 70},
-            {"name": "Pacing & Conciseness", "score": min(90, clarity_score - 3), "isFlagged": (clarity_score - 3) < 70},
-        ]
-
-        strongest_skill = f"{role} Core Fundamentals"
-        needs_attention_skill = "Edge Cases & Deep Optimization"
-
-        ai_recommendation = {
-            "headline": f"Level Up Architecture Depth in {role}",
-            "insight": (
-                f"When discussing solutions, explicitly frame choices around concrete trade-offs (e.g. latency, memory, maintainability) "
-                f"and illustrate with past production scenarios to showcase senior-level ownership."
-            ),
-            "primaryFocus": "Trade-off Analysis & Production Scale",
-        }
-
-        turns_count = max(candidate_turns, 3)
-        trend_scores = [
-            min(95, max(55, round(overall_score - 5 + (i * (10 / max(1, turns_count - 1))))))
-            for i in range(turns_count)
-        ]
-
-        return {
-            "overallScore": overall_score,
-            "readinessBadge": readiness_badge,
-            "summary": summary,
-            "technicalSkills": technical_skills,
-            "strongestSkill": strongest_skill,
-            "needsAttentionSkill": needs_attention_skill,
-            "performanceBreakdown": performance_breakdown,
-            "communicationAnalysis": communication_analysis,
-            "aiRecommendation": ai_recommendation,
             "trendScores": trend_scores,
         }
 
@@ -625,198 +441,171 @@ class InterviewEvaluationAgent:
         topic: str = "",
         candidate_skills: Optional[List[str]] = None,
         difficulty: str = "Intermediate",
+        prior_answers: Optional[List[str]] = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """Perform instant per-turn feedback coaching evaluation for Feedback Interview Mode.
-        Evaluates relevance, accuracy, clarity, completeness, supporting examples, and communication.
-        Provides strengths, areas for improvement, actionable suggestions, and an illustrative
-        improved answer guidance structure.
+    ) -> Optional[Dict[str, Any]]:
+        """Per-answer coaching for Feedback Interview Mode.
+
+        Every comment must be grounded in what the candidate actually said (or specifically
+        failed to say) for THIS question. Returns None when no genuine evaluation could be
+        produced, so callers can show "feedback unavailable" instead of a template.
         """
         role = target_role or "Software Engineer"
-        comp = company or "Target Company"
-        stage = stage_name or "Technical Interview"
-        top = topic or "Core Competency"
-        skills_str = ", ".join(candidate_skills) if candidate_skills else "General technical skills"
-
-        system_instruction = (
-            "You are the HireMind Interview Coaching & Answer Evaluation Agent.\n"
-            "Your mission is to evaluate an individual candidate answer in real-time during an interactive Feedback Interview.\n\n"
-            "CRITICAL EVALUATION SECTIONS:\n"
-            "1. Answer Evaluation:\n"
-            "   - relevance: How directly does the answer address the question? (detailed commentary)\n"
-            "   - relevanceScore: (0-100 integer)\n"
-            "   - technicalAccuracy: Accuracy of concepts, syntax, or architectural reasoning. (commentary)\n"
-            "   - technicalAccuracyScore: (0-100 integer)\n"
-            "   - clarityAndOrganization: Flow, structure (e.g. STAR, problem-solution), clarity. (commentary)\n"
-            "   - clarityScore: (0-100 integer)\n"
-            "   - completeness: Did candidate cover edge cases, trade-offs, and necessary details? (commentary)\n"
-            "   - completenessScore: (0-100 integer)\n"
-            "   - supportingExamples: Concreteness and depth of examples cited. (commentary)\n"
-            "   - communicationEffectiveness: Articulation, tone, conciseness, and vocabulary. (commentary)\n"
-            "2. Strengths: 2-3 specific bullet points describing what the candidate did well.\n"
-            "3. Areas for Improvement: 2-3 specific bullet points detailing gaps, vagueness, or inaccuracies.\n"
-            "4. Actionable Suggestions: 2-3 concrete steps the candidate can take right now to improve.\n"
-            "5. Improved Answer Guidance:\n"
-            "   - structure: Recommended high-level outline or framework (e.g. STAR, Trade-off Analysis).\n"
-            "   - exampleAnswer: An exemplary, realistic model response illustrating how a top-tier candidate would answer this question. Explicitly labeled as a learning example.\n"
-            "6. overallScore: (0-100 integer) Balanced score reflecting answer quality.\n\n"
-            "Do NOT invent facts about the candidate. Respond ONLY with a valid JSON object matching this schema."
-        )
+        stage = stage_name or "Interview"
+        top = topic or "the question"
+        skills_str = ", ".join(str(s) for s in (candidate_skills or [])[:15]) or "not provided"
+        prior = [str(a).strip()[:500] for a in (prior_answers or []) if str(a).strip()]
+        prior_text = (
+            "EARLIER ANSWERS IN THIS INTERVIEW (context only: do NOT grade these, but do not claim the candidate "
+            "omitted something they already said here):\n" + "\n".join(f"- {a}" for a in prior) + "\n\n"
+        ) if prior else ""
 
         prompt = (
-            f"TARGET ROLE: {role} at {comp}\n"
-            f"INTERVIEW STAGE: {stage} (Topic: {top})\n"
-            f"CANDIDATE SKILLS: {skills_str}\n\n"
-            f"INTERVIEWER'S QUESTION:\n\"{question}\"\n\n"
-            f"CANDIDATE'S SUBMITTED ANSWER:\n\"{answer}\"\n\n"
-            "Evaluate this answer rigorously and constructively according to the criteria above. "
-            "Respond strictly in valid JSON."
+            f"ROLE: {role}{f' at {company}' if company else ''} | DIFFICULTY: {difficulty} | STAGE: {stage} | TOPIC: {top}\n"
+            f"CANDIDATE SKILLS (from CV): {skills_str}\n\n"
+            f"{prior_text}"
+            f"QUESTION:\n{question}\n\n"
+            f"CANDIDATE ANSWER:\n{answer}\n\n"
+            "Evaluate THIS answer. Return the JSON object now."
         )
 
-        raw_llm_response = self._call_llm(prompt, system_instruction=system_instruction, max_tokens=1800)
-        parsed = self._extract_json(raw_llm_response) if raw_llm_response else None
-
-        if parsed and isinstance(parsed, dict) and "strengths" in parsed:
-            # Ensure required schema integrity
-            eval_dict = parsed.get("answerEvaluation") or parsed.get("evaluation") or {}
-            guidance = parsed.get("improvedAnswerGuidance") or parsed.get("improved_answer_guidance") or {}
-            score_val = int(parsed.get("overallScore") or parsed.get("score") or 78)
-
-            rel_text = eval_dict.get("relevance", "Directly addresses the prompt.")
-            rel_score = int(eval_dict.get("relevanceScore") or (eval_dict.get("relevance", {}).get("score") if isinstance(eval_dict.get("relevance"), dict) else 80))
-            tech_text = eval_dict.get("technicalAccuracy") or (eval_dict.get("technical_accuracy", {}).get("comment") if isinstance(eval_dict.get("technical_accuracy"), dict) else "Demonstrates foundational concepts.")
-            tech_score = int(eval_dict.get("technicalAccuracyScore") or (eval_dict.get("technical_accuracy", {}).get("score") if isinstance(eval_dict.get("technical_accuracy"), dict) else 78))
-            clar_text = eval_dict.get("clarityAndOrganization") or (eval_dict.get("clarity", {}).get("comment") if isinstance(eval_dict.get("clarity"), dict) else "Reasonably structured response.")
-            clar_score = int(eval_dict.get("clarityScore") or (eval_dict.get("clarity", {}).get("score") if isinstance(eval_dict.get("clarity"), dict) else 78))
-            comp_text = eval_dict.get("completeness", "Covers the primary aspect of the question.")
-            comp_score = int(eval_dict.get("completenessScore") or (eval_dict.get("completeness", {}).get("score") if isinstance(eval_dict.get("completeness"), dict) else 76))
-            supp_text = eval_dict.get("supportingExamples") or (eval_dict.get("supporting_examples", {}).get("comment") if isinstance(eval_dict.get("supporting_examples"), dict) else "References relevant domain context.")
-            comm_text = eval_dict.get("communicationEffectiveness") or (eval_dict.get("communication", {}).get("comment") if isinstance(eval_dict.get("communication"), dict) else "Clear and professional communication.")
-
-            summary_text = parsed.get("summary") or f"Response demonstrates foundational {role} competency with structured clarity and room for deeper quantitative trade-offs."
-            strengths_list = parsed.get("strengths", ["Addressed the core intent of the question with clear reasoning."])
-            improvements_list = parsed.get("areasForImprovement") or parsed.get("areas_for_improvement") or ["Could provide more concrete technical trade-offs."]
-            suggestions_list = parsed.get("actionableSuggestions") or parsed.get("actionable_suggestions") or ["Use the STAR method to structure your response with measurable outcomes."]
-            guidance_struct = guidance.get("structure", "Problem Context -> Pattern Selection -> Critical Trade-offs -> Measurable Result")
-            guidance_answer = guidance.get("exampleAnswer") or guidance.get("example_model_answer") or f"When approaching {top} for {role}, start with the high-level design choice, explain the trade-offs, and cite concrete results."
-
-            return {
-                "overallScore": score_val,
-                "score": score_val,
-                "summary": summary_text,
-                "answerEvaluation": {
-                    "relevance": rel_text,
-                    "relevanceScore": rel_score,
-                    "technicalAccuracy": tech_text,
-                    "technicalAccuracyScore": tech_score,
-                    "clarityAndOrganization": clar_text,
-                    "clarityScore": clar_score,
-                    "completeness": comp_text,
-                    "completenessScore": comp_score,
-                    "supportingExamples": supp_text,
-                    "communicationEffectiveness": comm_text,
-                },
-                "evaluation": {
-                    "relevance": {"score": rel_score, "comment": rel_text},
-                    "technical_accuracy": {"score": tech_score, "comment": tech_text},
-                    "clarity": {"score": clar_score, "comment": clar_text},
-                    "completeness": {"score": comp_score, "comment": comp_text},
-                    "supporting_examples": {"score": max(55, score_val - 5), "comment": supp_text},
-                    "communication": {"score": clar_score, "comment": comm_text},
-                },
-                "strengths": strengths_list,
-                "areasForImprovement": improvements_list,
-                "areas_for_improvement": improvements_list,
-                "actionableSuggestions": suggestions_list,
-                "actionable_suggestions": suggestions_list,
-                "improvedAnswerGuidance": {
-                    "structure": guidance_struct,
-                    "exampleAnswer": guidance_answer,
-                    "example_model_answer": guidance_answer,
-                },
-                "improved_answer_guidance": {
-                    "structure": guidance_struct,
-                    "exampleAnswer": guidance_answer,
-                    "example_model_answer": guidance_answer,
-                },
-            }
-
-        # Contextual Fallback if LLM was unavailable
-        word_count = len(answer.strip().split())
-        computed_score = min(88, max(55, 60 + min(word_count // 5, 25)))
-        summary_fallback = f"Candidate demonstrated relevant practical awareness of {top} for {role} with positive communication."
-        improvements_fallback = [
-            "Could state the concrete trade-offs (e.g. latency, memory, or consistency) that guided your decision.",
-            "Incorporate quantifiable business or technical metrics into your outcome.",
-        ]
-        suggestions_fallback = [
-            "Structure technical answers using the STAR method (Situation, Task, Action, Result).",
-            "Explicitly name the technologies, design patterns, and testing strategies you relied on.",
-        ]
-        guidance_structure_fallback = "1. Problem Context -> 2. Chosen Pattern/Solution -> 3. Critical Trade-offs -> 4. Measurable Result"
-        guidance_answer_fallback = (
-            f"In my previous work relevant to {role}, when tackling {top}, I evaluated both standard and optimized architectures. "
-            f"I chose an approach prioritizing maintainability and decoupled boundaries, which reduced error rates and ensured zero downtime under production loads."
+        result = self._call_llm(
+            prompt,
+            system_instruction=PER_ANSWER_SYSTEM_INSTRUCTION,
+            max_tokens=1500,
+            temperature=0.3,
+            timeout=30,
+            label="answer-feedback",
         )
-
-        return {
-            "overallScore": computed_score,
-            "score": computed_score,
-            "summary": summary_fallback,
-            "answerEvaluation": {
-                "relevance": f"Your response addresses the core question regarding {top} for the {role} position.",
-                "relevanceScore": computed_score,
-                "technicalAccuracy": f"Demonstrates working knowledge of {top}. To elevate this, mention specific architectural constraints and tooling.",
-                "technicalAccuracyScore": max(60, computed_score - 2),
-                "clarityAndOrganization": "Response has a recognizable train of thought.",
-                "clarityScore": computed_score,
-                "completeness": "Covers the primary inquiry, though edge cases and operational trade-offs could be deepened.",
-                "completenessScore": max(55, computed_score - 4),
-                "supportingExamples": "Mentions practical experience; backing this up with quantifiable scale or metrics will strengthen the impact.",
-                "communicationEffectiveness": "Professional tone and communicative delivery.",
-            },
-            "evaluation": {
-                "relevance": {"score": computed_score, "comment": f"Addresses the core question regarding {top}."},
-                "technical_accuracy": {"score": max(60, computed_score - 2), "comment": f"Demonstrates working knowledge of {top}."},
-                "clarity": {"score": computed_score, "comment": "Response has a recognizable train of thought."},
-                "completeness": {"score": max(55, computed_score - 4), "comment": "Covers primary inquiry with room for deeper trade-offs."},
-                "supporting_examples": {"score": max(55, computed_score - 6), "comment": "Mentions practical experience; add quantifiable metrics."},
-                "communication": {"score": computed_score, "comment": "Professional tone and communicative delivery."},
-            },
-            "strengths": [
-                f"Engaged directly with the question topic ({top}) without hesitation.",
-                "Maintained clear, professional communication.",
-            ],
-            "areasForImprovement": improvements_fallback,
-            "areas_for_improvement": improvements_fallback,
-            "actionableSuggestions": suggestions_fallback,
-            "actionable_suggestions": suggestions_fallback,
-            "improvedAnswerGuidance": {
-                "structure": guidance_structure_fallback,
-                "exampleAnswer": guidance_answer_fallback,
-                "example_model_answer": guidance_answer_fallback,
-            },
-            "improved_answer_guidance": {
-                "structure": guidance_structure_fallback,
-                "exampleAnswer": guidance_answer_fallback,
-                "example_model_answer": guidance_answer_fallback,
-            },
-        }
+        parsed = self._extract_json(result) if result else None
+        if not isinstance(parsed, dict):
+            logger.warning("Per-answer feedback unavailable: model returned no parseable JSON")
+            return None
+        return _normalize_answer_feedback(parsed)
 
 
-# Singleton instance
-def _quick_feedback_fallback(answer: str, topic: str) -> str:
-    words = len((answer or "").split())
-    topic_label = topic or "this question"
-    if words < 25:
-        return (
-            f"Thanks for that. Your answer touched on {topic_label}, but it was quite brief. "
-            "To make it stronger, walk through a specific example step by step and finish with the result you achieved."
-        )
-    return (
-        f"Good effort. You engaged directly with {topic_label} and explained your thinking clearly. "
-        "To improve, be more specific about the trade-offs you considered and back it up with a measurable outcome."
-    )
+PER_ANSWER_SYSTEM_INSTRUCTION = (
+    "You are an experienced interview coach reviewing ONE answer from a live mock interview.\n"
+    "Your feedback must be specific to this exact answer. A different answer must get visibly different feedback.\n\n"
+    "GROUNDING RULES (most important):\n"
+    "- Every strength must cite something the candidate actually said, quoting or closely paraphrasing it "
+    "(e.g. 'You explained that the Redis TTL was 10 minutes and invalidated on vendor edits').\n"
+    "- Every improvement must name a specific gap relative to what THIS question asked "
+    "(e.g. 'You did not say where the idempotency key is stored or how long it is kept').\n"
+    "- Never praise something the answer does not contain. Never ask for metrics/numbers/trade-offs the "
+    "candidate already gave. Never invent facts about the candidate.\n"
+    "- Before listing a gap, re-read the answer and confirm it is really missing. If the candidate covered "
+    "it partly, name what is still missing beyond what they said (do not claim they omitted it).\n"
+    "- Banned generic filler: 'clear and professional communication', 'positive communication', "
+    "'engaged with the question', 'good effort', 'use the STAR method' (unless the question is behavioral "
+    "and the answer lacks structure), 'add quantifiable metrics' (unless genuinely missing and relevant).\n"
+    "- If the answer is vague, off-topic, very short or technically wrong, say so plainly and score it low.\n\n"
+    "SCORING (0-100, be calibrated, not generous):\n"
+    "- 0-39: off-topic, incorrect, or no real content.\n"
+    "- 40-59: relevant but vague or generic; few concrete details; key parts of the question unanswered.\n"
+    "- 60-74: relevant with some concrete details, but missing important reasoning, depth or parts of the question.\n"
+    "- 75-89: specific, correct and well reasoned; minor gaps only.\n"
+    "- 90-100: exceptional depth, precise, with clear reasoning and outcomes.\n\n"
+    "IMPROVED ANSWER: write a short model answer (max 80 words) that BUILDS ON the candidate's own "
+    "content and fixes the gaps you listed. Do not invent experience: never state in the first person a fix, "
+    "tool, number or result the candidate did not mention. Phrase such additions as placeholders the candidate "
+    "fills in, e.g. '[how you prevented the race, e.g. a version in the cache key]' or '[your result]'.\n\n"
+    "Respond with ONLY this JSON object (no markdown, no extra keys):\n"
+    "{\n"
+    '  "overallScore": <int>,\n'
+    '  "summary": "<1-2 sentences: the single most important takeaway about THIS answer>",\n'
+    '  "evaluation": {\n'
+    '    "relevance": {"score": <int>, "comment": "<specific, max 20 words>"},\n'
+    '    "technical_accuracy": {"score": <int>, "comment": "<specific, max 20 words>"},\n'
+    '    "clarity": {"score": <int>, "comment": "<specific, max 20 words>"},\n'
+    '    "completeness": {"score": <int>, "comment": "<specific, max 20 words>"},\n'
+    '    "supporting_examples": {"score": <int>, "comment": "<specific, max 20 words>"}\n'
+    "  },\n"
+    '  "strengths": ["<1-2 grounded items, max 30 words each; empty list if none>"],\n'
+    '  "areas_for_improvement": ["<1-2 specific gaps, max 30 words each>"],\n'
+    '  "actionable_suggestions": ["<1-2 concrete next steps, max 25 words each>"],\n'
+    '  "improved_answer_guidance": {"structure": "<short outline>", "example_model_answer": "<max 80 words>"}\n'
+    "}"
+)
+
+_EVAL_KEYS = ("relevance", "technical_accuracy", "clarity", "completeness", "supporting_examples", "communication")
+
+
+def _clean_text_list(value: Any, limit: int = 3) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if isinstance(v, (str, int, float)) and str(v).strip()][:limit]
+
+
+def _normalize_answer_feedback(parsed: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Map the model JSON onto the shape the UI expects, keeping ONLY model-produced data."""
+
+    def score_of(value: Any) -> Optional[int]:
+        try:
+            return max(0, min(100, int(round(float(value)))))
+        except (TypeError, ValueError):
+            return None
+
+    raw_eval = parsed.get("evaluation") if isinstance(parsed.get("evaluation"), dict) else {}
+    evaluation: Dict[str, Dict[str, Any]] = {}
+    for key in _EVAL_KEYS:
+        item = raw_eval.get(key)
+        if isinstance(item, dict):
+            item_score = score_of(item.get("score"))
+            comment = str(item.get("comment") or "").strip()
+            if item_score is not None:
+                evaluation[key] = {"score": item_score, "comment": comment}
+
+    # The model's own overall score tends to anchor on one value (e.g. 82 for every decent
+    # answer), so derive it from the per-criterion scores, which do track the answer.
+    weights = {
+        "relevance": 0.20,
+        "technical_accuracy": 0.30,
+        "completeness": 0.25,
+        "supporting_examples": 0.15,
+        "clarity": 0.10,
+    }
+    weighted = [(evaluation[k]["score"], w) for k, w in weights.items() if k in evaluation]
+    if len(weighted) >= 3:
+        overall = round(sum(score * w for score, w in weighted) / sum(w for _, w in weighted))
+    else:
+        overall = score_of(parsed.get("overallScore", parsed.get("score")))
+
+    strengths = _clean_text_list(parsed.get("strengths"))
+    improvements = _clean_text_list(parsed.get("areas_for_improvement") or parsed.get("areasForImprovement"))
+    suggestions = _clean_text_list(parsed.get("actionable_suggestions") or parsed.get("actionableSuggestions"))
+    summary = str(parsed.get("summary") or "").strip()
+
+    if overall is None or not (summary or strengths or improvements):
+        logger.warning("Per-answer feedback discarded: model JSON missing score or content")
+        return None
+
+    guidance_raw = parsed.get("improved_answer_guidance") or parsed.get("improvedAnswerGuidance") or {}
+    guidance = {}
+    if isinstance(guidance_raw, dict):
+        structure = str(guidance_raw.get("structure") or "").strip()
+        example = str(guidance_raw.get("example_model_answer") or guidance_raw.get("exampleAnswer") or "").strip()
+        if structure:
+            guidance["structure"] = structure
+        if example:
+            guidance["example_model_answer"] = example
+            guidance["exampleAnswer"] = example
+
+    feedback: Dict[str, Any] = {
+        "overallScore": overall,
+        "score": overall,
+        "summary": summary,
+        "evaluation": evaluation,
+        "strengths": strengths,
+        "areas_for_improvement": improvements,
+        "areasForImprovement": improvements,
+        "actionable_suggestions": suggestions,
+        "actionableSuggestions": suggestions,
+    }
+    if guidance:
+        feedback["improved_answer_guidance"] = guidance
+        feedback["improvedAnswerGuidance"] = guidance
+    return feedback
 
 
 def quick_spoken_feedback(
@@ -827,29 +616,34 @@ def quick_spoken_feedback(
     stage_name: str = "",
     topic: str = "",
 ) -> str:
-    """Short, conversational feedback the interviewer can say aloud right after an answer.
+    """Short spoken coaching line for voice Feedback Mode (~2 sentences).
 
-    Kept deliberately small (one fast LLM call, ~3 sentences) so it does not slow
-    down the voice turn; the detailed evaluation is produced separately.
+    Returns "" when the model is unavailable; the interviewer then simply moves on rather
+    than speaking canned praise.
     """
     system_instruction = (
-        "You are a warm, professional interview coach giving spoken feedback in a live voice interview. "
-        "Speak directly to the candidate in the second person. In 2 to 3 short sentences (max 60 words): "
-        "first name one specific thing they did well in this answer, then give the single most important, "
-        "concrete way to improve it. Plain conversational English only: no scores, no lists, no markdown, "
-        "no quotation marks, and do not ask a new question."
+        "You are an interview coach speaking to the candidate right after their answer in a live voice "
+        "interview. In 2 short sentences (max 45 words): first name ONE specific thing from their answer "
+        "that worked (refer to what they actually said), then the ONE most important concrete improvement "
+        "for this answer. If the answer was vague or wrong, say that kindly but clearly instead of praising it. "
+        "Never ask for details they already gave. Plain spoken English: no scores, lists, markdown or quotes, "
+        "and do not ask a new question."
     )
     prompt = (
-        f"ROLE: {target_role or 'Software Engineer'}\n"
-        f"STAGE: {stage_name or 'Interview'} (topic: {topic or 'general'})\n\n"
-        f"QUESTION: {question}\n\n"
-        f"CANDIDATE ANSWER: {answer}\n\n"
-        "Give the spoken feedback now."
+        f"ROLE: {target_role or 'Software Engineer'} | STAGE: {stage_name or 'Interview'} | TOPIC: {topic or 'general'}\n\n"
+        f"QUESTION: {question}\n\nCANDIDATE ANSWER: {answer}\n\nSpeak the feedback now."
     )
-    raw = agent._call_llm(prompt, system_instruction=system_instruction, max_tokens=220)
+    raw = agent._call_llm(
+        prompt,
+        system_instruction=system_instruction,
+        max_tokens=140,
+        temperature=0.4,
+        timeout=12,
+        label="spoken-feedback",
+    )
     text = (raw or "").strip().strip('"').replace("**", "").replace("\n", " ").strip()
     if not text or text.startswith("{"):
-        return _quick_feedback_fallback(answer, topic)
+        return ""
     return text
 
 

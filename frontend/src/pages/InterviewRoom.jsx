@@ -4280,14 +4280,26 @@ export default function InterviewRoom() {
               {/* Overall Score Badge */}
               <div className="int-room-feedback-score-card">
                 <div className="int-room-feedback-score-num">
-                  {activeFeedback.score ?? activeFeedback.overallScore ?? 80}
-                  <span className="int-room-feedback-score-pct">%</span>
+                  {activeFeedback.score ?? activeFeedback.overallScore ?? '—'}
+                  {(activeFeedback.score ?? activeFeedback.overallScore) != null && (
+                    <span className="int-room-feedback-score-pct">%</span>
+                  )}
                 </div>
                 <div className="int-room-feedback-score-label">ANSWER SCORE</div>
               </div>
             </div>
 
             <div className="int-room-feedback-body">
+              {/* Coach unavailable: honest message + retry (no placeholder evaluation) */}
+              {activeFeedback.unavailable && (
+                <div className="int-room-feedback-err-banner" role="status">
+                  <span>{activeFeedback.message || 'Feedback for this answer could not be generated right now.'}</span>
+                  <button type="button" className="int-room-feedback-retry-btn" onClick={handleRetryFeedback} disabled={isRetryingFeedback}>
+                    {isRetryingFeedback ? 'Retrying...' : 'Retry Evaluation'}
+                  </button>
+                </div>
+              )}
+
               {/* Executive Summary */}
               {activeFeedback.summary && (
                 <div className="int-room-feedback-summary-box">
@@ -4347,6 +4359,7 @@ export default function InterviewRoom() {
               )}
 
               {/* SECTIONS B & C: STRENGTHS & AREAS FOR IMPROVEMENT */}
+              {!activeFeedback.unavailable && (
               <div className="int-room-feedback-columns-row">
                 {/* Strengths */}
                 <div className="int-room-feedback-card int-room-feedback-card--strengths">
@@ -4355,10 +4368,12 @@ export default function InterviewRoom() {
                     <span className="int-room-feedback-card-sub">What you did well</span>
                   </div>
                   <ul className="int-room-feedback-list">
-                    {(activeFeedback.strengths && activeFeedback.strengths.length > 0
-                      ? activeFeedback.strengths
-                      : ['Clear and direct communication style']
-                    ).map((str, idx) => (
+                    {!(activeFeedback.strengths && activeFeedback.strengths.length > 0) && (
+                      <li className="int-room-feedback-list-item">
+                        <span>No clear strengths were identified in this answer.</span>
+                      </li>
+                    )}
+                    {(activeFeedback.strengths || []).map((str, idx) => (
                       <li key={idx} className="int-room-feedback-list-item">
                         <span className="int-room-feedback-icon-check">✓</span>
                         <span>{str}</span>
@@ -4374,10 +4389,7 @@ export default function InterviewRoom() {
                     <span className="int-room-feedback-card-sub">Gaps & missing evidence</span>
                   </div>
                   <ul className="int-room-feedback-list">
-                    {(activeFeedback.areas_for_improvement && activeFeedback.areas_for_improvement.length > 0
-                      ? activeFeedback.areas_for_improvement
-                      : ['Could provide more tangible quantitative results or metrics.']
-                    ).map((imp, idx) => (
+                    {(activeFeedback.areas_for_improvement || activeFeedback.areasForImprovement || []).map((imp, idx) => (
                       <li key={idx} className="int-room-feedback-list-item">
                         <span className="int-room-feedback-icon-target">→</span>
                         <span>{imp}</span>
@@ -4386,6 +4398,7 @@ export default function InterviewRoom() {
                   </ul>
                 </div>
               </div>
+              )}
 
               {/* SECTION D: ACTIONABLE SUGGESTIONS */}
               {activeFeedback.actionable_suggestions && activeFeedback.actionable_suggestions.length > 0 && (

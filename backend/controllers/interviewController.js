@@ -44,25 +44,106 @@ const calculateAgendaCoverage = (stages = [], currentIdx = 0, currentHops = 0) =
 /**
  * Natural Conversational Filler / Acknowledgment Generator (Feature 2A)
  */
-const getConversationalAcknowledgment = (action, turnIndex = 0, stageName = '', topicName = '', nextStageName = '') => {
-  if (action === 'NEXT_STAGE') {
-    const transitions = [
-      `Great, that gives us a well-rounded picture of your experience with ${topicName || stageName || 'this area'}. Let's transition to our next competency: ${nextStageName || 'the next section'}. `,
-      `Understood, thank you for detailing that experience. Moving forward, let's explore ${nextStageName || 'our next area'}. `,
-      `Got it, that covers our key points for ${stageName || 'this topic'}. Now let's turn our attention to ${nextStageName || 'the next competency'}. `,
-    ];
-    return transitions[turnIndex % transitions.length];
+// Share of answered turns that may receive an adaptive follow-up instead of a planned question
+const ADAPTIVE_TURN_SHARE = 0.4;
+
+const isClosingStage = (stage) => {
+  const name = (stage?.name || '').toLowerCase();
+  return name.includes('closing') || name.includes('wrap') || name.includes('q&a');
+};
+
+/**
+ * Decide which actions the interview agent may take on THIS turn.
+ * The interview mixes planned questions (stage topics from the plan) with occasional
+ * adaptive follow-ups: at most one follow-up per answer thread and per stage, and at most
+ * ~40% of all turns, so the interview is adaptive part of the time, not throughout.
+ * The agent writes its question for the chosen action, so the backend never has to
+ * override the action afterwards (which previously produced mismatched questions).
+ */
+const computeTurnPolicy = ({ state, stages, currStageIdx, progressRatio, isAbsoluteMaxReached }) => {
+  const currStage = stages[currStageIdx] || {};
+  const nextStage = stages[currStageIdx + 1] || null;
+  const questionsAsked = state.questionsAsked || 1;
+  const stageAsked = state.stageQuestionsAsked || 1;
+  const stageAdaptive = state.stageAdaptiveTurns || 0;
+  const adaptiveTotal = state.adaptiveTurns || 0;
+  // Under time pressure (>= 85% of the target duration) the remaining plan is compressed:
+  // one question per remaining stage and no follow-ups, so the interview still reaches
+  // every stage instead of overrunning the selected duration.
+  const underTimePressure = progressRatio >= 0.85;
+  const stageTarget = underTimePressure ? 1 : Math.max(1, currStage.targetQuestionCount || 2);
+  const plannedAskedInStage = Math.max(0, stageAsked - stageAdaptive);
+
+  const maxAdaptive = Math.max(1, Math.floor((questionsAsked + 1) * ADAPTIVE_TURN_SHARE));
+  const followUpAllowed =
+    !isAbsoluteMaxReached &&
+    !underTimePressure &&
+    (state.followUpDepth || 0) < 1 &&
+    stageAdaptive < 1 &&
+    adaptiveTotal < maxAdaptive;
+
+  // Hold the closing stage back while plenty of target time remains (deepen instead)
+  const canEnterNextStage = Boolean(nextStage) && !(isClosingStage(nextStage) && progressRatio < 0.85);
+  const stageDone = plannedAskedInStage >= stageTarget;
+  const remainingStageTopics = (currStage.topics || []).filter(
+    (t) => t !== state.currentTopic && !(state.coveredTopics || []).includes(t)
+  );
+
+  let allowedActions;
+  let mustAdvanceStage = false;
+  if (isAbsoluteMaxReached) {
+    allowedActions = ['END_INTERVIEW'];
+  } else if (!nextStage && progressRatio >= 0.9) {
+    allowedActions = ['END_INTERVIEW'];
+  } else if (stageDone && canEnterNextStage) {
+    allowedActions = followUpAllowed ? ['FOLLOW_UP', 'CLARIFY', 'NEXT_STAGE'] : ['NEXT_STAGE'];
+    mustAdvanceStage = !followUpAllowed;
+  } else {
+    allowedActions = followUpAllowed ? ['FOLLOW_UP', 'CLARIFY', 'NEXT_TOPIC'] : ['NEXT_TOPIC'];
   }
 
-  const naturalFillers = [
-    "Understood, that makes good sense. ",
-    "Got it, thanks for explaining how you approached that. ",
-    "Fair point, that's a sound technical consideration. ",
-    "Thank you for detailing that experience. ",
-    "I see where you're coming from on that. ",
-    "That's a helpful perspective. ",
-  ];
-  return naturalFillers[turnIndex % naturalFillers.length];
+  return {
+    allowedActions,
+    followUpAllowed,
+    mustAdvanceStage,
+    remainingStageTopics,
+    adaptiveTurnsUsed: adaptiveTotal,
+    adaptiveTurnsMax: maxAdaptive,
+  };
+};
+
+/**
+ * Deterministic, plan-based question used when the AI agent is unavailable or keeps
+ * ignoring the turn policy. It is a genuine planned question (topic from the interview
+ * plan), never a canned comment about the candidate's answer.
+ */
+const buildPlannedQuestion = ({ policy, stages, currStageIdx, state }) => {
+  const currStage = stages[currStageIdx] || {};
+  const nextStage = stages[currStageIdx + 1] || null;
+  if (policy.allowedActions.includes('END_INTERVIEW') && policy.allowedActions.length === 1) {
+    return {
+      action: 'END_INTERVIEW',
+      reasonCode: 'TIME_PROGRESS',
+      question: 'Thank you for your time today. That brings us to the end of this mock interview; your answers have been saved for your report.',
+      topic: state.currentTopic,
+    };
+  }
+  if (policy.allowedActions.includes('NEXT_STAGE') && nextStage) {
+    const topic = (nextStage.topics && nextStage.topics[0]) || nextStage.name || 'the next area';
+    return {
+      action: 'NEXT_STAGE',
+      reasonCode: 'STAGE_COMPLETE',
+      question: `Let's move on to ${topic}. Could you walk me through your hands-on experience there and one decision you made along the way?`,
+      topic,
+    };
+  }
+  const topic = policy.remainingStageTopics[0] || (currStage.topics || [])[0] || currStage.name || 'your recent work';
+  return {
+    action: 'NEXT_TOPIC',
+    reasonCode: 'MOVE_TO_NEXT_PRIORITY',
+    question: `Next, I'd like to hear about ${topic}. How have you approached it in your own work, and what would you do differently now?`,
+    topic,
+  };
 };
 
 /**
@@ -1036,49 +1117,11 @@ const buildTranscriptionPrompt = (session) => {
   return parts.filter(Boolean).join(' ').slice(0, 800);
 };
 
-const buildFallbackFeedback = (answer, topicLabel) => {
-  const words = answer.trim().split(/\s+/).length;
-  const fallbackScore = Math.min(88, Math.max(60, 65 + Math.min(words / 4, 20)));
-  return {
-    overallScore: Math.round(fallbackScore),
-    answerEvaluation: {
-      relevance: `Directly engages with ${topicLabel || 'the question topic'}.`,
-      relevanceScore: Math.round(fallbackScore),
-      technicalAccuracy: 'Demonstrates working foundational technical knowledge.',
-      technicalAccuracyScore: Math.round(fallbackScore - 2),
-      clarityAndOrganization: 'Logically organized response.',
-      clarityScore: Math.round(fallbackScore),
-      completeness: 'Addresses the core prompt. Articulating trade-offs and edge cases would increase depth.',
-      completenessScore: Math.round(fallbackScore - 3),
-      supportingExamples: 'References practical candidate experience.',
-      communicationEffectiveness: 'Professional, articulate delivery.',
-    },
-    strengths: [
-      `Addressed the core intent regarding ${topicLabel || 'the technical topic'}.`,
-      'Maintained clear, professional communication.',
-    ],
-    areasForImprovement: [
-      'Could state explicit trade-offs (e.g. latency, memory, consistency, or scale).',
-      'Include quantifiable metrics or production impact.',
-    ],
-    actionableSuggestions: [
-      'Structure technical responses using the STAR method (Situation, Task, Action, Result).',
-      'Highlight production edge cases and validation strategies.',
-    ],
-    improvedAnswerGuidance: {
-      structure: '1. Context & Objective -> 2. Architecture & Patterns -> 3. Trade-off Analysis -> 4. Measurable Result',
-      exampleAnswer: `When approaching ${topicLabel || 'this challenge'}, I assess requirements, choose a pattern balancing simplicity and scale, and validate edge cases with automated testing.`,
-    },
-  };
-};
-
-const fallbackSpokenFeedback = (answer, topicLabel) => {
-  const words = answer.trim().split(/\s+/).length;
-  if (words < 25) {
-    return `Thanks for that. Your answer touched on ${topicLabel || 'the question'}, but it was quite brief. To make it stronger, walk through a specific example step by step and finish with the result you achieved.`;
-  }
-  return `Good effort. You engaged directly with ${topicLabel || 'the question'} and explained your thinking clearly. To improve, be more specific about the trade-offs you considered and back it up with a measurable outcome.`;
-};
+// When the coach model is unavailable, say so instead of showing a generic template
+const unavailableFeedback = () => ({
+  unavailable: true,
+  message: 'Feedback for this answer could not be generated right now. You can retry the evaluation or continue the interview.',
+});
 
 exports.submitLiveAnswer = async (req, res) => {
   try {
@@ -1265,6 +1308,15 @@ exports.submitLiveAnswer = async (req, res) => {
     const currStageIdx = session.interviewState.currentStageIndex || 0;
     const currStage = stages[currStageIdx] || stages[0] || {};
 
+    const isAbsoluteMaxReached = elapsedMinutes >= absoluteMax;
+    const turnPolicy = computeTurnPolicy({
+      state: session.interviewState,
+      stages,
+      currStageIdx,
+      progressRatio,
+      isAbsoluteMaxReached,
+    });
+
     const turnPayload = {
       candidate: {
         candidateName: session.resumeAnalysis?.candidate_name || req.user?.firstName || 'Candidate',
@@ -1304,6 +1356,7 @@ exports.submitLiveAnswer = async (req, res) => {
         followUpDepth: session.interviewState.followUpDepth || 0,
         coveredTopics: session.interviewState.coveredTopics || [],
         coveredObjectives: session.interviewState.coveredObjectives || [],
+        turnPolicy,
       },
       conversationHistory: session.chatMessages.slice(-12).map((m) => ({
         role: m.role,
@@ -1326,6 +1379,13 @@ exports.submitLiveAnswer = async (req, res) => {
       stageName: session.interviewState.currentStageName || currStage.name || 'Technical Stage',
       topic: evalTopic,
       candidateSkills: normalizeSkillList(session.resumeAnalysis?.skills),
+      difficulty: session.difficulty || session.interviewPlan?.difficulty || 'Intermediate',
+      // Earlier answers (context only) so the coach does not call something "missing"
+      // that the candidate already explained in a previous turn
+      priorAnswers: (session.chatMessages || [])
+        .filter((m) => m.role === 'candidate')
+        .slice(-3, -1)
+        .map((m) => String(m.content || '').slice(0, 500)),
     };
     const callEvaluationAgent = async (path, timeoutMs) => {
       try {
@@ -1343,11 +1403,11 @@ exports.submitLiveAnswer = async (req, res) => {
       return null;
     };
     const fullFeedbackPromise = isFeedbackMode
-      ? callEvaluationAgent('evaluate-answer', 45000).then((json) => json?.feedback || buildFallbackFeedback(answer, evalTopic))
+      ? callEvaluationAgent('evaluate-answer', 35000).then((json) => json?.feedback || unavailableFeedback())
       : null;
     // Voice mode speaks a short summary instead of showing the detailed panel
     const spokenFeedbackPromise = isFeedbackMode && isVoiceMode
-      ? callEvaluationAgent('quick-feedback', 15000).then((json) => (json?.spokenFeedback || '').trim() || fallbackSpokenFeedback(answer, evalTopic))
+      ? callEvaluationAgent('quick-feedback', 15000).then((json) => (json?.spokenFeedback || '').trim())
       : null;
 
     let aiResult = null;
@@ -1368,32 +1428,26 @@ exports.submitLiveAnswer = async (req, res) => {
       console.warn('[Interview Controller] Could not connect to AI service for turn:', aiErr.message);
     }
 
-    // Resilient fallback if AI service was offline or failed
-    if (!aiResult || !aiResult.question) {
-      const isTimeUp = elapsedMinutes >= absoluteMax;
-      if (isTimeUp) {
-        aiResult = {
-          action: 'END_INTERVIEW',
-          reasonCode: 'TIME_PROGRESS',
-          question: `Thank you for your time today. We have reached the time limit for this interview session. We have captured all your responses and will now proceed to complete the session. Have a great day!`,
-          stageId: currStage.id,
-          stageName: currStage.name,
-          topic: session.interviewState.currentTopic,
-          isComplete: true,
-        };
-      } else {
-        const topicLabel = session.interviewState.currentTopic || currStage.name || 'this area';
-        aiResult = {
-          action: 'FOLLOW_UP',
-          reasonCode: 'RELEVANT_DEPTH',
-          question: `Thank you for sharing your experience with ${topicLabel}. Could you elaborate on how you handled any edge cases or unexpected constraints in that scenario?`,
-          stageId: currStage.id,
-          stageName: currStage.name,
-          topic: session.interviewState.currentTopic,
-          isComplete: false,
-        };
+    // AI unavailable, or it ignored a mandatory stage change twice in a row:
+    // ask the next planned question from the interview plan instead.
+    const mustAdvanceIgnored =
+      aiResult?.policyViolation && turnPolicy.mustAdvanceStage && (session.interviewState.policyViolations || 0) >= 1;
+    if (!aiResult || !aiResult.question || mustAdvanceIgnored) {
+      if (mustAdvanceIgnored) {
+        console.warn('[TURN_POLICY] Agent ignored the required stage change again; using the planned stage question.');
       }
+      const planned = buildPlannedQuestion({ policy: turnPolicy, stages, currStageIdx, state: session.interviewState });
+      aiResult = {
+        ...planned,
+        stageId: currStage.id,
+        stageName: currStage.name,
+        isComplete: planned.action === 'END_INTERVIEW',
+        policyViolation: false,
+      };
     }
+    session.interviewState.policyViolations = aiResult.policyViolation
+      ? (session.interviewState.policyViolations || 0) + 1
+      : 0;
 
     // Apply state transitions
     let action = aiResult.action || 'FOLLOW_UP';
@@ -1401,7 +1455,6 @@ exports.submitLiveAnswer = async (req, res) => {
     let nextQuestion = (aiResult.question || '').trim();
 
     // 1. Authoritative Absolute Maximum Duration Check (+10 min buffer)
-    const isAbsoluteMaxReached = elapsedMinutes >= absoluteMax;
     if (isAbsoluteMaxReached) {
       console.log(`[DURATION_PACING] Absolute maximum duration reached (${elapsedMinutes}m >= ${absoluteMax}m). Concluding session.`);
       action = 'END_INTERVIEW';
@@ -1452,27 +1505,15 @@ exports.submitLiveAnswer = async (req, res) => {
       }
     }
 
-    // Deterministic Stage Transition & Follow-Up Hops Guardrail (Feature 2B):
-    // Max 2 follow-up hops per core stage/competency.
-    const stageQuestionTarget = Math.max(1, currStage.targetQuestionCount || 2);
-    const questionsInCurrentStage = (session.interviewState.stageQuestionsAsked || 0) + 1;
-    const currentHops = (session.interviewState.currentStageHops || 0) + 1;
-    session.interviewState.currentStageHops = currentHops;
-
-    const shouldAdvanceStage =
-      action === 'NEXT_STAGE' ||
-      questionsInCurrentStage >= stageQuestionTarget ||
-      currentHops >= 2 ||
-      (session.interviewState.followUpDepth || 0) >= 2;
-
-    if (shouldAdvanceStage && currStageIdx + 1 < stages.length && action !== 'END_INTERVIEW') {
-      action = 'NEXT_STAGE';
-      reasonCode = 'STAGE_COMPLETE';
-    }
+    // Stage/topic transitions follow the action the agent chose for its question.
+    // (The turn policy already limited which actions were allowed.)
+    session.interviewState.currentStageHops = (session.interviewState.currentStageHops || 0) + 1;
 
     // Advance Stage or Topic with Pacing-aware redistribution
     if (action === 'FOLLOW_UP' || action === 'CLARIFY' || action === 'DEEPEN') {
       session.interviewState.followUpDepth = (session.interviewState.followUpDepth || 0) + 1;
+      session.interviewState.adaptiveTurns = (session.interviewState.adaptiveTurns || 0) + 1;
+      session.interviewState.stageAdaptiveTurns = (session.interviewState.stageAdaptiveTurns || 0) + 1;
     } else if (action === 'NEXT_TOPIC') {
       session.interviewState.followUpDepth = 0;
       session.interviewState.currentStageHops = 0;
@@ -1481,6 +1522,7 @@ exports.submitLiveAnswer = async (req, res) => {
       session.interviewState.followUpDepth = 0;
       session.interviewState.currentStageHops = 0;
       session.interviewState.stageQuestionsAsked = 0;
+      session.interviewState.stageAdaptiveTurns = 0;
       const nextIdx = currStageIdx + 1;
 
       if (nextIdx < stages.length) {
@@ -1519,19 +1561,6 @@ exports.submitLiveAnswer = async (req, res) => {
     session.interviewState.questionsAsked = (session.interviewState.questionsAsked || 0) + 1;
     session.interviewState.stageQuestionsAsked = (session.interviewState.stageQuestionsAsked || 0) + 1;
 
-    // Conversational Acknowledgments & Natural Fillers (Feature 2A)
-    const hasExistingGreeting = /^(understood|got it|fair point|thank you|thanks|i see|great|excellent|that makes sense|certainly|of course)/i.test(nextQuestion);
-    if (!hasExistingGreeting && action !== 'END_INTERVIEW' && !isComplete) {
-      const nextStageName = stages[session.interviewState.currentStageIndex]?.name || 'the next section';
-      const ackPrefix = getConversationalAcknowledgment(
-        action,
-        session.interviewState.questionsAsked || 0,
-        currStage.name || session.interviewState.currentStageName,
-        session.interviewState.currentTopic,
-        nextStageName
-      );
-      nextQuestion = `${ackPrefix}${nextQuestion}`;
-    }
 
     session.interviewState.lastQuestion = nextQuestion;
     session.interviewState.lastAction = action;
@@ -1708,9 +1737,10 @@ exports.retryAnswerEvaluation = async (req, res) => {
           company: session.company || '',
           stageName: session.interviewState?.currentStageName || 'Technical Stage',
           topic: session.interviewState?.currentTopic || 'Core Concept',
-          candidateSkills: session.resumeAnalysis?.skills?.technical || session.resumeAnalysis?.skills || [],
+          candidateSkills: normalizeSkillList(session.resumeAnalysis?.skills),
+          difficulty: session.difficulty || session.interviewPlan?.difficulty || 'Intermediate',
         }),
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(35000),
       });
 
       if (evalRes.ok) {
@@ -1722,39 +1752,11 @@ exports.retryAnswerEvaluation = async (req, res) => {
     }
 
     if (!feedback) {
-      const words = lastCandidateMsg.content.trim().split(/\s+/).length;
-      const fallbackScore = Math.min(88, Math.max(60, 65 + Math.min(words / 4, 20)));
-      feedback = {
-        overallScore: Math.round(fallbackScore),
-        answerEvaluation: {
-          relevance: `Directly engages with ${session.interviewState?.currentTopic || 'the question topic'}.`,
-          relevanceScore: Math.round(fallbackScore),
-          technicalAccuracy: 'Demonstrates working foundational technical knowledge.',
-          technicalAccuracyScore: Math.round(fallbackScore - 2),
-          clarityAndOrganization: 'Logically organized response.',
-          clarityScore: Math.round(fallbackScore),
-          completeness: 'Addresses the core prompt. Articulating trade-offs and edge cases would increase depth.',
-          completenessScore: Math.round(fallbackScore - 3),
-          supportingExamples: 'References practical candidate experience.',
-          communicationEffectiveness: 'Professional, articulate delivery.',
-        },
-        strengths: [
-          `Addressed the core intent regarding ${session.interviewState?.currentTopic || 'the technical topic'}.`,
-          'Maintained clear, professional communication.',
-        ],
-        areasForImprovement: [
-          'Could state explicit trade-offs (e.g. latency, memory, consistency, or scale).',
-          'Include quantifiable metrics or production impact.',
-        ],
-        actionableSuggestions: [
-          'Structure technical responses using the STAR method (Situation, Task, Action, Result).',
-          'Highlight production edge cases and validation strategies.',
-        ],
-        improvedAnswerGuidance: {
-          structure: '1. Context & Objective -> 2. Architecture & Patterns -> 3. Trade-off Analysis -> 4. Measurable Result',
-          exampleAnswer: `When approaching ${session.interviewState?.currentTopic || 'this challenge'}, I assess requirements, choose a pattern balancing simplicity and scale, and validate edge cases with automated testing.`,
-        },
-      };
+      return res.status(503).json({
+        success: false,
+        error: 'FEEDBACK_UNAVAILABLE',
+        message: 'The answer coach is temporarily unavailable. Please retry in a moment.',
+      });
     }
 
     lastCandidateMsg.feedback = feedback;
@@ -1935,6 +1937,14 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         chatMessages: session.chatMessages || [],
         interview_state: session.interviewState || {},
         interviewState: session.interviewState || {},
+        // Feedback mode: the per-answer coach results, so the final report stays consistent with them
+        perAnswerFeedbacks: (session.perAnswerFeedbacks || [])
+          .filter((entry) => entry?.feedback && !entry.feedback.unavailable)
+          .map((entry) => ({
+            question: String(entry.question || '').slice(0, 300),
+            score: entry.feedback.overallScore ?? entry.feedback.score ?? null,
+            summary: String(entry.feedback.summary || '').slice(0, 400),
+          })),
       };
 
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/evaluate`, {

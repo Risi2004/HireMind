@@ -357,6 +357,8 @@ class EvaluationPayload(BaseModel):
     interview_plan: Optional[Any] = None
     chat_messages: Optional[List[Dict[str, Any]]] = None
     interview_state: Optional[Any] = None
+    # Feedback mode: per-answer coach scores/summaries to keep the report consistent
+    perAnswerFeedbacks: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
 
 
 @app.post("/agents/evaluation-agent/evaluate")
@@ -406,6 +408,8 @@ class SingleAnswerEvaluationPayload(BaseModel):
     topic: Optional[str] = Field(default="", description="Topic being probed")
     candidate_skills: Optional[List[str]] = Field(default_factory=list, description="Candidate skills")
     candidateSkills: Optional[List[str]] = Field(default_factory=list, description="Alternative candidate skills")
+    difficulty: Optional[str] = Field(default="Intermediate", description="Interview difficulty level")
+    priorAnswers: Optional[List[str]] = Field(default_factory=list, description="Earlier candidate answers (context only)")
 
 
 @app.post("/agents/evaluation-agent/evaluate-answer")
@@ -424,11 +428,18 @@ def evaluate_single_answer_endpoint(payload: SingleAnswerEvaluationPayload):
             stage_name=resolved_stage,
             topic=payload.topic or "",
             candidate_skills=resolved_skills,
+            difficulty=payload.difficulty or "Intermediate",
+            prior_answers=payload.priorAnswers or [],
         )
+        if not feedback:
+            # Honest failure: the backend shows "feedback unavailable" with a retry option
+            raise HTTPException(status_code=503, detail="Answer feedback is temporarily unavailable.")
         return {
             "status": "success",
             "feedback": feedback,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to evaluate single answer:")
         raise HTTPException(status_code=500, detail=f"Failed to evaluate answer: {str(e)}")
