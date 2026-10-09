@@ -6,6 +6,7 @@ const {
   analyzeResume,
   analyzeJobDescription,
   getSession,
+  getMySessions,
   updateSession,
   deleteSession,
   generateInterviewPlan,
@@ -166,6 +167,7 @@ router.post('/:sessionId/chat', ...demoOwner, sendChatMessage);
 router.post('/:sessionId/end', ...owner, manualEndLiveInterview);
 router.get('/:sessionId/evaluation', ...owner, getOrGenerateEvaluation);
 router.post('/:sessionId/evaluate', ...owner, getOrGenerateEvaluation);
+router.get('/my-sessions', protect, getMySessions);
 router.get('/:sessionId', ...owner, getSession);
 router.put('/:sessionId', ...owner, updateSession);
 router.delete('/:sessionId', ...owner, deleteSession);

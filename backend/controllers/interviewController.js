@@ -237,6 +237,52 @@ exports.updateSession = async (req, res) => {
 };
 
 /**
+ * Get all interview sessions for current authenticated user with their real evaluation scores
+ * GET /api/interview/my-sessions
+ */
+exports.getMySessions = async (req, res) => {
+  try {
+    const sessions = await InterviewSession.find({ userId: req.user._id })
+      .sort({ updatedAt: -1 })
+      .select('sessionId targetRole company interviewType difficulty duration status evaluation createdAt updatedAt')
+      .lean();
+
+    const formatted = sessions.map((s) => {
+      const evalScore = s.evaluation?.overallScore ?? s.evaluation?.score ?? null;
+      return {
+        id: s.sessionId,
+        sessionId: s.sessionId,
+        title: s.targetRole || (s.company ? `${s.company} Interview` : 'New Interview'),
+        targetRole: s.targetRole || '',
+        company: s.company || '',
+        track: s.interviewType ? `${s.interviewType} Interview` : 'Role-Specific Interview',
+        interviewType: s.interviewType || 'Role-Specific',
+        difficulty: s.difficulty || 'Intermediate',
+        duration: s.duration || '30 min',
+        status: s.status || 'setup',
+        score: evalScore !== null ? `${evalScore}%` : null,
+        overallScore: evalScore,
+        evaluation: s.evaluation || null,
+        lastVisitedPath: (s.status === 'completed' || s.status === 'ended_by_user')
+          ? `/interview-report?id=${s.sessionId}`
+          : `/new-interview/${s.sessionId}`,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      sessions: formatted,
+    });
+  } catch (error) {
+    console.error('[Interview Controller] Error fetching user sessions:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch interview sessions', error: error.message });
+  }
+};
+
+
+/**
  * Analyze Job Description via Google ADK Job Description Analyzer Agent
  * POST /api/interview/:sessionId/analyze-jd
  */
@@ -1262,6 +1308,17 @@ exports.manualEndLiveInterview = async (req, res) => {
     session.interviewState.endedAt = new Date();
     session.interviewState.isProcessing = false;
 
+    // Calculate elapsed minutes and seconds for pro-rata evaluation
+    if (session.interviewState.startedAt) {
+      const startedAtMs = new Date(session.interviewState.startedAt).getTime();
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+      session.interviewState.elapsedSeconds = elapsedSeconds;
+      session.interviewState.elapsedMinutes = parseFloat((elapsedSeconds / 60).toFixed(1));
+    } else if (req.body?.elapsedMinutes) {
+      session.interviewState.elapsedMinutes = parseFloat(req.body.elapsedMinutes) || 0;
+      session.interviewState.elapsedSeconds = parseInt(req.body.elapsedSeconds, 10) || Math.round((session.interviewState.elapsedMinutes || 0) * 60);
+    }
+
     // Reset stale cached evaluation so fresh evaluation is generated on report page
     session.evaluation = null;
 
@@ -1349,7 +1406,10 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         sessionId: session.sessionId,
         target_role: targetRole,
         targetRole,
-        targetJob: targetRole,
+        targetJob: {
+          role: targetRole,
+          company,
+        },
         company,
         interview_type: session.interviewType || 'Role-Specific',
         interviewType: session.interviewType || 'Role-Specific',
@@ -1362,6 +1422,7 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         },
         difficulty: session.difficulty || 'Intermediate',
         duration: parseInt(String(session.duration || '30').replace(/\D/g, ''), 10) || 30,
+        isEndedByUser: session.status === 'ended_by_user' || session.interviewState?.isEndedByUser === true,
         cv_analysis: session.resumeAnalysis,
         candidate: session.resumeAnalysis,
         jd_analysis: session.jdAnalysis,
@@ -1376,7 +1437,7 @@ exports.getOrGenerateEvaluation = async (req, res) => {
         method: 'POST',
         headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(60000),
+        signal: AbortSignal.timeout(90000),
       });
 
       if (aiRes.ok) {

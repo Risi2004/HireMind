@@ -315,7 +315,10 @@ export function AuthProvider({ children }) {
   }
 
   // Delete account: permanently deletes from MongoDB and Cloudflare R2, clears session
-  const deleteAccount = async (password = null) => {
+  const deleteAccount = async (password) => {
+    if (!password || !password.trim()) {
+      throw new Error('Account password is required to confirm deletion.')
+    }
     setLoading(true)
     try {
       if (token) {
@@ -325,7 +328,7 @@ export function AuthProvider({ children }) {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify(password ? { password } : {}),
+          body: JSON.stringify({ password: password.trim() }),
         })
 
         const data = await res.json()
@@ -449,6 +452,28 @@ export function AuthProvider({ children }) {
     if (data.user) {
       setUser(data.user)
       localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    }
+    return data
+  }
+
+  // Delete Avatar
+  const deleteUserAvatar = async () => {
+    if (!token) throw new Error('Not authenticated')
+    const res = await apiFetch('/api/profile/avatar', {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      throw new Error(data.message || 'Failed to remove avatar')
+    }
+    if (data.user) {
+      setUser(data.user)
+      localStorage.setItem('hiremind_user', JSON.stringify(data.user))
+    } else {
+      setUser((prev) => (prev ? { ...prev, avatarUrl: '' } : null))
     }
     return data
   }
@@ -810,6 +835,7 @@ export function AuthProvider({ children }) {
     uploadUserResume,
     deleteUserResume,
     uploadUserAvatar,
+    deleteUserAvatar,
     connectUserGithub,
     disconnectUserGithub,
     updateUserSkills,

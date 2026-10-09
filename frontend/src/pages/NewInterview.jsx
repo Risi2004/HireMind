@@ -1630,12 +1630,15 @@ export default function NewInterview() {
               <div
                 className={`new-int-step-item ${hasCompany ? 'is-done' : currentStep === 3 ? 'is-active' : ''}`}
                 onClick={() => document.getElementById('company-name')?.focus()}
-                title="Step 3: Enter Company Name"
+                title={hasCompany ? `Step 3: Company Name (${company})` : 'Step 3: Enter Company Name'}
               >
                 <div className="new-int-step-num">{hasCompany ? '✓' : '3'}</div>
                 <div className="new-int-step-text">
                   <div className="new-int-step-title">3. Company Name</div>
-                  <div className="new-int-step-sub">
+                  <div
+                    className="new-int-step-sub"
+                    title={hasCompany ? company : 'Company name (e.g. WSO2, Google)'}
+                  >
                     {hasCompany ? company : 'Company name (e.g. WSO2, Google)'}
                   </div>
                 </div>

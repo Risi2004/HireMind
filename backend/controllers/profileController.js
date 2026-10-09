@@ -11,6 +11,20 @@ const {
   deleteAvatar,
 } = require('../services/cloudflareR2');
 const { getClientUrl } = require('../config/clientConfig');
+const { getAiServiceUrl, getAiServiceHeaders } = require('../config/aiServiceConfig');
+const AI_SERVICE_URL = getAiServiceUrl();
+
+/**
+ * Helper to convert a readable stream into a Buffer
+ */
+const streamToBuffer = async (readableStream) => {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    readableStream.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    readableStream.on('end', () => resolve(Buffer.concat(chunks)));
+    readableStream.on('error', reject);
+  });
+};
 
 /**
  * Universal GitHub HTTPS API Request Helper
@@ -896,6 +910,40 @@ const uploadAvatarFile = async (req, res) => {
 };
 
 /**
+ * @desc    Remove candidate avatar picture
+ * @route   DELETE /api/profile/avatar
+ * @access  Private
+ */
+const deleteAvatarFile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (user.avatarUrl) {
+      try {
+        await deleteAvatar(user.avatarUrl);
+      } catch (storageErr) {
+        console.warn('[Delete Avatar Storage Warning]:', storageErr.message);
+      }
+      user.avatarUrl = '';
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile picture removed successfully!',
+      avatarUrl: '',
+      user,
+    });
+  } catch (error) {
+    console.error('[Delete Avatar Error]:', error);
+    return res.status(500).json({ message: error.message || 'Failed to remove profile picture' });
+  }
+};
+
+/**
  * @desc    Update or toggle candidate skills in database
  * @route   POST /api/profile/skills
  * @access  Private
@@ -1020,12 +1068,147 @@ const updateLinkedin = async (req, res) => {
   }
 };
 
+/**
+ * @desc    Extract skills automatically from uploaded resume or profile resume
+ * @route   POST /api/profile/extract-skills
+ * @access  Private
+ */
+const extractSkills = async (req, res) => {
+  try {
+    let fileBuffer = null;
+    let originalFilename = 'resume.pdf';
+    let mimeType = 'application/pdf';
+
+    if (req.file) {
+      fileBuffer = req.file.buffer;
+      originalFilename = req.file.originalname;
+      mimeType = req.file.mimetype || 'application/pdf';
+    } else if (
+      req.body?.useProfileResume === 'true' ||
+      req.body?.useProfileResume === true ||
+      (!req.file && req.user?.resumeUrl)
+    ) {
+      const user = await User.findById(req.user._id);
+      if (!user || (!user.resumeFileName && !user.resumeUrl)) {
+        return res.status(404).json({ success: false, message: 'No resume found on user profile.' });
+      }
+      originalFilename = user.resumeFileName || 'profile-resume.pdf';
+      try {
+        const resumeKey = user.resumeUrl && user.resumeUrl.includes('/api/profile/resume/')
+          ? `resumes/${user.resumeUrl.split('/api/profile/resume/')[1]}`
+          : (user.resumeFileName || '');
+        const streamData = await getPrivateResumeStream(resumeKey);
+        fileBuffer = await streamToBuffer(streamData.Body);
+        mimeType = streamData.ContentType || 'application/pdf';
+      } catch (storageErr) {
+        console.warn('[Profile Extract Skills] Cloudflare R2 fetch error:', storageErr.message);
+        return res.status(404).json({ success: false, message: 'Could not access stored resume file.' });
+      }
+    } else {
+      return res.status(400).json({ success: false, message: 'Please upload a resume file or select your profile resume.' });
+    }
+
+    if (!fileBuffer || fileBuffer.length === 0) {
+      return res.status(400).json({ success: false, message: 'Resume file is empty.' });
+    }
+
+    // Call the Python AI Service (Google ADK Resume Analyzer)
+    let rawSkills = [];
+    let detectedRole = '';
+    let yearsOfExperience = null;
+
+    try {
+      const formData = new FormData();
+      const fileBlob = new Blob([fileBuffer], { type: mimeType });
+      formData.append('file', fileBlob, originalFilename);
+
+      const aiRes = await fetch(`${AI_SERVICE_URL}/agents/resume-analyzer/analyze`, {
+        method: 'POST',
+        headers: getAiServiceHeaders(),
+        body: formData,
+        signal: AbortSignal.timeout(60000),
+      });
+
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        const analysis = aiData.analysis || {};
+        detectedRole = analysis.detected_role || '';
+        yearsOfExperience = analysis.years_of_experience || null;
+        const skillsObj = analysis.skills || {};
+        rawSkills = [
+          ...(Array.isArray(skillsObj.technical) ? skillsObj.technical : []),
+          ...(Array.isArray(skillsObj.frameworks_and_tools) ? skillsObj.frameworks_and_tools : []),
+        ];
+        if (rawSkills.length === 0 && Array.isArray(skillsObj.soft_skills)) {
+          rawSkills = skillsObj.soft_skills;
+        }
+      } else {
+        const errText = await aiRes.text();
+        console.warn(`[Profile Extract Skills] AI service returned ${aiRes.status}:`, errText.slice(0, 200));
+      }
+    } catch (aiErr) {
+      console.warn('[Profile Extract Skills] AI service unreachable:', aiErr.message);
+    }
+
+    // Fallback: If AI service could not return skills (e.g. offline or unparseable), scan text for skills
+    if (rawSkills.length === 0) {
+      try {
+        const textSample = fileBuffer.toString('utf-8').replace(/[^\x20-\x7E\n\r\t]/g, ' ');
+        const KNOWN_KEYWORDS = [
+          'React', 'JavaScript', 'TypeScript', 'Node.js', 'Python', 'Java', 'C++', 'C#',
+          'HTML5', 'HTML', 'CSS3', 'CSS', 'Next.js', 'Vue.js', 'Angular', 'Express',
+          'Django', 'Flask', 'FastAPI', 'Spring Boot', 'SQL', 'PostgreSQL', 'MySQL',
+          'MongoDB', 'Redis', 'Docker', 'Kubernetes', 'AWS', 'Google Cloud', 'GCP',
+          'Azure', 'Git', 'Linux', 'REST APIs', 'GraphQL', 'Microservices', 'PyTorch',
+          'TensorFlow', 'Data Science', 'Pandas', 'NumPy', 'Figma', 'CI/CD', 'Go',
+          'Rust', 'Swift', 'Kotlin', 'Flutter', 'Tailwind', 'Sass', 'Redux', 'Jest',
+          'Webpack', 'Vite'
+        ];
+        for (const kw of KNOWN_KEYWORDS) {
+          const regex = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+          if (regex.test(textSample)) {
+            rawSkills.push(kw);
+          }
+        }
+      } catch (fallbackErr) {
+        console.warn('[Profile Extract Skills] Keyword fallback error:', fallbackErr.message);
+      }
+    }
+
+    // Strict deduplication: case-insensitive, trimmed, no empty items
+    const seen = new Set();
+    const cleanSkills = [];
+    for (const s of rawSkills) {
+      if (!s || typeof s !== 'string') continue;
+      const trimmed = s.trim();
+      if (!trimmed || trimmed.length > 50) continue;
+      const lower = trimmed.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        cleanSkills.push(trimmed);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      skills: cleanSkills,
+      detectedRole,
+      yearsOfExperience,
+      count: cleanSkills.length,
+    });
+  } catch (error) {
+    console.error('[Profile Extract Skills Error]:', error);
+    return res.status(500).json({ success: false, message: 'Failed to extract skills from resume' });
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
   uploadResumeFile,
   deleteResumeFile,
   uploadAvatarFile,
+  deleteAvatarFile,
   updateSkills,
   updateInterests,
   updateLinkedin,
@@ -1037,4 +1220,5 @@ module.exports = {
   getGithubRepoReadme,
   completeProfileSetup,
   getResume,
+  extractSkills,
 };

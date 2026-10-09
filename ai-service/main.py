@@ -334,24 +334,29 @@ def code_review_endpoint(payload: CodeReviewPayload):
 
 
 class EvaluationPayload(BaseModel):
-    candidate: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    targetJob: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    interviewConfiguration: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    candidate: Optional[Any] = Field(default_factory=dict)
+    targetJob: Optional[Any] = Field(default_factory=dict)
+    interviewConfiguration: Optional[Any] = Field(default_factory=dict)
     chatMessages: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
-    interviewState: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    interviewState: Optional[Any] = Field(default_factory=dict)
 
-    # Also accept backend snake_case variants
+    # Also accept backend snake_case variants and extra metadata
     session_id: Optional[str] = None
+    sessionId: Optional[str] = None
     target_role: Optional[str] = None
+    targetRole: Optional[str] = None
     company: Optional[str] = None
     interview_type: Optional[str] = None
+    interviewType: Optional[str] = None
     difficulty: Optional[str] = None
-    duration: Optional[int] = None
-    cv_analysis: Optional[Dict[str, Any]] = None
-    jd_analysis: Optional[Dict[str, Any]] = None
-    interview_plan: Optional[Dict[str, Any]] = None
+    duration: Optional[Any] = None
+    isEndedByUser: Optional[bool] = None
+    elapsedMinutes: Optional[float] = None
+    cv_analysis: Optional[Any] = None
+    jd_analysis: Optional[Any] = None
+    interview_plan: Optional[Any] = None
     chat_messages: Optional[List[Dict[str, Any]]] = None
-    interview_state: Optional[Dict[str, Any]] = None
+    interview_state: Optional[Any] = None
 
 
 @app.post("/agents/evaluation-agent/evaluate")
@@ -362,8 +367,10 @@ def evaluation_agent_endpoint(payload: EvaluationPayload):
         # Normalize fields between camelCase and snake_case
         if not data.get("chatMessages") and data.get("chat_messages"):
             data["chatMessages"] = data["chat_messages"]
-        if not data.get("targetJob") and data.get("target_role"):
-            data["targetJob"] = {"role": data.get("target_role"), "company": data.get("company")}
+        if isinstance(data.get("targetJob"), str):
+            data["targetJob"] = {"role": data.get("targetJob"), "company": data.get("company") or ""}
+        elif not data.get("targetJob") and data.get("target_role"):
+            data["targetJob"] = {"role": data.get("target_role"), "company": data.get("company") or ""}
         if not data.get("candidate") and data.get("cv_analysis"):
             data["candidate"] = data["cv_analysis"]
         if not data.get("interviewConfiguration") and data.get("interview_type"):

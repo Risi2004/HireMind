@@ -2,11 +2,13 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import OnboardingHeader from '../components/OnboardingHeader'
 import { useProfileSetup } from '../context/useProfileSetup'
+import { useAuth } from '../context/useAuth'
 import './ProfileSetup.css'
 import './YourField.css'
 
 export default function YourField() {
   const navigate = useNavigate()
+  const { user: authUser } = useAuth()
   const {
     field,
     setField,
@@ -20,11 +22,28 @@ export default function YourField() {
     addSkill,
     removeSkill,
     popularSkills,
+    resumeFile,
+    isExtractingSkills,
+    extractedSkills,
+    lastExtractedSource,
+    extractSkillsFromResume,
   } = useProfileSetup()
   const [error, setError] = useState('')
   const [skillInput, setSkillInput] = useState('')
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
+
+  // Automatically detect skills from resume if not already extracted for this file/profile
+  useEffect(() => {
+    const hasResume = Boolean(resumeFile || authUser?.resumeFileName || authUser?.resumeUrl)
+    const currentSource = resumeFile
+      ? `${resumeFile.name}_${resumeFile.size}_${resumeFile.lastModified}`
+      : (authUser?.resumeFileName || authUser?.resumeUrl || '')
+
+    if (hasResume && currentSource && currentSource !== lastExtractedSource && !isExtractingSkills) {
+      extractSkillsFromResume(resumeFile)
+    }
+  }, [resumeFile, authUser?.resumeFileName, authUser?.resumeUrl, lastExtractedSource, isExtractingSkills, extractSkillsFromResume])
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -146,12 +165,39 @@ export default function YourField() {
 
           <div className="your-field__group" ref={dropdownRef}>
             <div className="your-field__label-row">
-              <label className="your-field__label" htmlFor="skills-input">
-                SKILLS
-              </label>
-              <span className="your-field__label-hint">
-                {skills.length > 0 ? `${skills.length} selected` : 'Type or pick skills'}
-              </span>
+              <div className="your-field__label-title-group">
+                <label className="your-field__label" htmlFor="skills-input">
+                  SKILLS
+                </label>
+                {isExtractingSkills ? (
+                  <span className="your-field__detecting-badge">
+                    <span className="your-field__spinner-dot" aria-hidden="true" />
+                    Detecting from CV...
+                  </span>
+                ) : extractedSkills.length > 0 ? (
+                  <span
+                    className="your-field__detected-badge"
+                    title={`${extractedSkills.length} skills automatically detected from your resume`}
+                  >
+                    ✨ {extractedSkills.length} from CV
+                  </span>
+                ) : null}
+              </div>
+              <div className="your-field__label-actions-group">
+                {!isExtractingSkills && (resumeFile || authUser?.resumeFileName) && (
+                  <button
+                    type="button"
+                    className="your-field__rescan-btn"
+                    onClick={() => extractSkillsFromResume(resumeFile, true)}
+                    title="Re-scan your CV to detect skills"
+                  >
+                    ↺ Re-detect
+                  </button>
+                )}
+                <span className="your-field__label-hint">
+                  {skills.length > 0 ? `${skills.length} selected` : 'Type or pick skills'}
+                </span>
+              </div>
             </div>
 
             <div className="your-field__skill-input-wrap">
@@ -161,9 +207,11 @@ export default function YourField() {
                 className="your-field__input your-field__skill-input"
                 value={skillInput}
                 placeholder={
-                  skills.length === 0
-                    ? 'Type any skill (e.g. React, Python) and press Enter...'
-                    : 'Add another skill...'
+                  isExtractingSkills
+                    ? 'Detecting skills from your CV...'
+                    : skills.length === 0
+                      ? 'Type any skill (e.g. React, Python) and press Enter...'
+                      : 'Add another skill...'
                 }
                 onChange={(event) => {
                   setSkillInput(event.target.value)
@@ -177,7 +225,7 @@ export default function YourField() {
                 type="button"
                 className="your-field__skill-add-btn"
                 onClick={() => handleAddSkill(skillInput)}
-                disabled={!skillInput.trim()}
+                disabled={!skillInput.trim() || isExtractingSkills}
                 title="Add Skill"
               >
                 + Add

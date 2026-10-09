@@ -6,7 +6,7 @@ import restartIcon from '../assets/icons/restart.svg'
 import company1Icon from '../assets/icons/company1.svg'
 import bulbIcon from '../assets/icons/bulb.svg'
 import ProfileDropdown from '../components/ProfileDropdown'
-import { generateInterviewId } from '../utils/interviewUtils'
+import { generateInterviewId, saveInterviewSession } from '../utils/interviewUtils'
 import { getApiUrl } from '../config/api'
 import './InterviewReport.css'
 
@@ -61,6 +61,23 @@ export default function InterviewReport() {
           setSession(data.session)
           setChatMessages(data.chatMessages || [])
           setLoadError(null)
+
+          const evalScore = typeof data.evaluation?.overallScore === 'number'
+            ? data.evaluation.overallScore
+            : (typeof data.evaluation?.score === 'number' ? data.evaluation.score : null)
+
+          const targetId = data.session?.sessionId || sessionId
+          if (targetId && targetId !== 'default' && targetId !== 'latest') {
+            saveInterviewSession({
+              id: targetId,
+              sessionId: targetId,
+              score: evalScore !== null ? `${evalScore}%` : null,
+              overallScore: evalScore,
+              evaluation: data.evaluation,
+              status: 'completed',
+              lastVisitedPath: `/interview-report?id=${targetId}`,
+            })
+          }
         } else {
           if (data.session) setSession(data.session)
           setLoadError({

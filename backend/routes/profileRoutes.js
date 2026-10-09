@@ -7,6 +7,7 @@ const {
   uploadResumeFile,
   deleteResumeFile,
   uploadAvatarFile,
+  deleteAvatarFile,
   updateSkills,
   updateInterests,
   updateLinkedin,
@@ -18,6 +19,7 @@ const {
   getGithubRepos,
   getGithubRepoReadme,
   getResume,
+  extractSkills,
 } = require('../controllers/profileController');
 
 const router = express.Router();
@@ -74,8 +76,24 @@ router.post('/linkedin', protect, updateLinkedin);
 router.post('/resume', protect, uploadResumeMulter.single('resume'), uploadResumeFile);
 router.delete('/resume', protect, deleteResumeFile);
 
-// Avatar picture upload
+// Extract skills automatically from resume
+router.post(
+  '/extract-skills',
+  protect,
+  (req, res, next) => {
+    uploadResumeMulter.single('resume')(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ success: false, message: err.message });
+      }
+      next();
+    });
+  },
+  extractSkills
+);
+
+// Avatar picture upload and removal
 router.post('/avatar', protect, uploadAvatarMulter.single('avatar'), uploadAvatarFile);
+router.delete('/avatar', protect, deleteAvatarFile);
 
 // Setup profile (field, careerStage, experienceLevel, resume)
 router.post('/setup', protect, uploadResumeMulter.single('resume'), completeProfileSetup);

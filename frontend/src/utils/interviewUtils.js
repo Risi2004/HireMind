@@ -53,12 +53,19 @@ export function getAllInterviewSessions() {
     const cleanList = parsed
       .filter((item) => item && item.id && !DUMMY_IDS.has(item.id))
       .map((item) => {
-        if (item.targetRole === 'New Interview') {
-          return { ...item, targetRole: '' }
+        const clean = { ...item }
+        if (clean.targetRole === 'New Interview') {
+          clean.targetRole = ''
         }
-        return item
+        // Sanitize legacy dummy score placeholders (84%, 79%, 94%) if session has no real evaluation
+        if (clean.score && (clean.score === '84%' || clean.score === '79%' || clean.score === '94%')) {
+          if (!clean.evaluation && typeof clean.overallScore !== 'number') {
+            clean.score = null
+          }
+        }
+        return clean
       })
-    if (cleanList.length !== parsed.length) {
+    if (cleanList.length !== parsed.length || JSON.stringify(cleanList) !== raw) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanList))
     }
 
@@ -68,6 +75,74 @@ export function getAllInterviewSessions() {
     return []
   }
 }
+
+/**
+ * Synchronize stored sessions with backend MongoDB database so genuine AI evaluations
+ * and actual scores are always up-to-date across all devices and tabs.
+ */
+export async function syncUserInterviewsFromBackend() {
+  try {
+    const token = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+    if (!token) return getAllInterviewSessions()
+
+    const res = await fetch(getApiUrl('/api/interview/my-sessions'), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    if (!res.ok) return getAllInterviewSessions()
+
+    const data = await res.json()
+    if (!data.success || !Array.isArray(data.sessions)) {
+      return getAllInterviewSessions()
+    }
+
+    const localSessions = getAllInterviewSessions()
+    const mergedMap = new Map()
+
+    for (const session of localSessions) {
+      mergedMap.set(String(session.id), session)
+    }
+
+    for (const remote of data.sessions) {
+      const existing = mergedMap.get(String(remote.id)) || {}
+      const evalScore = remote.overallScore ?? remote.evaluation?.overallScore ?? null
+
+      const merged = {
+        ...existing,
+        ...remote,
+        score: evalScore !== null ? `${evalScore}%` : (existing.score || null),
+        overallScore: evalScore !== null ? evalScore : (existing.overallScore ?? null),
+        evaluation: remote.evaluation || existing.evaluation || null,
+        status: remote.status || existing.status || 'setup',
+        company: remote.company || existing.company || '',
+        targetRole: remote.targetRole || existing.targetRole || '',
+        title: remote.title || existing.title || (remote.targetRole || (remote.company ? `${remote.company} Interview` : 'New Interview')),
+        lastVisitedPath: remote.lastVisitedPath || existing.lastVisitedPath || (
+          (remote.status === 'completed' || remote.status === 'ended_by_user')
+            ? `/interview-report?id=${remote.id}`
+            : `/new-interview/${remote.id}`
+        ),
+      }
+      mergedMap.set(String(remote.id), merged)
+    }
+
+    const updatedList = Array.from(mergedMap.values()).sort((a, b) => {
+      const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime()
+      const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime()
+      return timeB - timeA
+    })
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList))
+    window.dispatchEvent(new CustomEvent('hiremind_interviews_updated', { detail: updatedList }))
+
+    return updatedList
+  } catch (err) {
+    console.warn('Error syncing interview sessions from backend:', err)
+    return getAllInterviewSessions()
+  }
+}
+
 
 /**
  * Fetch a single interview session by its unique ID.

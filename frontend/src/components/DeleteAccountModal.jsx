@@ -41,24 +41,28 @@ function DeleteAccountModalContent({ isOpen, onClose }) {
 
   if (!isOpen) return null
 
-  const isFormValid = acknowledged && confirmWord.trim().toUpperCase() === 'DELETE'
+  const isFormValid = acknowledged && confirmWord.trim().toUpperCase() === 'DELETE' && Boolean(password && password.trim())
 
   const handleDelete = async (e) => {
     e.preventDefault()
+    if (!password || !password.trim()) {
+      setError('Please enter your account password to confirm deletion.')
+      return
+    }
     if (!isFormValid || isDeleting) return
 
     setIsDeleting(true)
     setError('')
 
     try {
-      await deleteAccount(password.trim() || null)
+      await deleteAccount(password.trim())
       setSuccess(true)
       setTimeout(() => {
         onClose()
         navigate('/signup')
       }, 1800)
     } catch (err) {
-      setError(err.message || 'Failed to delete account. Please verify your credentials and try again.')
+      setError(err.message || 'Failed to delete account. Please verify your password and try again.')
       setIsDeleting(false)
     }
   }
@@ -149,20 +153,24 @@ function DeleteAccountModalContent({ isOpen, onClose }) {
               </div>
             </div>
 
-            {/* Password Verification (Optional if user logged in, but verified if provided) */}
+            {/* Password Verification (Mandatory) */}
             <div className="del-input-group">
               <label className="del-input-label" htmlFor="del-password">
-                Account Password <span className="del-optional-tag">(Optional verification)</span>
+                Account Password <span className="del-required-tag">*Required</span>
               </label>
               <div className="del-password-wrapper">
                 <input
                   id="del-password"
                   type={showPassword ? 'text' : 'password'}
                   className="del-text-input"
-                  placeholder="Enter your password to confirm identity"
+                  placeholder="Enter your account password to confirm deletion"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    if (error) setError('')
+                  }}
                   disabled={isDeleting}
+                  required
                 />
                 <button
                   type="button"

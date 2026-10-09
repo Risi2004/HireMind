@@ -204,6 +204,14 @@
   letter-spacing: 0.04em;
 }
 
+.del-required-tag {
+  font-size: 0.75rem;
+  color: #ef4444;
+  font-weight: 600;
+  margin-left: 6px;
+  letter-spacing: 0.02em;
+}
+
 .del-optional-tag {
   font-size: 0.75rem;
   color: #64748b;
