@@ -4,6 +4,7 @@ import OnboardingHeader from '../components/OnboardingHeader'
 import githubLogo from '../assets/icons/Vector.svg'
 import { useProfileSetup } from '../context/useProfileSetup'
 import { useAuth } from '../context/useAuth'
+import { GITHUB_INTEGRATION_ENABLED } from '../config/features'
 import './ProfileSetup.css'
 
 // Map the ?github_connected / ?github_error query params set by the backend OAuth callback
@@ -120,6 +121,7 @@ export default function ProfileSetup() {
           </p>
 
           {/* GitHub Connection Card */}
+          {GITHUB_INTEGRATION_ENABLED && (
           <div className={`github-card ${githubData?.connected ? 'is-connected' : ''}`}>
             <div className="github-card__left">
               {githubData?.connected && githubData.avatarUrl ? (
@@ -172,6 +174,7 @@ export default function ProfileSetup() {
               </button>
             )}
           </div>
+          )}
         </div>
 
         <div className="profile-setup__actions">
@@ -193,7 +196,7 @@ export default function ProfileSetup() {
       </main>
 
       {/* GitHub Connect Modal */}
-      {isModalOpen && (
+      {GITHUB_INTEGRATION_ENABLED && isModalOpen && (
         <div className="gh-modal-overlay" onClick={() => !isConnecting && setIsModalOpen(false)}>
           <div className="gh-modal-card" onClick={(e) => e.stopPropagation()}>
             <button

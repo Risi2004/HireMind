@@ -2,6 +2,7 @@ const User = require('../models/User');
 const InterviewSession = require('../models/InterviewSession');
 const { extractToken, verifySessionToken } = require('../config/authToken');
 const { isAdminUser } = require('./authMiddleware');
+const { sendPilotFeedbackEmail } = require('../services/emailService');
 
 /**
  * Middleware that strictly protects AI Interview execution.
@@ -194,8 +195,36 @@ const recordCompletedDemoInterview = async (session) => {
   }
 };
 
+/**
+ * Emails a demo (pilot) candidate the pilot feedback form after they finish an interview.
+ * Sent at most once per session: the session's feedbackEmailSentAt is claimed atomically.
+ * Admins and non-demo users are skipped. Never throws.
+ *
+ * @param {Object} session - InterviewSession mongoose document
+ */
+const sendPilotFeedbackRequest = async (session) => {
+  try {
+    if (!session || !session.userId) return;
+
+    const candidate = await User.findById(session.userId);
+    if (!candidate || isAdminUser(candidate) || !candidate.demoAccess?.enabled) return;
+
+    const claimed = await InterviewSession.findOneAndUpdate(
+      { _id: session._id, feedbackEmailSentAt: null },
+      { $set: { feedbackEmailSentAt: new Date() } }
+    );
+    if (!claimed) return; // Already sent for this interview
+
+    await sendPilotFeedbackEmail(candidate.email, candidate.firstName, session.targetRole || '');
+    console.log(`[Demo Access] Pilot feedback email sent to ${candidate.email} for session ${session.sessionId}`);
+  } catch (err) {
+    console.error('[Demo Access] Error sending pilot feedback email:', err.message);
+  }
+};
+
 module.exports = {
   requireInterviewDemoAccess,
   requireSessionOwnership,
   recordCompletedDemoInterview,
+  sendPilotFeedbackRequest,
 };

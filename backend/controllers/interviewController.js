@@ -7,7 +7,7 @@ const interviewAgentService = require('../services/interviewAgentService');
 const codeExecutionService = require('../services/codeExecutionService');
 
 const { getAiServiceUrl, getAiServiceHeaders } = require('../config/aiServiceConfig');
-const { recordCompletedDemoInterview } = require('../middleware/demoAccessMiddleware');
+const { recordCompletedDemoInterview, sendPilotFeedbackRequest } = require('../middleware/demoAccessMiddleware');
 
 const AI_SERVICE_URL = getAiServiceUrl();
 
@@ -1581,6 +1581,8 @@ exports.submitLiveAnswer = async (req, res) => {
       session.interviewState.status = 'completed';
       session.interviewState.endedAt = new Date();
       demoAccessUpdate = await recordCompletedDemoInterview(session);
+      // Fire-and-forget: ask pilot (demo) candidates for feedback
+      sendPilotFeedbackRequest(session);
     }
 
     // Spoken feedback (voice) and the next question's audio are synthesized in parallel
@@ -1839,6 +1841,8 @@ exports.manualEndLiveInterview = async (req, res) => {
 
     await session.save();
     const demoAccessUpdate = await recordCompletedDemoInterview(session);
+    // Fire-and-forget: ask pilot (demo) candidates for feedback
+    sendPilotFeedbackRequest(session);
 
     return res.status(200).json({
       success: true,

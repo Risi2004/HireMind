@@ -10,6 +10,7 @@ import ProfileDropdown from '../components/ProfileDropdown'
 import { useAuth } from '../context/useAuth'
 import { generateInterviewId, getInterviewSession, saveInterviewSession } from '../utils/interviewUtils'
 import { getApiUrl } from '../config/api'
+import { GITHUB_INTEGRATION_ENABLED } from '../config/features'
 import './NewInterview.css'
 
 export default function NewInterview() {
@@ -48,15 +49,17 @@ export default function NewInterview() {
   const [targetRole, setTargetRole] = useState('')
   const [company, setCompany] = useState('')
   const [jobDescription, setJobDescription] = useState('')
-  const [interviewType, setInterviewType] = useState('Role-Specific')
+  const [interviewType, setInterviewType] = useState('Full Interview')
   const [interviewMode, setInterviewMode] = useState(null) // 'HR_SIMULATION' | 'FEEDBACK_COACHING'
   const [difficulty, setDifficulty] = useState('Intermediate')
   const [duration, setDuration] = useState('30 min')
   const [uploadedResume, setUploadedResume] = useState(null)
   const [currentResumeFile, setCurrentResumeFile] = useState(null)
-  const [isGithubConnected, setIsGithubConnected] = useState(() => {
+  const [isGithubConnectedState, setIsGithubConnected] = useState(() => {
     return Boolean(authUser?.github?.connected)
   })
+  // While GitHub integration is disabled, interviews never use GitHub repos
+  const isGithubConnected = GITHUB_INTEGRATION_ENABLED && isGithubConnectedState
   const [showUrlModal, setShowUrlModal] = useState(false)
   const [urlInput, setUrlInput] = useState('')
   const [isChatOpen, setIsChatOpen] = useState(false)
@@ -83,6 +86,19 @@ export default function NewInterview() {
   const fileInputRef = useRef(null)
   const isLoadedRef = useRef(false)
 
+  // Temporary lock: Only Full Interview, Intermediate difficulty, and 30 min duration are currently available
+  useEffect(() => {
+    if (interviewType !== 'Full Interview') {
+      setInterviewType('Full Interview')
+    }
+    if (difficulty !== 'Intermediate') {
+      setDifficulty('Intermediate')
+    }
+    if (duration !== '30 min') {
+      setDuration('30 min')
+    }
+  }, [interviewType, difficulty, duration])
+
   // Restore this interview's locally cached setup. Runs during render whenever the
   // interview id changes (React's "adjust state on prop change" pattern), so the form
   // never flashes empty and no extra effect-driven render is needed.
@@ -94,10 +110,10 @@ export default function NewInterview() {
       if (cached.targetRole && cached.targetRole !== 'New Interview') setTargetRole(cached.targetRole)
       if (cached.company) setCompany(cached.company)
       if (cached.jobDescription) setJobDescription(cached.jobDescription)
-      if (cached.interviewType) setInterviewType(cached.interviewType)
+      if (cached.interviewType) setInterviewType(cached.interviewType === 'Full Interview' ? cached.interviewType : 'Full Interview')
       if (cached.interviewMode) setInterviewMode(cached.interviewMode)
-      if (cached.difficulty) setDifficulty(cached.difficulty)
-      if (cached.duration) setDuration(cached.duration)
+      if (cached.difficulty) setDifficulty(cached.difficulty === 'Intermediate' ? cached.difficulty : 'Intermediate')
+      if (cached.duration) setDuration(cached.duration === '30 min' ? cached.duration : '30 min')
       if (cached.uploadedResume) setUploadedResume(cached.uploadedResume)
       if (cached.resumeAnalysis) setResumeAnalysis(cached.resumeAnalysis)
       if (cached.jdAnalysis) setJdAnalysis(cached.jdAnalysis)
@@ -198,10 +214,10 @@ export default function NewInterview() {
     if (s.targetRole && s.targetRole !== 'New Interview') setTargetRole(s.targetRole)
     if (s.company) setCompany(s.company)
     if (s.jobDescription) setJobDescription(s.jobDescription)
-    if (s.interviewType) setInterviewType(s.interviewType)
+    if (s.interviewType) setInterviewType(s.interviewType === 'Full Interview' ? s.interviewType : 'Full Interview')
     if (s.interviewMode) setInterviewMode(s.interviewMode)
-    if (s.difficulty) setDifficulty(s.difficulty)
-    if (s.duration) setDuration(s.duration)
+    if (s.difficulty) setDifficulty(s.difficulty === 'Intermediate' ? s.difficulty : 'Intermediate')
+    if (s.duration) setDuration(s.duration === '30 min' ? s.duration : '30 min')
     if (s.resumeFileName) setUploadedResume(s.resumeFileName.replace(/^resumes\//, ''))
     if (s.jdAnalysis) setJdAnalysis(s.jdAnalysis)
     if (s.userFacingPlan || s.interviewPlan) {
@@ -658,7 +674,9 @@ export default function NewInterview() {
           headline: hasJdAnalysis ? 'Interview Cockpit Ready!' : 'Configure Your Interview',
           subtext: hasJdAnalysis
             ? 'All candidate configurations and JD alignment are complete. Click "Start" to begin your interactive AI interview.'
-            : 'Select your preferred interview type, difficulty, duration, and GitHub integration below.',
+            : GITHUB_INTEGRATION_ENABLED
+            ? 'Select your preferred interview type, difficulty, duration, and GitHub integration below.'
+            : 'Select your preferred interview type, difficulty, and duration below.',
         },
       }[currentStep]
 
@@ -1326,17 +1344,27 @@ export default function NewInterview() {
                   'Case & Situational',
                   'Skills Assessment',
                   'Full Interview',
-                ].map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    disabled={isOptionsLocked}
-                    className={`new-int-pill ${interviewType === type ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''}`}
-                    onClick={() => setInterviewType(type)}
-                  >
-                    {type}
-                  </button>
-                ))}
+                ].map((type) => {
+                  const isBlocked = type !== 'Full Interview'
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      disabled={isOptionsLocked || isBlocked}
+                      title={isBlocked ? 'Temporarily blocked' : undefined}
+                      className={`new-int-pill ${interviewType === type ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''} ${isBlocked ? 'is-blocked' : ''}`}
+                      onClick={() => !isBlocked && setInterviewType(type)}
+                    >
+                      {isBlocked && (
+                        <svg className="new-int-pill-lock-icon" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                      )}
+                      <span>{type}</span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
@@ -1355,17 +1383,27 @@ export default function NewInterview() {
                 )}
               </div>
               <div className="new-int-pills-row">
-                {['Beginner', 'Intermediate', 'Advanced'].map((diff) => (
-                  <button
-                    key={diff}
-                    type="button"
-                    disabled={isOptionsLocked}
-                    className={`new-int-pill ${difficulty === diff ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''}`}
-                    onClick={() => setDifficulty(diff)}
-                  >
-                    {diff}
-                  </button>
-                ))}
+                {['Beginner', 'Intermediate', 'Advanced'].map((diff) => {
+                  const isBlocked = diff !== 'Intermediate'
+                  return (
+                    <button
+                      key={diff}
+                      type="button"
+                      disabled={isOptionsLocked || isBlocked}
+                      title={isBlocked ? 'Temporarily blocked' : undefined}
+                      className={`new-int-pill ${difficulty === diff ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''} ${isBlocked ? 'is-blocked' : ''}`}
+                      onClick={() => !isBlocked && setDifficulty(diff)}
+                    >
+                      {isBlocked && (
+                        <svg className="new-int-pill-lock-icon" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                      )}
+                      <span>{diff}</span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
@@ -1384,22 +1422,32 @@ export default function NewInterview() {
                 )}
               </div>
               <div className="new-int-pills-row">
-                {['15 min', '30 min', '60 min'].map((dur) => (
-                  <button
-                    key={dur}
-                    type="button"
-                    disabled={isOptionsLocked}
-                    className={`new-int-pill ${duration === dur ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''}`}
-                    onClick={() => setDuration(dur)}
-                  >
-                    {dur}
-                  </button>
-                ))}
+                {['15 min', '30 min', '60 min'].map((dur) => {
+                  const isBlocked = dur !== '30 min'
+                  return (
+                    <button
+                      key={dur}
+                      type="button"
+                      disabled={isOptionsLocked || isBlocked}
+                      title={isBlocked ? 'Temporarily blocked' : undefined}
+                      className={`new-int-pill ${duration === dur ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''} ${isBlocked ? 'is-blocked' : ''}`}
+                      onClick={() => !isBlocked && setDuration(dur)}
+                    >
+                      {isBlocked && (
+                        <svg className="new-int-pill-lock-icon" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                      )}
+                      <span>{dur}</span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
             {/* GITHUB INTEGRATION (Shown for developer/technical roles, marked Optional) */}
-            {showGithubOption && (
+            {GITHUB_INTEGRATION_ENABLED && showGithubOption && (
               <div className={`new-int-github-card ${isGithubConnected ? 'is-connected' : ''} ${isOptionsLocked ? 'is-locked' : ''}`}>
                 <div className="new-int-github-info">
                   <div className="new-int-github-icon-wrap">
@@ -1771,14 +1819,16 @@ export default function NewInterview() {
                       />
                     )}
                   </div>
-                  <div className="new-int-pipe-card__title">
-                    Parsing Resume & Experience
+                  <div className="new-int-pipe-card__text">
+                    <div className="new-int-pipe-card__title">
+                      Parsing Resume & Experience
+                    </div>
                     {analysisError && !isAnalyzingResume ? (
                       <div className="new-int-pipe-error-preview">
                         Analysis Incomplete / Click to Retry
                       </div>
                     ) : hasResumeReady && resumeAnalysis?.skills?.technical?.length > 0 && !isAnalyzingResume ? (
-                      <div className="new-int-pipe-skills-preview">
+                      <div className="new-int-pipe-skills-preview" title={resumeAnalysis.skills.technical.slice(0, 3).join(' • ')}>
                         {resumeAnalysis.skills.technical.slice(0, 3).join(' • ')}
                       </div>
                     ) : null}
@@ -1843,12 +1893,12 @@ export default function NewInterview() {
                       />
                     )}
                   </div>
-                  <div className="new-int-pipe-card__title">
-                    Extracting Key Skills
-                    <br />
-                    from JD
+                  <div className="new-int-pipe-card__text">
+                    <div className="new-int-pipe-card__title">
+                      Extracting Key Skills from JD
+                    </div>
                     {hasJdAnalysis && jdAnalysis?.requirements?.required_skills?.length > 0 && !isAnalyzingJd ? (
-                      <div className="new-int-pipe-skills-preview">
+                      <div className="new-int-pipe-skills-preview" title={jdAnalysis.requirements.required_skills.slice(0, 3).join(' • ')}>
                         {jdAnalysis.requirements.required_skills.slice(0, 3).join(' • ')}
                       </div>
                     ) : null}
@@ -1880,46 +1930,58 @@ export default function NewInterview() {
               </div>
 
               {/* Progress Bar */}
-              <div className="new-int-progress-bar">
-                <div
-                  className={`new-int-progress-fill ${isAnalyzingJd ? 'is-pulsing' : ''}`}
-                  style={{ width: hasJdAnalysis ? '100%' : isAnalyzingJd ? '60%' : hasJd ? '30%' : '0%' }}
-                />
-              </div>
+              {isAnalyzingJd && (
+                <div className="new-int-progress-bar">
+                  <div
+                    className="new-int-progress-fill is-pulsing"
+                    style={{ width: hasJdAnalysis ? '100%' : '60%' }}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Stage 3: Researching Engineering Culture */}
             <div className={`new-int-pipe-card ${hasCompany ? 'new-int-pipe-card--done' : 'new-int-pipe-card--queued'}`}>
-              <div className="new-int-pipe-card__left">
-                <div className={`new-int-pipe-card__icon-wrap ${hasCompany ? 'is-done' : 'is-queued'}`}>
-                  <img src={hasCompany ? tick2Icon : researchEngIcon} alt="" className="new-int-pipe-icon" />
+              <div className="new-int-pipe-card__main-row">
+                <div className="new-int-pipe-card__left">
+                  <div className={`new-int-pipe-card__icon-wrap ${hasCompany ? 'is-done' : 'is-queued'}`}>
+                    <img src={hasCompany ? tick2Icon : researchEngIcon} alt="" className="new-int-pipe-icon" />
+                  </div>
+                  <div className="new-int-pipe-card__text">
+                    <div className="new-int-pipe-card__title">
+                      Researching Engineering Culture
+                    </div>
+                  </div>
                 </div>
-                <div className="new-int-pipe-card__title">
-                  Researching Engineering
-                  <br />
-                  Culture
+                <div className={`new-int-pipe-badge ${hasCompany ? 'new-int-pipe-badge--done' : 'new-int-pipe-badge--queued'}`}>
+                  {hasCompany ? 'DONE' : 'QUEUED'}
                 </div>
-              </div>
-              <div className={`new-int-pipe-badge ${hasCompany ? 'new-int-pipe-badge--done' : 'new-int-pipe-badge--queued'}`}>
-                {hasCompany ? 'DONE' : 'QUEUED'}
               </div>
             </div>
 
             {/* Stage 4: Interview Structure & Agenda */}
             <div className={`new-int-pipe-card ${planData ? 'new-int-pipe-card--done' : isPlanning ? 'new-int-pipe-card--active' : isSetupComplete ? 'new-int-pipe-card--active' : 'new-int-pipe-card--queued'}`}>
-              <div className="new-int-pipe-card__left">
-                <div className={`new-int-pipe-card__icon-wrap ${planData ? 'is-done' : isPlanning || isSetupComplete ? 'is-analyzing' : 'is-queued'}`}>
-                  <img src={planData ? tick2Icon : genQuestionsIcon} alt="" className="new-int-pipe-icon" />
+              <div className="new-int-pipe-card__main-row">
+                <div className="new-int-pipe-card__left">
+                  <div className={`new-int-pipe-card__icon-wrap ${planData ? 'is-done' : isPlanning || isSetupComplete ? 'is-analyzing' : 'is-queued'}`}>
+                    <img src={planData ? tick2Icon : genQuestionsIcon} alt="" className="new-int-pipe-icon" />
+                  </div>
+                  <div className="new-int-pipe-card__text">
+                    <div className="new-int-pipe-card__title">
+                      Interview Structure & Agenda
+                    </div>
+                  </div>
                 </div>
-                <div className="new-int-pipe-card__title">
-                  Interview Structure
-                  <br />
-                  & Agenda
+                <div className={`new-int-pipe-badge ${planData ? 'new-int-pipe-badge--done' : isPlanning ? 'new-int-pipe-badge--analyzing' : isSetupComplete ? 'new-int-pipe-badge--analyzing' : 'new-int-pipe-badge--queued'}`}>
+                  {planData ? 'PLAN READY' : isPlanning ? 'PLANNING...' : isSetupComplete ? 'READY' : 'QUEUED'}
                 </div>
               </div>
-              <div className={`new-int-pipe-badge ${planData ? 'new-int-pipe-badge--done' : isPlanning ? 'new-int-pipe-badge--analyzing' : isSetupComplete ? 'new-int-pipe-badge--analyzing' : 'new-int-pipe-badge--queued'}`}>
-                {planData ? 'PLAN READY' : isPlanning ? 'PLANNING...' : isSetupComplete ? 'READY' : 'QUEUED'}
-              </div>
+
+              {isPlanning && (
+                <div className="new-int-progress-bar">
+                  <div className="new-int-progress-fill is-pulsing" style={{ width: '85%' }} />
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -2002,7 +2064,7 @@ export default function NewInterview() {
       )}
 
       {/* GitHub Connect Modal (When user has not connected GitHub in profile) */}
-      {showGithubModal && (
+      {GITHUB_INTEGRATION_ENABLED && showGithubModal && (
         <div className="new-int-modal-backdrop" onClick={() => !isConnectingGithub && setShowGithubModal(false)}>
           <div className="new-int-modal" onClick={(e) => e.stopPropagation()}>
             <h3 className="new-int-modal__title">Connect Your GitHub Account</h3>

@@ -115,6 +115,11 @@ const interviewSessionSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // Set once the pilot feedback form email has been sent for this interview
+    feedbackEmailSentAt: {
+      type: Date,
+      default: null,
+    },
     interviewState: {
       status: {
         type: String,

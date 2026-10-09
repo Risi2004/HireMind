@@ -539,6 +539,87 @@ const sendDemoAccessRevokedEmail = async (email, firstName = 'Candidate', reason
   return true;
 };
 
+const DEFAULT_PILOT_FEEDBACK_FORM_URL =
+  'https://docs.google.com/forms/d/e/1FAIpQLSc6PAv6O_xDxA4-MyHmbOnXNE8fN1qeLKcwn5yBp5TV5b4SHg/viewform?usp=dialog';
+
+/**
+ * Asks a demo (pilot) candidate to fill the pilot testing feedback form after an interview.
+ *
+ * @param {string} email
+ * @param {string} firstName
+ * @param {string} targetRole - Role of the interview just finished (optional)
+ */
+const sendPilotFeedbackEmail = async (email, firstName = 'Candidate', targetRole = '') => {
+  const formUrl = process.env.PILOT_FEEDBACK_FORM_URL || DEFAULT_PILOT_FEEDBACK_FORM_URL;
+  const supportEmail = process.env.SUPPORT_EMAIL || 'support@hiremind.com';
+  const transporter = getTransporter();
+  const roleText = targetRole ? ` for the <strong>${targetRole}</strong> role` : '';
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 40px 20px; }
+          .container { max-width: 560px; margin: 0 auto; background: #1e293b; border-radius: 16px; border: 1px solid rgba(56, 189, 248, 0.25); padding: 36px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+          .logo { font-size: 24px; font-weight: 800; letter-spacing: -0.5px; color: #38bdf8; margin-bottom: 20px; display: inline-block; }
+          .badge { display: inline-block; background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 4px 10px; border-radius: 6px; margin-bottom: 16px; }
+          .title { font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 12px; }
+          .text { font-size: 14px; line-height: 1.6; color: #94a3b8; margin-bottom: 20px; }
+          .btn-container { text-align: center; margin: 30px 0 24px; }
+          .btn { display: inline-block; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: #ffffff !important; text-decoration: none; font-weight: 600; font-size: 15px; padding: 14px 34px; border-radius: 10px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); }
+          .footer { font-size: 12px; color: #475569; text-align: center; margin-top: 32px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="logo">HireMind</div>
+          <div><span class="badge">Pilot Testing Feedback</span></div>
+          <div class="title">Thanks for completing your mock interview! 🙌</div>
+          <p class="text">Hi ${firstName},</p>
+          <p class="text">You just finished an AI mock interview${roleText} on HireMind as part of our pilot program. Your experience helps us shape the product, so we'd love to hear what worked well and what didn't.</p>
+          <p class="text">The feedback form only takes a few minutes to complete.</p>
+
+          <div class="btn-container">
+            <a href="${formUrl}" class="btn">Fill the Pilot Feedback Form &rarr;</a>
+          </div>
+
+          <p class="text" style="font-size: 13px; color: #64748b; text-align: center;">
+            Direct link: <br/><a href="${formUrl}" style="color: #60a5fa; word-break: break-all;">${formUrl}</a>
+          </p>
+
+          <div class="footer">
+            &copy; ${new Date().getFullYear()} HireMind. All rights reserved. <br/>
+            Have questions? Contact our support team at <a href="mailto:${supportEmail}" style="color: #60a5fa;">${supportEmail}</a>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  if (!transporter) {
+    console.log('\n=============================================');
+    console.log(`[HireMind Email] (Dev Mock Mode) Pilot feedback request sent to ${email}`);
+    console.log(`[HireMind Email] Form Link: ${formUrl}`);
+    console.log('=============================================\n');
+    return true;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || '"HireMind Team" <noreply@hiremind.com>',
+      to: email,
+      subject: 'HireMind: How was your mock interview? Share your pilot feedback',
+      html: htmlContent,
+    });
+  } catch (err) {
+    console.error('[Email Service] Failed to send pilot feedback email:', err.message);
+  }
+
+  return true;
+};
+
 module.exports = {
   sendOtpEmail,
   sendOnboardingEmail,
@@ -546,6 +627,7 @@ module.exports = {
   sendAccountDeletionEmail,
   sendDemoAccessGrantedEmail,
   sendDemoAccessRevokedEmail,
+  sendPilotFeedbackEmail,
 };
 
 
