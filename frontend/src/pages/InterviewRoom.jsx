@@ -501,11 +501,19 @@ export default function InterviewRoom() {
       }
     } catch { /* non-critical */ }
 
-    await startOrResumeInterview('voice', true)
+    await startOrResumeInterview('voice', true, chosenMode)
   }
 
-  // Interview Mode Selection Modal state
+  // Interview Mode & Format Selection Modal state
   const [isModeModalOpen, setIsModeModalOpen] = useState(false)
+  const [modalStep, setModalStep] = useState('mode') // 'mode' | 'format'
+  const [chosenMode, setChosenMode] = useState(() => {
+    return (
+      sessionStorage.getItem(`hiremind_int_mode_${interviewId}`) ||
+      session?.interviewMode ||
+      'HR_SIMULATION'
+    )
+  })
   const [liveTranscript, setLiveTranscript] = useState('')
   const liveTranscriptRef = useRef('')
   const recognitionRef = useRef(null)
@@ -954,13 +962,67 @@ export default function InterviewRoom() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
   }
 
-  // Handler when user selects mode from the Welcome Modal
-  const handleSelectMode = async (selectedMode) => {
-    setIsModeModalOpen(false)
-    setInterviewMode(selectedMode)
-    sessionStorage.setItem(`hiremind_mode_${interviewId}`, selectedMode)
+  // Handler when user selects interview mode (HR Simulation vs Feedback Coaching)
+  const handleChooseInterviewMode = (mode) => {
+    setChosenMode(mode)
+    sessionStorage.setItem(`hiremind_int_mode_${interviewId}`, mode)
+    setSession((prev) => ({
+      ...prev,
+      interviewMode: mode,
+      interviewState: {
+        ...(prev?.interviewState || {}),
+        interviewMode: mode,
+      },
+    }))
 
-    if (selectedMode === 'voice') {
+    // Sync to MongoDB session
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      fetch(getApiUrl(`/api/interview/${interviewId}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({ interviewMode: mode }),
+      }).catch(() => {})
+    } catch { /* non-critical */ }
+
+    // Transition to Format Selection (Voice vs Text)
+    setModalStep('format')
+  }
+
+  // Handler when user selects format (Voice vs Text) from modal
+  const handleSelectMode = async (selectedFormat, modeToUse = chosenMode) => {
+    setIsModeModalOpen(false)
+    setInterviewMode(selectedFormat)
+    sessionStorage.setItem(`hiremind_mode_${interviewId}`, selectedFormat)
+    sessionStorage.setItem(`hiremind_int_mode_${interviewId}`, modeToUse)
+
+    // Ensure session state has latest mode
+    setSession((prev) => ({
+      ...prev,
+      interviewMode: modeToUse,
+      interviewState: {
+        ...(prev?.interviewState || {}),
+        interviewMode: modeToUse,
+      },
+    }))
+
+    // Sync to MongoDB
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      fetch(getApiUrl(`/api/interview/${interviewId}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({ interviewMode: modeToUse }),
+      }).catch(() => {})
+    } catch { /* non-critical */ }
+
+    if (selectedFormat === 'voice') {
       // User gesture: unlock AudioContext immediately so autoplay succeeds
       try {
         const AudioCtx = window.AudioContext || window.webkitAudioContext
@@ -978,12 +1040,13 @@ export default function InterviewRoom() {
         await startMicrophone()
       } catch { /* non-critical; safe to ignore */ }
     } else {
-      await startOrResumeInterview('text', false)
+      await startOrResumeInterview('text', false, modeToUse)
     }
   }
 
-  const startOrResumeInterview = async (mode = 'voice', shouldAutoPlayAudio = true) => {
+  const startOrResumeInterview = async (mode = 'voice', shouldAutoPlayAudio = true, passedInterviewMode = null) => {
     try {
+      const effectiveMode = passedInterviewMode || chosenMode || session?.interviewMode || 'HR_SIMULATION'
       setVoiceState(VOICE_STATES.INITIALIZING)
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
       const res = await fetch(getApiUrl(`/api/interview/${interviewId}/begin`), {
@@ -992,7 +1055,11 @@ export default function InterviewRoom() {
           'Content-Type': 'application/json',
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
         },
-        body: JSON.stringify({ mode, includeAudio: mode === 'voice' }),
+        body: JSON.stringify({
+          mode,
+          includeAudio: mode === 'voice',
+          interviewMode: effectiveMode,
+        }),
       })
 
       if (res.ok) {
@@ -1070,6 +1137,10 @@ export default function InterviewRoom() {
         const data = await res.json()
         const sess = data.session || data
         if (sess) {
+          if (sess.interviewMode) {
+            setChosenMode(sess.interviewMode)
+          }
+
           if (sess.interviewState?.status === 'completed' || sess.interviewState?.status === 'ended_by_user') {
             setIsCompleted(true)
             setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
@@ -1094,7 +1165,7 @@ export default function InterviewRoom() {
             // Resuming ongoing session with previous candidate interaction
             const modeToUse = savedMode || 'voice'
             setInterviewMode(modeToUse)
-            startOrResumeInterview(modeToUse, false)
+            startOrResumeInterview(modeToUse, false, sess.interviewMode)
             return
           }
         }
@@ -1103,7 +1174,8 @@ export default function InterviewRoom() {
       console.warn('[InterviewRoom] Initial check error:', err)
     }
 
-    // Fresh interview: prompt user with Voice vs Text Modal
+    // Fresh interview: prompt user with Step 1 (Mode Selection: HR vs Feedback)
+    setModalStep('mode')
     setIsModeModalOpen(true)
   })
 
@@ -3242,122 +3314,279 @@ export default function InterviewRoom() {
       </div>
 
       {/* =====================================================================
-          INTERVIEW MODE SELECTION MODAL (Prompted at begin of interview)
+          INTERVIEW MODE & FORMAT SELECTION MODAL (Prompted at begin of interview)
           ===================================================================== */}
       {isModeModalOpen && (
         <div className="int-room-mode-overlay" role="dialog" aria-modal="true" aria-labelledby="mode-modal-title">
           <div className="int-room-mode-modal">
-            <div className="int-room-mode-header">
-              <div className="int-room-mode-badge">HireMind AI Interview Experience</div>
-              <h2 id="mode-modal-title" className="int-room-mode-title">Choose Your Interview Format</h2>
-              <p className="int-room-mode-subtitle">
-                Select how you would like to interact with the AI interviewer for the <strong>{displayRole}</strong> position at <strong>{displayCompany}</strong>.
-              </p>
-            </div>
-
-            <div className="int-room-mode-grid">
-              {/* Voice-Based Interview Card */}
-              <div className="int-room-mode-card is-voice" onClick={() => handleSelectMode('voice')}>
-                <div className="int-room-mode-card__badge">Recommended • Hands-Free</div>
-                <div className="int-room-mode-card__icon-wrap">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="22" />
-                  </svg>
+            {modalStep === 'mode' ? (
+              <>
+                <div className="int-room-mode-header">
+                  <div className="int-room-mode-badge">Step 1 of 2 • Interview Style</div>
+                  <h2 id="mode-modal-title" className="int-room-mode-title">Select Interview Mode</h2>
+                  <p className="int-room-mode-subtitle">
+                    Choose how you would like to experience your interview for the <strong>{displayRole}</strong> position at <strong>{displayCompany}</strong>.
+                  </p>
                 </div>
-                <h3 className="int-room-mode-card__title">Voice-Based Interview</h3>
-                <p className="int-room-mode-card__desc">
-                  The AI interviewer asks questions aloud automatically. You answer naturally using your microphone, with live speech transcription typed directly on screen.
-                </p>
-                <ul className="int-room-mode-card__features">
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    AI automatically reads questions aloud
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Real-time speech typing — words appear as you speak
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Simple microphone ON / OFF controls (no chatbox needed)
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Realistic, immersive conversational practice
-                  </li>
-                </ul>
-                <button
-                  type="button"
-                  className="int-room-mode-card__action-btn is-voice"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleSelectMode('voice')
-                  }}
-                >
-                  Start Voice Interview →
-                </button>
-              </div>
 
-              {/* Text-Based Interview Card */}
-              <div className="int-room-mode-card is-text" onClick={() => handleSelectMode('text')}>
-                <div className="int-room-mode-card__badge is-muted">Standard Format</div>
-                <div className="int-room-mode-card__icon-wrap">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
+                <div className="int-room-mode-grid">
+                  {/* Card 1: HR Interview Mode */}
+                  <div
+                    className={`int-room-mode-card is-hr ${chosenMode === 'HR_SIMULATION' ? 'is-selected' : ''}`}
+                    onClick={() => handleChooseInterviewMode('HR_SIMULATION')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        handleChooseInterviewMode('HR_SIMULATION')
+                      }
+                    }}
+                  >
+                    <div className="int-room-mode-card__top">
+                      <div className="int-room-mode-card__icon-box">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                      </div>
+                      <span className="int-room-mode-card__badge-pill">Realistic Simulation</span>
+                    </div>
+
+                    <h3 className="int-room-mode-card__title">HR Interview Mode</h3>
+                    <p className="int-room-mode-card__desc">
+                      Experience a realistic interview with an AI interviewer. Answer HR, behavioral, and job-related questions while the AI asks relevant adaptive follow-up questions based on your responses.
+                    </p>
+
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Realistic interview conversation</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Adaptive follow-up questions</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check is-amber">✓</span>
+                        <span>No immediate feedback, scores, or coaching after individual answers</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Comprehensive performance report after the interview ends</span>
+                      </li>
+                    </ul>
+
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-hr"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleChooseInterviewMode('HR_SIMULATION')
+                      }}
+                    >
+                      Choose HR Mode →
+                    </button>
+                  </div>
+
+                  {/* Card 2: Feedback Interview Mode */}
+                  <div
+                    className={`int-room-mode-card is-feedback ${chosenMode === 'FEEDBACK_COACHING' ? 'is-selected is-selected--feedback' : ''}`}
+                    onClick={() => handleChooseInterviewMode('FEEDBACK_COACHING')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        handleChooseInterviewMode('FEEDBACK_COACHING')
+                      }
+                    }}
+                  >
+                    <div className="int-room-mode-card__top">
+                      <div className="int-room-mode-card__icon-box is-feedback">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                          <path d="M12 7v2" />
+                          <path d="M12 13h.01" />
+                        </svg>
+                      </div>
+                      <span className="int-room-mode-card__badge-pill is-purple">Interactive Coaching</span>
+                    </div>
+
+                    <h3 className="int-room-mode-card__title">Feedback Interview Mode</h3>
+                    <p className="int-room-mode-card__desc">
+                      Practise answering interview questions while receiving personalized AI feedback after every response. Learn from your mistakes, improve your answers, and continue practising with adaptive follow-up questions.
+                    </p>
+
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Personalized interview questions</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Immediate feedback after every answer</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Strengths and weaknesses identification</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Actionable suggestions for improving each answer</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Adaptive follow-up questions</span>
+                      </li>
+                      <li>
+                        <span className="int-room-mode-check">✓</span>
+                        <span>Comprehensive final performance report</span>
+                      </li>
+                    </ul>
+
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-feedback"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleChooseInterviewMode('FEEDBACK_COACHING')
+                      }}
+                    >
+                      Choose Feedback Mode →
+                    </button>
+                  </div>
                 </div>
-                <h3 className="int-room-mode-card__title">Text-Based Interview</h3>
-                <p className="int-room-mode-card__desc">
-                  Traditional format with on-screen reading and keyboard input. Type your responses and insert code snippets at your own pace.
-                </p>
-                <ul className="int-room-mode-card__features">
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Read questions on screen
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Type responses using the keyboard chatbox
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Insert formatted code snippets
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Self-paced response writing
-                  </li>
-                </ul>
-                <button
-                  type="button"
-                  className="int-room-mode-card__action-btn is-text"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleSelectMode('text')
-                  }}
-                >
-                  Start Text Interview →
-                </button>
-              </div>
-            </div>
+              </>
+            ) : (
+              <>
+                <div className="int-room-mode-header">
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      className="int-room-mode-back-btn"
+                      onClick={() => setModalStep('mode')}
+                      title="Change interview mode"
+                    >
+                      ← Back to Mode Selection
+                    </button>
+                    <div className={`int-room-mode-badge ${chosenMode === 'FEEDBACK_COACHING' ? 'is-purple' : ''}`}>
+                      {chosenMode === 'FEEDBACK_COACHING' ? '🟣 Feedback Interview Mode' : '🔵 HR Interview Mode'}
+                    </div>
+                  </div>
+                  <h2 id="mode-modal-title" className="int-room-mode-title">Choose Your Interview Format</h2>
+                  <p className="int-room-mode-subtitle">
+                    Select how you would like to interact with the AI interviewer for the <strong>{displayRole}</strong> position at <strong>{displayCompany}</strong>.
+                  </p>
+                </div>
+
+                <div className="int-room-mode-grid">
+                  {/* Voice-Based Interview Card */}
+                  <div className="int-room-mode-card is-voice" onClick={() => handleSelectMode('voice')}>
+                    <div className="int-room-mode-card__badge">Recommended • Hands-Free</div>
+                    <div className="int-room-mode-card__icon-wrap">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                    </div>
+                    <h3 className="int-room-mode-card__title">Voice-Based Interview</h3>
+                    <p className="int-room-mode-card__desc">
+                      The AI interviewer asks questions aloud automatically. You answer naturally using your microphone, with live speech transcription typed directly on screen.
+                    </p>
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        AI automatically reads questions aloud
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Real-time speech typing — words appear as you speak
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Simple microphone ON / OFF controls (no chatbox needed)
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Realistic, immersive conversational practice
+                      </li>
+                    </ul>
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-voice"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSelectMode('voice')
+                      }}
+                    >
+                      Start Voice Interview →
+                    </button>
+                  </div>
+
+                  {/* Text-Based Interview Card */}
+                  <div className="int-room-mode-card is-text" onClick={() => handleSelectMode('text')}>
+                    <div className="int-room-mode-card__badge is-muted">Standard Format</div>
+                    <div className="int-room-mode-card__icon-wrap">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="int-room-mode-card__title">Text-Based Interview</h3>
+                    <p className="int-room-mode-card__desc">
+                      Traditional format with on-screen reading and keyboard input. Type your responses and insert code snippets at your own pace.
+                    </p>
+                    <ul className="int-room-mode-card__features">
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Read questions on screen
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Type responses using the keyboard chatbox
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Insert formatted code snippets
+                      </li>
+                      <li>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Self-paced response writing
+                      </li>
+                    </ul>
+                    <button
+                      type="button"
+                      className="int-room-mode-card__action-btn is-text"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleSelectMode('text')
+                      }}
+                    >
+                      Start Text Interview →
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

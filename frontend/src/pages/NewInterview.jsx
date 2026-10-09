@@ -296,10 +296,6 @@ export default function NewInterview() {
   const handleStartToggle = async () => {
     if (isAnalyzingResume || isAnalyzingJd) return
     if (!isSetupComplete) return
-    if (!interviewMode) {
-      setPlanError('Please select an Interview Mode (HR Interview Mode or Feedback Interview Mode) to proceed.')
-      return
-    }
 
     const interviewId = id || generateInterviewId()
 
@@ -335,7 +331,7 @@ export default function NewInterview() {
           company: company || '',
           jobDescription,
           interviewType,
-          interviewMode,
+          interviewMode: interviewMode || 'HR_SIMULATION',
           difficulty,
           duration,
           isGithubConnected,
@@ -1309,165 +1305,6 @@ export default function NewInterview() {
               )}
             </div>
 
-            {/* INTERVIEW MODE SELECTION (HR SIMULATION vs FEEDBACK COACHING) */}
-            <div className={`new-int-field-group ${isOptionsLocked ? 'is-locked' : ''}`}>
-              <div className="new-int-label-row">
-                <label className="new-int-label">INTERVIEW MODE</label>
-                {isOptionsLocked ? (
-                  <span className="new-int-locked-tag">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                    </svg>
-                    <span>Analyze JD first</span>
-                  </span>
-                ) : (
-                  <span className="new-int-mode-required-tag">Select One (Required)</span>
-                )}
-              </div>
-
-              <div className="new-int-mode-selection">
-                <div className="new-int-mode-cards-grid">
-                  {/* Card A: HR Interview Mode */}
-                  <div
-                    role="button"
-                    tabIndex={isOptionsLocked ? -1 : 0}
-                    className={`new-int-mode-card ${interviewMode === 'HR_SIMULATION' ? 'is-selected' : ''} ${isOptionsLocked ? 'is-disabled' : ''}`}
-                    onClick={() => !isOptionsLocked && setInterviewMode('HR_SIMULATION')}
-                    onKeyDown={(e) => {
-                      if (!isOptionsLocked && (e.key === 'Enter' || e.key === ' ')) {
-                        e.preventDefault()
-                        setInterviewMode('HR_SIMULATION')
-                      }
-                    }}
-                    aria-pressed={interviewMode === 'HR_SIMULATION'}
-                    aria-label="HR Interview Mode: Realistic Simulation"
-                  >
-                    <div className="new-int-mode-card__top">
-                      <div className="new-int-mode-card__icon-box">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                          <circle cx="9" cy="7" r="4" />
-                          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-                          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                        </svg>
-                      </div>
-                      <span className="new-int-mode-card__badge">Realistic Simulation</span>
-                    </div>
-
-                    <div className="new-int-mode-card__title">HR Interview Mode</div>
-                    <div className="new-int-mode-card__desc">
-                      Experience a realistic interview with an AI interviewer. Answer HR, behavioral, and job-related questions while the AI asks relevant adaptive follow-up questions based on your responses.
-                    </div>
-
-                    <ul className="new-int-mode-card__features">
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Realistic interview conversation</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Adaptive follow-up questions</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check new-int-mode-card__check--amber">✓</span>
-                        <span>No immediate feedback, scores, or coaching after individual answers</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Comprehensive performance report after the interview ends</span>
-                      </li>
-                    </ul>
-
-                    <div className="new-int-mode-card__select-pill">
-                      {interviewMode === 'HR_SIMULATION' ? (
-                        <>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
-                          <span>Selected Mode</span>
-                        </>
-                      ) : (
-                        <span>Choose HR Mode</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Card B: Feedback Interview Mode */}
-                  <div
-                    role="button"
-                    tabIndex={isOptionsLocked ? -1 : 0}
-                    className={`new-int-mode-card ${interviewMode === 'FEEDBACK_COACHING' ? 'is-selected is-selected--feedback' : ''} ${isOptionsLocked ? 'is-disabled' : ''}`}
-                    onClick={() => !isOptionsLocked && setInterviewMode('FEEDBACK_COACHING')}
-                    onKeyDown={(e) => {
-                      if (!isOptionsLocked && (e.key === 'Enter' || e.key === ' ')) {
-                        e.preventDefault()
-                        setInterviewMode('FEEDBACK_COACHING')
-                      }
-                    }}
-                    aria-pressed={interviewMode === 'FEEDBACK_COACHING'}
-                    aria-label="Feedback Interview Mode: Interactive Coaching"
-                  >
-                    <div className="new-int-mode-card__top">
-                      <div className="new-int-mode-card__icon-box new-int-mode-card__icon-box--feedback">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                          <path d="M12 7v2" />
-                          <path d="M12 13h.01" />
-                        </svg>
-                      </div>
-                      <span className="new-int-mode-card__badge">Interactive Coaching</span>
-                    </div>
-
-                    <div className="new-int-mode-card__title">Feedback Interview Mode</div>
-                    <div className="new-int-mode-card__desc">
-                      Practise answering interview questions while receiving personalized AI feedback after every response. Learn from your mistakes, improve your answers, and continue practising with adaptive follow-up questions.
-                    </div>
-
-                    <ul className="new-int-mode-card__features">
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Personalized interview questions</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Immediate feedback after every answer</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Strengths and weaknesses identification</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Actionable suggestions for improving each answer</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Adaptive follow-up questions</span>
-                      </li>
-                      <li className="new-int-mode-card__feature-item">
-                        <span className="new-int-mode-card__check">✓</span>
-                        <span>Comprehensive final performance report</span>
-                      </li>
-                    </ul>
-
-                    <div className="new-int-mode-card__select-pill">
-                      {interviewMode === 'FEEDBACK_COACHING' ? (
-                        <>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                            <polyline points="20 6 9 17 4 12" />
-                          </svg>
-                          <span>Selected Mode</span>
-                        </>
-                      ) : (
-                        <span>Choose Feedback Mode</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* INTERVIEW TYPE */}
             <div className={`new-int-field-group ${isOptionsLocked ? 'is-locked' : ''}`}>
               <div className="new-int-label-row">
@@ -1751,7 +1588,7 @@ export default function NewInterview() {
                     type="button"
                     className="new-int-hud-start-btn"
                     onClick={handleStartToggle}
-                    disabled={isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete || !interviewMode}
+                    disabled={isAnalyzingResume || isAnalyzingJd || isPlanning || isOptionsLocked || !isSetupComplete}
                     title={
                       isPlanning
                         ? 'Preparing your personalized interview plan...'
@@ -1765,8 +1602,6 @@ export default function NewInterview() {
                         ? 'Please resolve resume analysis error to enable Start'
                         : !isSetupComplete
                         ? 'Complete all setup steps to enable Start'
-                        : !interviewMode
-                        ? 'Please select HR Interview Mode or Feedback Interview Mode to enable Start'
                         : planData
                         ? 'View your personalized interview plan'
                         : 'Start Interview'

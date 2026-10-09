@@ -1785,6 +1785,143 @@
   color: #ffffff;
 }
 
+/* Step 1: Mode Selection Cards & Navigation */
+.int-room-mode-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 9999px;
+  padding: 4px 12px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.int-room-mode-back-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.int-room-mode-badge.is-purple {
+  background: rgba(168, 85, 247, 0.15);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+}
+
+.int-room-mode-card.is-hr {
+  background: linear-gradient(180deg, rgba(14, 38, 80, 0.65) 0%, rgba(10, 25, 55, 0.85) 100%);
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.int-room-mode-card.is-hr:hover,
+.int-room-mode-card.is-hr.is-selected {
+  border-color: #38bdf8;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 28px rgba(56, 189, 248, 0.25);
+  transform: translateY(-3px);
+}
+
+.int-room-mode-card.is-feedback {
+  background: linear-gradient(180deg, rgba(30, 27, 75, 0.65) 0%, rgba(20, 15, 50, 0.85) 100%);
+  border-color: rgba(168, 85, 247, 0.25);
+}
+
+.int-room-mode-card.is-feedback:hover,
+.int-room-mode-card.is-feedback.is-selected {
+  border-color: #a855f7;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 28px rgba(168, 85, 247, 0.25);
+  transform: translateY(-3px);
+}
+
+.int-room-mode-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.int-room-mode-card__icon-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.int-room-mode-card__icon-box.is-feedback {
+  background: rgba(168, 85, 247, 0.15);
+  border-color: rgba(168, 85, 247, 0.35);
+  color: #c084fc;
+}
+
+.int-room-mode-card__badge-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.int-room-mode-card__badge-pill.is-purple {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(168, 85, 247, 0.35);
+  color: #c084fc;
+}
+
+.int-room-mode-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  font-size: 10.5px;
+  font-weight: 800;
+  margin-top: 1px;
+}
+
+.int-room-mode-check.is-amber {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+.int-room-mode-card__action-btn.is-hr {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.35);
+}
+
+.int-room-mode-card__action-btn.is-hr:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(2, 132, 199, 0.55);
+}
+
+.int-room-mode-card__action-btn.is-feedback {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35);
+}
+
+.int-room-mode-card__action-btn.is-feedback:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(124, 58, 237, 0.55);
+}
+
 /* ==========================================================================
    DEDICATED BOTTOM VOICE MIC DOCK (No chatbox in voice mode)
    ========================================================================== */

@@ -866,6 +866,12 @@ exports.beginLiveInterview = async (req, res) => {
     session.interviewState.coveredTopics = [];
     session.interviewState.coveredObjectives = [];
     session.interviewState.isProcessing = false;
+
+    const requestedInterviewMode = req.body?.interviewMode || req.query?.interviewMode;
+    if (requestedInterviewMode) {
+      session.interviewMode = requestedInterviewMode;
+      session.interviewState.interviewMode = requestedInterviewMode;
+    }
     session.status = 'in_progress';
 
     // Prepare payload for AI service
@@ -883,6 +889,7 @@ exports.beginLiveInterview = async (req, res) => {
       },
       interviewConfiguration: {
         type: session.interviewType || session.interviewPlan?.interviewType || 'Role-Specific',
+        mode: session.interviewMode || session.interviewPlan?.interviewMode || 'HR_SIMULATION',
         difficulty: session.difficulty || session.interviewPlan?.difficulty || 'Intermediate',
         durationMinutes: parsedDuration,
       },
