@@ -434,6 +434,25 @@ def evaluate_single_answer_endpoint(payload: SingleAnswerEvaluationPayload):
         raise HTTPException(status_code=500, detail=f"Failed to evaluate answer: {str(e)}")
 
 
+@app.post("/agents/evaluation-agent/quick-feedback")
+def quick_feedback_endpoint(payload: SingleAnswerEvaluationPayload):
+    """Fast 2-3 sentence spoken coaching summary for voice Feedback Interview Mode."""
+    try:
+        from agents.evaluation_agent import quick_spoken_feedback
+        text = quick_spoken_feedback(
+            evaluation_agent_instance,
+            question=payload.question,
+            answer=payload.answer,
+            target_role=payload.target_role or payload.targetRole or "Software Engineer",
+            stage_name=payload.stage_name or payload.stageName or "Interview",
+            topic=payload.topic or "",
+        )
+        return {"status": "success", "spokenFeedback": text}
+    except Exception as e:
+        logger.exception("Failed to generate quick feedback:")
+        raise HTTPException(status_code=500, detail=f"Failed to generate quick feedback: {str(e)}")
+
+
 # -------------------------------------------------------------
 # Voice Interview Endpoints (STT & TTS)
 # -------------------------------------------------------------
@@ -444,7 +463,11 @@ class VoiceSynthesisPayload(BaseModel):
 
 
 @app.post("/voice/transcribe")
-async def voice_transcribe_endpoint(file: UploadFile = File(...)):
+async def voice_transcribe_endpoint(
+    file: UploadFile = File(...),
+    prompt: Optional[str] = Form(None),
+    language: Optional[str] = Form(None),
+):
     """Transcribe candidate speech audio to text using Whisper Large V3 Turbo."""
     try:
         content = await file.read()
@@ -454,7 +477,9 @@ async def voice_transcribe_endpoint(file: UploadFile = File(...)):
         result = stt_service_instance.transcribe_audio(
             audio_bytes=content,
             filename=filename,
-            mime_type=mime_type
+            mime_type=mime_type,
+            prompt=prompt,
+            language=language,
         )
         if not result.get("success"):
             return {
@@ -491,7 +516,7 @@ def voice_synthesize_endpoint(payload: VoiceSynthesisPayload):
         if payload.format == "audio":
             return Response(
                 content=audio_bytes,
-                media_type="audio/wav",
+                media_type=result.get("media_type") or "audio/wav",
                 headers={
                     "X-Latency-Ms": str(result.get("latencyMs", 0)),
                     "X-Cached": str(result.get("cached", False)),
@@ -502,7 +527,7 @@ def voice_synthesize_endpoint(payload: VoiceSynthesisPayload):
         audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
         return {
             "status": "success",
-            "audioUrl": f"data:audio/wav;base64,{audio_b64}",
+            "audioUrl": f"data:{result.get('media_type') or 'audio/wav'};base64,{audio_b64}",
             "voice": result.get("voice"),
             "model": result.get("model"),
             "cached": result.get("cached", False),

@@ -55,6 +55,7 @@ int main() {
 
 const VOICE_STATES = {
   INITIALIZING: 'INITIALIZING',
+  PREPARING_SPEECH: 'PREPARING_SPEECH',
   INTERVIEWER_SPEAKING: 'INTERVIEWER_SPEAKING',
   WAITING_FOR_CANDIDATE: 'WAITING_FOR_CANDIDATE',
   CANDIDATE_SPEAKING: 'CANDIDATE_SPEAKING',
@@ -62,6 +63,42 @@ const VOICE_STATES = {
   AI_PROCESSING: 'AI_PROCESSING',
   INTERVIEW_COMPLETE: 'INTERVIEW_COMPLETE',
   ERROR: 'ERROR',
+}
+
+// Silent clip played during the start click to unlock audio autoplay
+const SILENT_WAV = 'data:audio/wav;base64,UklGRsQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+
+// Voice activity detection: average analyser level that counts as speech,
+// and how long the candidate must stay quiet before their answer is sent
+const VAD_SPEECH_LEVEL = 18
+const SILENCE_AUTO_SEND_MS = 2500
+// After this much silence we start transcribing the recording in the background,
+// so the accurate (Whisper) transcript is usually ready when the answer is sent
+const SPECULATIVE_STT_DELAY_MS = 1000
+const monotonicNow = () => performance.now()
+
+const countWords = (text) => (text || '').trim().split(/\s+/).filter(Boolean).length
+
+// Whisper sometimes "hears" these on near-silent audio
+const WHISPER_HALLUCINATION = /^(thanks?( you)?( so much)?( for watching)?|you|bye|okay|\.+)[.!]*$/i
+
+// Prefer the server (Whisper) transcript: it is far more accurate than the browser's
+// live captions. Fall back to the live text if Whisper looks truncated or hallucinated.
+const chooseBestTranscript = (liveText, whisperText) => {
+  const live = (liveText || '').trim()
+  const whisper = (whisperText || '').trim()
+  if (!whisper || WHISPER_HALLUCINATION.test(whisper)) return live
+  if (!live) return whisper
+  const liveWords = countWords(live)
+  const whisperWords = countWords(whisper)
+  if (whisperWords < liveWords * 0.5 || whisperWords > liveWords * 2 + 8) return live
+  return whisper
+}
+
+// Browser speech recognition locale: the candidate's own English variant if they have one
+const getRecognitionLang = () => {
+  const langs = typeof navigator !== 'undefined' ? (navigator.languages || [navigator.language]) : []
+  return langs.find((l) => /^en-[A-Z]{2}$/i.test(l || '')) || 'en-US'
 }
 
 let messageIdCounter = 0
@@ -83,6 +120,17 @@ export default function InterviewRoom() {
   // Strict Interview Termination and Network Abort refs
   const isTerminatedRef = useRef(false)
   const inFlightAbortControllerRef = useRef(new AbortController())
+
+  // (Re)mount: React StrictMode unmounts and remounts once in development and refs
+  // survive that. Without this reset the room believed it was already terminated,
+  // so the interviewer never spoke and every answer request went out pre-aborted.
+  // Declared first so it runs before the effects that start requests.
+  useEffect(() => {
+    isTerminatedRef.current = false
+    if (inFlightAbortControllerRef.current.signal.aborted) {
+      inFlightAbortControllerRef.current = new AbortController()
+    }
+  }, [])
 
   // Track dynamic session details
   const [session, setSession] = useState(() => getInterviewSession(interviewId) || {})
@@ -142,6 +190,10 @@ export default function InterviewRoom() {
   const [isPaused, setIsPaused] = useState(false)
   const [isEndModalOpen, setIsEndModalOpen] = useState(false)
   const [isEnding, setIsEnding] = useState(false)
+  const isPausedRef = useRef(false)
+  useEffect(() => {
+    isPausedRef.current = isPaused
+  }, [isPaused])
 
   // Audio / Microphone hardware references
   const [isAudioOn, setIsAudioOn] = useState(true)
@@ -151,8 +203,27 @@ export default function InterviewRoom() {
   const analyserRef = useRef(null)
   const animFrameRef = useRef(null)
 
-  // Start Microphone Hardware
-  const startMicrophone = async () => {
+  const micRequestRef = useRef(null)
+  const lastSpeechAtRef = useRef(0)
+  const hasSpokenRef = useRef(false)
+  // True while browser speech-to-text is running and producing results normally
+  const speechRecognitionOkRef = useRef(false)
+
+  // Start Microphone Hardware (concurrent callers share one permission request)
+  const startMicrophone = () => {
+    const existing = mediaStreamRef.current
+    if (existing && existing.getAudioTracks().some((t) => t.readyState === 'live')) {
+      return Promise.resolve(existing)
+    }
+    if (!micRequestRef.current) {
+      micRequestRef.current = acquireMicrophone().finally(() => {
+        micRequestRef.current = null
+      })
+    }
+    return micRequestRef.current
+  }
+
+  const acquireMicrophone = async () => {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Microphone is not supported by your browser')
@@ -200,26 +271,44 @@ export default function InterviewRoom() {
           source.connect(analyser)
           analyserRef.current = analyser
 
+          // Only one analyser loop may run at a time
+          if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+
           const dataArray = new Uint8Array(analyser.frequencyBinCount)
+          let lastMeterUpdate = 0
           const checkVolume = () => {
-            if (!analyserRef.current) return
+            if (analyserRef.current !== analyser) return
             analyser.getByteFrequencyData(dataArray)
             let sum = 0
             for (let i = 0; i < dataArray.length; i++) {
               sum += dataArray[i]
             }
             const avgVol = sum / dataArray.length
-            setAudioVolume(avgVol)
+            const now = performance.now()
+            if (now - lastMeterUpdate > 100) {
+              lastMeterUpdate = now
+              setAudioVolume(avgVol)
+            }
 
-            // Candidate Barge-In / Interruption Detection (Feature 2A)
-            if (voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING && !isVoiceMutedRef.current && avgVol > 20) {
-              consecutiveSpeechFramesRef.current = (consecutiveSpeechFramesRef.current || 0) + 1
-              if (consecutiveSpeechFramesRef.current >= 6) {
-                consecutiveSpeechFramesRef.current = 0
-                handleCandidateBargeIn()
+            // Interruptions are manual ("Excuse Me / Interject"): auto-detecting them from
+            // mic volume picked up the interviewer's own voice through the speakers and
+            // cut every question off within a fraction of a second.
+
+            // Volume-based silence detection: used when live speech-to-text gives us
+            // nothing (unsupported browser or recognition service error)
+            if (voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING && !isVoiceMutedRef.current) {
+              if (avgVol > VAD_SPEECH_LEVEL) {
+                lastSpeechAtRef.current = now
+                hasSpokenRef.current = true
+              } else if (
+                hasSpokenRef.current &&
+                !speechRecognitionOkRef.current &&
+                !liveTranscriptRef.current &&
+                now - lastSpeechAtRef.current > SILENCE_AUTO_SEND_MS + 500
+              ) {
+                hasSpokenRef.current = false
+                voiceHandlersRef.current.handleCommitCandidateSpeech?.()
               }
-            } else {
-              consecutiveSpeechFramesRef.current = 0
             }
 
             animFrameRef.current = requestAnimationFrame(checkVolume)
@@ -325,7 +414,6 @@ export default function InterviewRoom() {
   // =========================================================================
   const [bargeInToast, setBargeInToast] = useState(null)
   const bargeInToastTimeoutRef = useRef(null)
-  const consecutiveSpeechFramesRef = useRef(0)
 
   // Query microphone permissions
   useEffect(() => {
@@ -353,15 +441,18 @@ export default function InterviewRoom() {
   }
 
   // Handle Candidate Barge-In / Interruption (Feature 2A)
-  const handleCandidateBargeIn = (interruptedText = '') => {
-    if (isCompleted || isTerminatedRef.current) return
-    if (voiceStateRef.current !== VOICE_STATES.INTERVIEWER_SPEAKING) return
+  const handleCandidateBargeIn = () => {
+    if (isCompletedRef.current || isTerminatedRef.current) return
+    if (
+      voiceStateRef.current !== VOICE_STATES.INTERVIEWER_SPEAKING &&
+      voiceStateRef.current !== VOICE_STATES.PREPARING_SPEECH
+    ) return
 
     console.log('[BargeIn] Candidate interrupted interviewer speech')
+    speechQueueRef.current.splice(0)
     stopCurrentAudio()
 
-    voiceStateRef.current = VOICE_STATES.CANDIDATE_SPEAKING
-    setVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+    updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     setPlayingMessageId(null)
     triggerBargeInToast('Interviewer paused — Listening to your response...')
 
@@ -493,13 +584,10 @@ export default function InterviewRoom() {
   // Confirm hardware ready and proceed into interview (Feature 1B)
   const handleConfirmHardwareReady = async () => {
     setIsHardwareModalOpen(false)
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext
-      if (AudioCtx) {
-        const ctx = new AudioCtx()
-        if (ctx.state === 'suspended') ctx.resume()
-      }
-    } catch { /* non-critical */ }
+    unlockAudioPlayback()
+    if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume().catch(() => {})
+    }
 
     if (transcriptMessages.length === 0) {
       await startOrResumeInterview('voice', true, chosenMode)
@@ -525,6 +613,16 @@ export default function InterviewRoom() {
     voiceStateRef.current = voiceState
   }, [voiceState])
 
+  // Keep the ref in sync immediately: async callbacks read it before React re-renders
+  const updateVoiceState = (nextState) => {
+    voiceStateRef.current = nextState
+    setVoiceState(nextState)
+  }
+
+  // Latest handlers for long-lived callbacks (audio events, speech recognition,
+  // timers, analyser loop) so they never run a stale render's closure
+  const voiceHandlersRef = useRef({})
+
   const updateLiveTranscript = (text) => {
     liveTranscriptRef.current = text
     setLiveTranscript(text)
@@ -534,18 +632,80 @@ export default function InterviewRoom() {
   const mediaRecorderRef = useRef(null)
   const recordedChunksRef = useRef([])
   const recordingTimerRef = useRef(null)
+  const recordingStartedAtRef = useRef(0)
+  // Incremented whenever a listening turn starts or is abandoned
+  const listenSessionRef = useRef(0)
+  // Transcript from earlier recognition sessions within the same answer
+  const committedTranscriptRef = useRef('')
+  const sessionFinalTranscriptRef = useRef('')
+  // Background Whisper transcription started during the silence countdown
+  const speculativeSttRef = useRef(null)
+  const speculativeTimerRef = useRef(null)
+  // Interviewer messages waiting to be spoken after the current one (e.g. feedback, then question)
+  const speechQueueRef = useRef([])
   const currentAudioPlayerRef = useRef(null)
   const currentUtteranceRef = useRef(null)
   const audioCacheRef = useRef(new Map())
 
+  // Playback session token: bumped on every start/stop so callbacks from an
+  // interrupted or superseded playback can never advance the turn.
+  const playbackTokenRef = useRef(0)
+  const playbackWatchdogRef = useRef(null)
+  const speechKeepAliveRef = useRef(null)
+  // A single <audio> element unlocked during the user's click, reused for every
+  // question so Safari/iOS autoplay rules don't silently block later playback.
+  const ttsAudioElRef = useRef(null)
+
+  const clearPlaybackTimers = () => {
+    if (playbackWatchdogRef.current) {
+      clearTimeout(playbackWatchdogRef.current)
+      playbackWatchdogRef.current = null
+    }
+    if (speechKeepAliveRef.current) {
+      clearInterval(speechKeepAliveRef.current)
+      speechKeepAliveRef.current = null
+    }
+  }
+
+  // Call inside a click handler: unlocks audio output for the rest of the session
+  const unlockAudioPlayback = () => {
+    try {
+      if (!ttsAudioElRef.current) {
+        ttsAudioElRef.current = new Audio()
+      }
+      const el = ttsAudioElRef.current
+      el.muted = true
+      el.src = SILENT_WAV
+      el.play().then(() => {
+        el.pause()
+        el.muted = false
+      }).catch(() => {
+        el.muted = false
+      })
+    } catch { /* non-critical; safe to ignore */ }
+    try {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        const warmup = new SpeechSynthesisUtterance(' ')
+        warmup.volume = 0
+        window.speechSynthesis.speak(warmup)
+      }
+    } catch { /* non-critical; safe to ignore */ }
+  }
+
   // Stop any active TTS audio playback completely
   const stopCurrentAudio = () => {
+    playbackTokenRef.current += 1
+    clearPlaybackTimers()
     if (currentAudioPlayerRef.current) {
+      const audio = currentAudioPlayerRef.current
       try {
-        currentAudioPlayerRef.current.pause()
-        currentAudioPlayerRef.current.currentTime = 0
-        currentAudioPlayerRef.current.src = ''
-        currentAudioPlayerRef.current.load()
+        audio.onended = null
+        audio.onerror = null
+        audio.onplaying = null
+        audio.onloadedmetadata = null
+        audio.pause()
+        audio.removeAttribute('src')
+        audio.load()
       } catch { /* non-critical; safe to ignore */ }
       currentAudioPlayerRef.current = null
     }
@@ -566,167 +726,185 @@ export default function InterviewRoom() {
 
   // Transition from AI Speech to Candidate Listening
   const handleAiSpeakingFinished = () => {
+    clearPlaybackTimers()
     setPlayingMessageId(null)
     currentAudioPlayerRef.current = null
-    if (currentUtteranceRef.current) {
+    currentUtteranceRef.current = null
+
+    // Next queued interviewer message (e.g. the question after spoken feedback)
+    const next = speechQueueRef.current.shift()
+    if (next && !isTerminatedRef.current && !isPausedRef.current) {
+      playInterviewerAudio(next.audioUrl, next.id, next.text, { allowAfterComplete: true })
+      return
+    }
+
+    if (isCompletedRef.current || isTerminatedRef.current) return
+
+    updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+
+    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice' && !isPausedRef.current) {
+      voiceHandlersRef.current.startVoiceListening?.()
+    }
+  }
+
+  // Speak with the browser's built-in voice. Guards against the Chrome bugs where
+  // speak() right after cancel() is dropped, and long utterances stop without
+  // ever firing onend (which used to leave the room stuck on "Speaking...").
+  const speakWithBrowser = (text, messageId, token) => {
+    const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null
+    if (!synth || !text) {
+      handleAiSpeakingFinished()
+      return
+    }
+
+    let finished = false
+    const finish = () => {
+      if (finished || token !== playbackTokenRef.current) return
+      finished = true
       currentUtteranceRef.current = null
+      handleAiSpeakingFinished()
     }
 
-    if (isCompleted || isTerminatedRef.current) return
+    updateVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
+    setPlayingMessageId(messageId)
+    setVoiceError(null)
 
-    voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
-    setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+    // Let the preceding cancel() settle before queueing new speech
+    setTimeout(() => {
+      if (token !== playbackTokenRef.current) return
+      try {
+        const utterance = new SpeechSynthesisUtterance(text)
+        const voices = synth.getVoices() || []
+        const preferred =
+          voices.find((v) => /^en(-|_)/i.test(v.lang) && /natural|google|neural|samantha|aria|jenny/i.test(v.name)) ||
+          voices.find((v) => /^en(-|_)/i.test(v.lang))
+        if (preferred) utterance.voice = preferred
+        utterance.lang = preferred?.lang || 'en-US'
+        utterance.rate = 1.0
+        utterance.onend = finish
+        utterance.onerror = finish
+        currentUtteranceRef.current = utterance
+        synth.speak(utterance)
 
-    if (!isVoiceMutedRef.current && interviewModeRef.current === 'voice' && !isCompleted && !isTerminatedRef.current) {
-      startVoiceListening()
-    }
+        // Chrome pauses long utterances after ~15s; nudging it keeps speech alive
+        speechKeepAliveRef.current = setInterval(() => {
+          if (token !== playbackTokenRef.current) return
+          if (synth.speaking && !synth.paused) {
+            synth.pause()
+            synth.resume()
+          }
+        }, 10000)
+
+        // Watchdog: if onend never fires, hand the turn to the candidate anyway
+        const words = text.split(/\s+/).filter(Boolean).length
+        const expectedMs = Math.max(6000, (words / 2) * 1000 + 5000)
+        playbackWatchdogRef.current = setTimeout(() => {
+          if (token !== playbackTokenRef.current) return
+          try { synth.cancel() } catch { /* non-critical; safe to ignore */ }
+          finish()
+        }, expectedMs)
+      } catch (err) {
+        console.warn('[VoiceMode] Browser speech failed:', err)
+        finish()
+      }
+    }, 80)
   }
 
   // Play Interviewer TTS Audio with strict Turn-Taking and termination protection
-  const playInterviewerAudio = (audioUrl, messageId = null, fallbackText = null) => {
-    if (isCompleted || isTerminatedRef.current) return
+  const playInterviewerAudio = (audioUrl, messageId = null, fallbackText = null, options = {}) => {
+    if ((isCompletedRef.current && !options.allowAfterComplete) || isTerminatedRef.current) return
+
+    // Turn-taking: the candidate's mic is closed while the interviewer talks
+    stopCandidateCapture()
+    stopCurrentAudio()
+    const token = playbackTokenRef.current
 
     if (!audioUrl) {
-      if (fallbackText && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          if (isCompleted || isTerminatedRef.current) return
-          stopCurrentAudio()
-          if (isCompleted || isTerminatedRef.current) return
-
-          const utterance = new SpeechSynthesisUtterance(fallbackText)
-          currentUtteranceRef.current = utterance
-          utterance.rate = 1.0
-          setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
-          setPlayingMessageId(messageId)
-          utterance.onend = () => {
-            currentUtteranceRef.current = null
-            if (!isCompleted && !isTerminatedRef.current) {
-              handleAiSpeakingFinished()
-            }
-          }
-          utterance.onerror = () => {
-            currentUtteranceRef.current = null
-            if (!isCompleted && !isTerminatedRef.current) {
-              handleAiSpeakingFinished()
-            }
-          }
-          window.speechSynthesis.speak(utterance)
-          return
-        } catch {
-          currentUtteranceRef.current = null
-        }
-      }
-      if (!isCompleted && !isTerminatedRef.current) {
-        handleAiSpeakingFinished()
-      }
+      speakWithBrowser(fallbackText, messageId, token)
       return
     }
 
-    if (isCompleted || isTerminatedRef.current) return
-    stopCurrentAudio()
-    if (isCompleted || isTerminatedRef.current) return
+    let settled = false
+    const fallbackToBrowser = (reason) => {
+      if (settled || token !== playbackTokenRef.current) return
+      settled = true
+      console.warn('[VoiceMode] Interviewer audio unavailable, using browser voice:', reason)
+      clearPlaybackTimers()
+      if (currentAudioPlayerRef.current) {
+        try {
+          currentAudioPlayerRef.current.onended = null
+          currentAudioPlayerRef.current.onerror = null
+          currentAudioPlayerRef.current.pause()
+        } catch { /* non-critical; safe to ignore */ }
+        currentAudioPlayerRef.current = null
+      }
+      speakWithBrowser(fallbackText, messageId, token)
+    }
+    const finish = () => {
+      if (settled || token !== playbackTokenRef.current) return
+      settled = true
+      handleAiSpeakingFinished()
+    }
 
     try {
-      const audio = new Audio(audioUrl)
+      const audio = ttsAudioElRef.current || new Audio()
+      ttsAudioElRef.current = audio
+      audio.muted = false
+      audio.src = audioUrl
       currentAudioPlayerRef.current = audio
       setPlayingMessageId(messageId)
-      // Turn-taking rule: Disable candidate microphone while interviewer is speaking
-      setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
+      // Turn-taking rule: candidate microphone stays closed while interviewer is speaking
+      updateVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
       setVoiceError(null)
 
-      audio.onended = () => {
-        if (!isCompleted && !isTerminatedRef.current) {
-          handleAiSpeakingFinished()
-        }
+      audio.onended = finish
+      audio.onerror = () => fallbackToBrowser(audio.error)
+
+      // If playback never starts, don't leave the candidate staring at a silent screen
+      playbackWatchdogRef.current = setTimeout(() => fallbackToBrowser('playback did not start'), 6000)
+      audio.onplaying = () => {
+        if (token !== playbackTokenRef.current) return
+        if (playbackWatchdogRef.current) clearTimeout(playbackWatchdogRef.current)
+        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+          ? audio.duration * 1000
+          : 60000
+        playbackWatchdogRef.current = setTimeout(finish, durationMs + 3000)
       }
 
-      audio.onerror = (e) => {
-        if (isCompleted || isTerminatedRef.current) return
-        console.warn('[VoiceMode] Audio playback error:', e)
-        if (fallbackText && 'speechSynthesis' in window && !isCompleted && !isTerminatedRef.current) {
-          try {
-            const utterance = new SpeechSynthesisUtterance(fallbackText)
-            currentUtteranceRef.current = utterance
-            utterance.onend = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            utterance.onerror = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            window.speechSynthesis.speak(utterance)
-            return
-          } catch {
-            currentUtteranceRef.current = null
-          }
-        }
-        if (!isCompleted && !isTerminatedRef.current) {
-          handleAiSpeakingFinished()
-        }
-      }
-
-      audio.play().catch((err) => {
-        if (isCompleted || isTerminatedRef.current) return
-        console.warn('[VoiceMode] Audio autoplay was prevented or delayed:', err)
-        if (fallbackText && 'speechSynthesis' in window && !isCompleted && !isTerminatedRef.current) {
-          try {
-            const utterance = new SpeechSynthesisUtterance(fallbackText)
-            currentUtteranceRef.current = utterance
-            utterance.onend = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            utterance.onerror = () => {
-              currentUtteranceRef.current = null
-              if (!isCompleted && !isTerminatedRef.current) {
-                handleAiSpeakingFinished()
-              }
-            }
-            window.speechSynthesis.speak(utterance)
-            return
-          } catch {
-            currentUtteranceRef.current = null
-          }
-        }
-        if (!isCompleted && !isTerminatedRef.current) {
-          handleAiSpeakingFinished()
-        }
-      })
+      audio.play().catch((err) => fallbackToBrowser(err))
     } catch (err) {
-      console.warn('[VoiceMode] playInterviewerAudio exception:', err)
-      if (!isCompleted && !isTerminatedRef.current) {
-        handleAiSpeakingFinished()
-      }
+      fallbackToBrowser(err)
     }
   }
 
-  // Synthesize and play speech on-demand for any AI message
+  // Synthesize and play speech on-demand for any AI message (Listen / Replay buttons)
   const handleSynthesizeSpeech = async (text, messageId) => {
-    if (!text || isCompleted || isTerminatedRef.current) return
-    setVoiceState(VOICE_STATES.INTERVIEWER_SPEAKING)
-    setPlayingMessageId(messageId)
+    if (!text || isCompletedRef.current || isTerminatedRef.current) return
 
     const existingAudio = audioCacheRef.current.get(messageId) || transcriptMessages.find((m) => m.id === messageId)?.audioUrl
     if (existingAudio) {
-      if (!isCompleted && !isTerminatedRef.current) {
-        audioCacheRef.current.set(messageId, existingAudio)
-        playInterviewerAudio(existingAudio, messageId, text)
-      }
+      audioCacheRef.current.set(messageId, existingAudio)
+      playInterviewerAudio(existingAudio, messageId, text)
       return
     }
 
+    // Close the mic while we fetch the voice so the candidate isn't recorded mid-request
+    speechQueueRef.current.splice(0)
+    stopCandidateCapture()
+    stopCurrentAudio()
+    updateVoiceState(VOICE_STATES.PREPARING_SPEECH)
+    setPlayingMessageId(messageId)
+    const requestToken = playbackTokenRef.current
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
+    const abortOnTerminate = () => controller.abort()
+    const terminateSignal = inFlightAbortControllerRef.current?.signal
+    terminateSignal?.addEventListener('abort', abortOnTerminate)
+
+    let audioUrl = null
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
-
       const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/speech`), {
         method: 'POST',
         headers: {
@@ -734,29 +912,40 @@ export default function InterviewRoom() {
           ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
         },
         body: JSON.stringify({ text }),
-        signal: inFlightAbortControllerRef.current?.signal || controller.signal,
+        signal: controller.signal,
       })
-      clearTimeout(timeoutId)
-
-      if (isCompleted || isTerminatedRef.current) return
-
       if (res.ok) {
         const data = await res.json()
-        if (isCompleted || isTerminatedRef.current) return
-        if (data.audioUrl) {
-          audioCacheRef.current.set(messageId, data.audioUrl)
-          playInterviewerAudio(data.audioUrl, messageId, text)
-        } else {
-          playInterviewerAudio(null, messageId, text)
-        }
-      } else {
-        playInterviewerAudio(null, messageId, text)
+        audioUrl = data.audioUrl || null
       }
     } catch (err) {
-      if (isCompleted || isTerminatedRef.current) return
       console.warn('[VoiceMode] TTS synthesis notice, using native speech:', err)
-      playInterviewerAudio(null, messageId, text)
+    } finally {
+      clearTimeout(timeoutId)
+      terminateSignal?.removeEventListener('abort', abortOnTerminate)
     }
+
+    // Candidate interrupted or ended the interview while we were waiting
+    if (isCompletedRef.current || isTerminatedRef.current || requestToken !== playbackTokenRef.current) return
+
+    if (audioUrl) audioCacheRef.current.set(messageId, audioUrl)
+    playInterviewerAudio(audioUrl, messageId, text)
+  }
+
+  // Speak a freshly received interviewer message. The backend already tried TTS,
+  // so when it sent no audio we go straight to the browser voice instead of
+  // waiting on a second synthesis round-trip.
+  const speakInterviewerMessage = (text, messageId, audioUrl) => {
+    if (isCompletedRef.current || isTerminatedRef.current) {
+      updateVoiceState(isCompletedRef.current ? VOICE_STATES.INTERVIEW_COMPLETE : VOICE_STATES.WAITING_FOR_CANDIDATE)
+      return
+    }
+    if (audioUrl) audioCacheRef.current.set(messageId, audioUrl)
+    if (interviewModeRef.current !== 'voice') {
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      return
+    }
+    playInterviewerAudio(audioUrl || null, messageId, text)
   }
 
   // Live Interview State from authoritative backend
@@ -769,6 +958,18 @@ export default function InterviewRoom() {
   const [activeMobileTab, setActiveMobileTab] = useState('center')
   const transcriptEndRef = useRef(null)
   const hasInitializedRef = useRef(false)
+  const isCompletedRef = useRef(false)
+  const isAiTypingRef = useRef(false)
+  useEffect(() => {
+    isCompletedRef.current = isCompleted
+  }, [isCompleted])
+  useEffect(() => {
+    isAiTypingRef.current = isAiTyping
+  }, [isAiTyping])
+  const setAiTyping = (value) => {
+    isAiTypingRef.current = value
+    setIsAiTyping(value)
+  }
 
   // Dynamic Live Timer effect (pauses when isPaused or isCompleted)
   useEffect(() => {
@@ -833,7 +1034,7 @@ export default function InterviewRoom() {
   }
 
   const handleSubmitCodeSolution = async () => {
-    if (!codeContent.trim() || isCodeSubmitting || isAiTyping || isCompleted || isTerminatedRef.current) return
+    if (!codeContent.trim() || isCodeSubmitting || isAiTyping || isCompletedRef.current || isTerminatedRef.current) return
     setIsCodeSubmitting(true)
     stopCurrentAudio()
 
@@ -851,8 +1052,8 @@ export default function InterviewRoom() {
     }
 
     setTranscriptMessages((prev) => [...prev, candidateCodeMsg])
-    setIsAiTyping(true)
-    setVoiceState(VOICE_STATES.AI_PROCESSING)
+    setAiTyping(true)
+    updateVoiceState(VOICE_STATES.AI_PROCESSING)
 
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
@@ -868,17 +1069,17 @@ export default function InterviewRoom() {
           explanation: codeExplanation,
           runOutput: codeOutput?.stdout || codeOutput?.compile_output || codeOutput?.stderr || '',
           durationSeconds: secondsElapsed,
-          mode: interviewMode,
-          includeAudio: interviewMode === 'voice',
+          mode: interviewModeRef.current,
+          includeAudio: interviewModeRef.current === 'voice',
         }),
         signal: inFlightAbortControllerRef.current?.signal,
       })
 
-      if (isCompleted || isTerminatedRef.current) return
+      if (isCompletedRef.current || isTerminatedRef.current) return
 
       if (res.ok) {
         const data = await res.json()
-        if (isCompleted || isTerminatedRef.current) return
+        if (isCompletedRef.current || isTerminatedRef.current) return
 
         if (data.interviewState) {
           setInterviewState(data.interviewState)
@@ -899,8 +1100,8 @@ export default function InterviewRoom() {
             demoAccess: data.demoAccess,
             interviewState: data.interviewState,
           })
-          setIsAiTyping(false)
-          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          setAiTyping(false)
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
           return
         }
 
@@ -916,16 +1117,9 @@ export default function InterviewRoom() {
             isCodeReview: true,
           }
           setTranscriptMessages((prev) => [...prev, aiMsg])
-          setIsAiTyping(false)
+          setAiTyping(false)
 
-          if (!isCompleted && !isTerminatedRef.current) {
-            if (data.audioUrl) {
-              audioCacheRef.current.set(aiMsgId, data.audioUrl)
-              playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
-            } else {
-              handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
-            }
-          }
+          speakInterviewerMessage(data.nextQuestion, aiMsgId, data.audioUrl)
           return
         }
 
@@ -937,8 +1131,8 @@ export default function InterviewRoom() {
             checkInterviewAccessStatus().catch(() => {})
           }
           setIsCompleted(true)
-          setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
-          setIsAiTyping(false)
+          updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+          setAiTyping(false)
           return
         }
       } else {
@@ -953,8 +1147,8 @@ export default function InterviewRoom() {
         canRetry: true,
         canSwitchToText: false,
       })
-      setVoiceState(VOICE_STATES.ERROR)
-      setIsAiTyping(false)
+      updateVoiceState(VOICE_STATES.ERROR)
+      setAiTyping(false)
     } finally {
       setIsCodeSubmitting(false)
     }
@@ -1045,12 +1239,11 @@ export default function InterviewRoom() {
           source.connect(ctx.destination)
           source.start(0)
         }
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-          window.speechSynthesis.resume()
-        }
       } catch { /* non-critical; safe to ignore */ }
+      // Must run inside this click so later interviewer audio is allowed to autoplay
+      unlockAudioPlayback()
 
-      // Prompt and initialize microphone in background
+      // Ask for microphone permission now, while the opening question is being prepared
       startMicrophone().catch((err) => {
         console.warn('Microphone permission request deferred or denied:', err)
       })
@@ -1065,7 +1258,7 @@ export default function InterviewRoom() {
   const startOrResumeInterview = async (mode = 'voice', shouldAutoPlayAudio = true, passedInterviewMode = null) => {
     try {
       const effectiveMode = passedInterviewMode || chosenMode || session?.interviewMode || 'HR_SIMULATION'
-      setVoiceState(VOICE_STATES.INITIALIZING)
+      updateVoiceState(VOICE_STATES.INITIALIZING)
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
       const res = await fetch(getApiUrl(`/api/interview/${interviewId}/begin`), {
         method: 'POST',
@@ -1086,7 +1279,7 @@ export default function InterviewRoom() {
           setInterviewState(data.interviewState)
           if (data.interviewState.status === 'completed' || data.interviewState.status === 'ended_by_user') {
             setIsCompleted(true)
-            setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+            updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
             return
           }
         }
@@ -1105,14 +1298,9 @@ export default function InterviewRoom() {
           const lastMsg = mapped[mapped.length - 1]
           const audioToPlay = lastMsg?.audioUrl || data.audioUrl || null
           if (lastMsg && lastMsg.sender === 'ai' && shouldAutoPlayAudio) {
-            if (audioToPlay) {
-              audioCacheRef.current.set(lastMsg.id, audioToPlay)
-              playInterviewerAudio(audioToPlay, lastMsg.id, lastMsg.text)
-            } else {
-              handleSynthesizeSpeech(lastMsg.text, lastMsg.id)
-            }
+            speakInterviewerMessage(lastMsg.text, lastMsg.id, audioToPlay)
           } else {
-            setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+            updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
           }
         } else if (data.question) {
           const openMsgId = createMessageId('ai-open')
@@ -1129,21 +1317,20 @@ export default function InterviewRoom() {
           ])
 
           // AUTOMATICALLY READ OPENING QUESTION ALOUD IMMEDIATELY
-          if (data.audioUrl) {
-            audioCacheRef.current.set(openMsgId, data.audioUrl)
-            playInterviewerAudio(data.audioUrl, openMsgId, data.question)
+          if (shouldAutoPlayAudio) {
+            speakInterviewerMessage(data.question, openMsgId, data.audioUrl)
           } else {
-            handleSynthesizeSpeech(data.question, openMsgId)
+            updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
           }
         } else {
-          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
         }
       } else {
-        setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
       }
     } catch (err) {
       console.warn('[InterviewRoom] Live interview initialization notice:', err)
-      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     }
   }
 
@@ -1165,7 +1352,7 @@ export default function InterviewRoom() {
 
           if (sess.interviewState?.status === 'completed' || sess.interviewState?.status === 'ended_by_user') {
             setIsCompleted(true)
-            setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+            updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
             if (sess.chatMessages) {
               const mapped = sess.chatMessages.map((m, idx) => ({
                 id: m._id || createMessageId(`msg-${idx}`),
@@ -1223,9 +1410,11 @@ export default function InterviewRoom() {
      ========================================================================= */
   const submitCandidateAnswer = async (answerText, inputMode = 'text', durationSeconds = 0, sttLatencyMs = null) => {
     const trimmed = (answerText || '').trim()
-    if (!trimmed || isAiTyping || isCompleted || isTerminatedRef.current) return
+    if (!trimmed || isAiTypingRef.current || isCompletedRef.current || isTerminatedRef.current) return
 
+    speechQueueRef.current.splice(0)
     stopCurrentAudio()
+    stopCandidateCapture()
 
     const questionBeingAnswered =
       latestAiQuestion?.text ||
@@ -1243,8 +1432,8 @@ export default function InterviewRoom() {
 
     setTranscriptMessages((prev) => [...prev, candidateMsg])
     setInputValue('')
-    setIsAiTyping(true)
-    setVoiceState(VOICE_STATES.AI_PROCESSING)
+    setAiTyping(true)
+    updateVoiceState(VOICE_STATES.AI_PROCESSING)
     setVoiceError(null)
 
     try {
@@ -1258,22 +1447,64 @@ export default function InterviewRoom() {
         body: JSON.stringify({
           answer: trimmed,
           inputMode,
-          mode: interviewMode,
-          includeAudio: interviewMode === 'voice',
+          mode: interviewModeRef.current,
+          includeAudio: interviewModeRef.current === 'voice',
           durationSeconds,
           sttLatencyMs,
         }),
         signal: inFlightAbortControllerRef.current?.signal,
       })
 
-      if (isCompleted || isTerminatedRef.current) return
+      if (isCompletedRef.current || isTerminatedRef.current) return
 
       if (res.ok) {
         const data = await res.json()
-        if (isCompleted || isTerminatedRef.current) return
+        if (isCompletedRef.current || isTerminatedRef.current) return
 
         if (data.interviewState) {
           setInterviewState(data.interviewState)
+        }
+
+        // Voice Feedback Mode: the interviewer says the coaching summary, then asks the
+        // next question; no popup interrupts the conversation
+        if (data.spokenFeedback && interviewModeRef.current === 'voice') {
+          const feedbackMsgId = createMessageId('ai-feedback')
+          const newMessages = [{
+            id: feedbackMsgId,
+            sender: 'ai',
+            senderName: 'HireMind AI Interviewer',
+            time: formatTimer(secondsElapsed + 1),
+            stage: 'Feedback',
+            text: data.spokenFeedback,
+            audioUrl: data.feedbackAudioUrl || null,
+            isFeedback: true,
+          }]
+          speechQueueRef.current.splice(0)
+          if (data.nextQuestion) {
+            const questionMsgId = createMessageId('ai')
+            newMessages.push({
+              id: questionMsgId,
+              sender: 'ai',
+              senderName: 'HireMind AI Interviewer',
+              time: formatTimer(secondsElapsed + 2),
+              stage: data.stage || data.interviewState?.currentStageName || null,
+              text: data.nextQuestion,
+              audioUrl: data.audioUrl || null,
+            })
+            if (data.audioUrl) audioCacheRef.current.set(questionMsgId, data.audioUrl)
+            speechQueueRef.current.push({ audioUrl: data.audioUrl || null, id: questionMsgId, text: data.nextQuestion })
+          }
+          setTranscriptMessages((prev) => [...prev, ...newMessages])
+          setAiTyping(false)
+
+          if (data.isComplete) {
+            if (data.demoAccess && updateDemoQuota) updateDemoQuota(data.demoAccess)
+            if (checkInterviewAccessStatus) checkInterviewAccessStatus().catch(() => {})
+            setIsCompleted(true)
+          }
+
+          speakInterviewerMessage(data.spokenFeedback, feedbackMsgId, data.feedbackAudioUrl)
+          return
         }
 
         if (data.feedback) {
@@ -1291,8 +1522,8 @@ export default function InterviewRoom() {
             demoAccess: data.demoAccess,
             interviewState: data.interviewState,
           })
-          setIsAiTyping(false)
-          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          setAiTyping(false)
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
           return
         }
 
@@ -1307,7 +1538,7 @@ export default function InterviewRoom() {
             text: data.nextQuestion,
           }
           setTranscriptMessages((prev) => [...prev, aiMsg])
-          setIsAiTyping(false)
+          setAiTyping(false)
 
           if (data.isComplete) {
             if (data.demoAccess && updateDemoQuota) {
@@ -1320,14 +1551,7 @@ export default function InterviewRoom() {
           }
 
           // ONLY READ QUESTION ALOUD IF NOT TERMINATED OR COMPLETED
-          if (!isCompleted && !isTerminatedRef.current) {
-            if (data.audioUrl) {
-              audioCacheRef.current.set(aiMsgId, data.audioUrl)
-              playInterviewerAudio(data.audioUrl, aiMsgId, data.nextQuestion)
-            } else {
-              handleSynthesizeSpeech(data.nextQuestion, aiMsgId)
-            }
-          }
+          speakInterviewerMessage(data.nextQuestion, aiMsgId, data.audioUrl)
           return
         }
 
@@ -1339,14 +1563,14 @@ export default function InterviewRoom() {
             checkInterviewAccessStatus().catch(() => {})
           }
           setIsCompleted(true)
-          setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
-          setIsAiTyping(false)
+          updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+          setAiTyping(false)
           return
         }
       } else if (res.status === 409) {
         console.warn('[InterviewRoom] Duplicate turn detected, ignoring.')
-        setIsAiTyping(false)
-        setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+        setAiTyping(false)
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
         return
       } else {
         throw new Error(`Server returned status ${res.status}`)
@@ -1362,8 +1586,8 @@ export default function InterviewRoom() {
         canRetry: true,
         canSwitchToText: true,
       })
-      setVoiceState(VOICE_STATES.ERROR)
-      setIsAiTyping(false)
+      updateVoiceState(VOICE_STATES.ERROR)
+      setAiTyping(false)
     }
   }
 
@@ -1384,7 +1608,7 @@ export default function InterviewRoom() {
       if (demoAccess && updateDemoQuota) updateDemoQuota(demoAccess)
       if (checkInterviewAccessStatus) checkInterviewAccessStatus().catch(() => {})
       setIsCompleted(true)
-      setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+      updateVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
       return
     }
 
@@ -1399,18 +1623,9 @@ export default function InterviewRoom() {
         text: nextQuestion,
       }
       setTranscriptMessages((prev) => [...prev, aiMsg])
-      setIsAiTyping(false)
+      setAiTyping(false)
 
-      if (!isCompleted && !isTerminatedRef.current) {
-        if (audioUrl) {
-          audioCacheRef.current.set(aiMsgId, audioUrl)
-          playInterviewerAudio(audioUrl, aiMsgId, nextQuestion)
-        } else if (interviewMode === 'voice') {
-          handleSynthesizeSpeech(nextQuestion, aiMsgId)
-        } else {
-          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
-        }
-      }
+      speakInterviewerMessage(nextQuestion, aiMsgId, audioUrl)
     }
   }
 
@@ -1456,6 +1671,10 @@ export default function InterviewRoom() {
      VOICE ACTIVITY DETECTION (VAD), 3s SILENCE AUTO-SEND, & MUTE CONTROLS
      ========================================================================= */
   const resetSilenceDetection = () => {
+    if (speculativeTimerRef.current) {
+      clearTimeout(speculativeTimerRef.current)
+      speculativeTimerRef.current = null
+    }
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current)
       silenceTimerRef.current = null
@@ -1471,8 +1690,13 @@ export default function InterviewRoom() {
     resetSilenceDetection()
     if (isVoiceMutedRef.current) return
 
-    let secondsRemaining = 3
+    let secondsRemaining = Math.ceil(SILENCE_AUTO_SEND_MS / 1000)
     setSilenceCountdown(secondsRemaining)
+
+    speculativeTimerRef.current = setTimeout(() => {
+      speculativeTimerRef.current = null
+      startSpeculativeTranscription()
+    }, SPECULATIVE_STT_DELAY_MS)
 
     silenceCountdownIntervalRef.current = setInterval(() => {
       secondsRemaining -= 1
@@ -1491,15 +1715,64 @@ export default function InterviewRoom() {
       resetSilenceDetection()
       const textToSend = (liveTranscriptRef.current || '').trim()
       if (textToSend && !isVoiceMutedRef.current) {
-        console.log('[VoiceMode] 3s silence reached, auto-submitting answer:', textToSend)
-        handleCommitCandidateSpeech(textToSend)
+        console.log('[VoiceMode] Silence reached, auto-submitting answer:', textToSend)
+        voiceHandlersRef.current.handleCommitCandidateSpeech?.(textToSend)
       }
-    }, 3000)
+    }, SILENCE_AUTO_SEND_MS)
   }
 
-  // Finalize speech and commit to transcript / backend
-  const handleCommitCandidateSpeech = (explicitText = null) => {
+  // Send recorded audio to Whisper. Never throws: resolves to '' on any failure.
+  const transcribeRecording = async (audioBlob, timeoutMs) => {
+    if (!audioBlob || audioBlob.size < 1000) return ''
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const formData = new FormData()
+      formData.append('audio', audioBlob, 'candidate_answer.webm')
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/transcribe`), {
+        method: 'POST',
+        headers: {
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: formData,
+        signal: controller.signal,
+      })
+      if (!res.ok) return ''
+      const data = await res.json()
+      return data.success === false ? '' : (data.text || '').trim()
+    } catch (err) {
+      if (err.name !== 'AbortError') console.warn('[VoiceMode] Whisper transcription notice:', err)
+      return ''
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  }
+
+  // Transcribe what has been recorded so far while the silence countdown runs
+  const startSpeculativeTranscription = () => {
+    const recorder = mediaRecorderRef.current
+    const liveText = (liveTranscriptRef.current || '').trim()
+    if (
+      voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING ||
+      !recorder ||
+      !liveText ||
+      recordedChunksRef.current.length === 0
+    ) return
+    const audioBlob = new Blob(recordedChunksRef.current.slice(), { type: recorder.mimeType || 'audio/webm' })
+    speculativeSttRef.current = {
+      words: countWords(liveText),
+      promise: transcribeRecording(audioBlob, 15000),
+    }
+  }
+
+  // Stop recognition + recording WITHOUT submitting anything (mute, pause, replay, end)
+  const stopCandidateCapture = () => {
     resetSilenceDetection()
+    speculativeSttRef.current = null
+    listenSessionRef.current += 1
+    speechRecognitionOkRef.current = false
+    hasSpokenRef.current = false
 
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
@@ -1507,130 +1780,191 @@ export default function InterviewRoom() {
     }
 
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop()
-      } catch { /* non-critical; safe to ignore */ }
+      const recognition = recognitionRef.current
       recognitionRef.current = null
+      try {
+        recognition.onresult = null
+        recognition.onerror = null
+        recognition.onend = null
+        recognition.abort()
+      } catch { /* non-critical; safe to ignore */ }
     }
 
-    const candidateText = (explicitText !== null ? explicitText : (liveTranscriptRef.current || '')).trim()
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop()
-    } else if (candidateText) {
-      finalizeCandidateSpeech(candidateText)
-    } else {
-      finalizeCandidateSpeech('')
+    if (mediaRecorderRef.current) {
+      const recorder = mediaRecorderRef.current
+      mediaRecorderRef.current = null
+      try {
+        recorder.ondataavailable = null
+        recorder.onstop = null
+        if (recorder.state !== 'inactive') recorder.stop()
+      } catch { /* non-critical; safe to ignore */ }
     }
+  }
+
+  const getRecordingDurationSeconds = () => {
+    if (!recordingStartedAtRef.current) return 0
+    return Math.max(1, Math.round((monotonicNow() - recordingStartedAtRef.current) / 1000))
+  }
+
+  // Finalize speech and commit to transcript / backend
+  const handleCommitCandidateSpeech = (explicitText = null) => {
+    // Silence timer, volume detector and "Send Now" can race; only the first commit counts
+    if (voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING) return
+
+    const liveText = (explicitText !== null ? explicitText : (liveTranscriptRef.current || '')).trim()
+    const durationSeconds = getRecordingDurationSeconds()
+    const recorder = mediaRecorderRef.current
+    const mimeType = recorder?.mimeType || 'audio/webm'
+    const hasRecording = Boolean(recorder && recorder.state !== 'inactive')
+
+    // A background transcription is reusable if the candidate hasn't said more since it started
+    const speculative = speculativeSttRef.current
+    const speculativeUsable = Boolean(speculative && liveText && countWords(liveText) <= speculative.words + 1)
+
+    if (hasRecording && !speculativeUsable) {
+      // Detach the recorder so stopCandidateCapture lets it finish and flush its audio
+      mediaRecorderRef.current = null
+    }
+    stopCandidateCapture()
+
+    if (!hasRecording && !speculativeUsable) {
+      finalizeCandidateSpeech(liveText, durationSeconds)
+      return
+    }
+
+    updateVoiceState(VOICE_STATES.TRANSCRIBING)
+
+    const whisperPromise = speculativeUsable
+      ? speculative.promise
+      : new Promise((resolve) => {
+          recorder.onstop = () => resolve(new Blob(recordedChunksRef.current, { type: mimeType }))
+          try {
+            recorder.stop()
+          } catch {
+            resolve(null)
+          }
+        }).then((audioBlob) => transcribeRecording(audioBlob, liveText ? 8000 : 30000))
+
+    whisperPromise.then((whisperText) => {
+      if (isCompletedRef.current || isTerminatedRef.current) return
+      if (voiceStateRef.current !== VOICE_STATES.TRANSCRIBING) return
+      voiceHandlersRef.current.finalizeCandidateSpeech?.(chooseBestTranscript(liveText, whisperText), durationSeconds)
+    })
   }
 
   // Start continuous listening when candidate's turn begins
   const startVoiceListening = async () => {
     if (
       isVoiceMutedRef.current ||
+      isPausedRef.current ||
+      isCompletedRef.current ||
+      isTerminatedRef.current ||
+      isAiTypingRef.current ||
       voiceStateRef.current === VOICE_STATES.AI_PROCESSING ||
       voiceStateRef.current === VOICE_STATES.TRANSCRIBING ||
-      isAiTyping ||
-      isCompleted
+      voiceStateRef.current === VOICE_STATES.PREPARING_SPEECH
     ) {
       return
     }
 
+    speechQueueRef.current.splice(0)
     stopCurrentAudio()
+    stopCandidateCapture()
     setVoiceError(null)
     updateLiveTranscript('')
-    resetSilenceDetection()
+    committedTranscriptRef.current = ''
+    sessionFinalTranscriptRef.current = ''
+    lastSpeechAtRef.current = monotonicNow()
     setIsAudioOn(true)
-    voiceStateRef.current = VOICE_STATES.CANDIDATE_SPEAKING
-    setVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+    updateVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+    const listenSession = listenSessionRef.current
 
     try {
-      let stream = mediaStreamRef.current
-      const hasLiveTrack = stream && stream.getAudioTracks().some((t) => t.readyState === 'live')
-      if (!hasLiveTrack) {
-        stream = await startMicrophone()
-      } else {
-        stream.getAudioTracks().forEach((t) => {
-          t.enabled = true
-        })
-        setIsAudioOn(true)
+      const stream = await startMicrophone()
+      // Turn changed while we were waiting for microphone permission
+      if (listenSession !== listenSessionRef.current || voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING) {
+        return
       }
+      stream.getAudioTracks().forEach((t) => {
+        t.enabled = true
+      })
+      setIsAudioOn(true)
 
-      // 1. Initialize Web Speech API for real-time live typing directly into the UI
+      // 1. Web Speech API for real-time live typing directly into the UI
       const SpeechRecognition = typeof window !== 'undefined'
         ? (window.SpeechRecognition || window.webkitSpeechRecognition)
         : null
 
       if (SpeechRecognition) {
         try {
-          if (recognitionRef.current) {
-            try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-          }
-
           const recognition = new SpeechRecognition()
           recognition.continuous = true
           recognition.interimResults = true
-          recognition.lang = 'en-US'
+          recognition.lang = getRecognitionLang()
+          recognition.maxAlternatives = 1
 
           recognition.onresult = (event) => {
-            if (isVoiceMutedRef.current) return
+            if (recognitionRef.current !== recognition || isVoiceMutedRef.current) return
+            speechRecognitionOkRef.current = true
 
-            let final = ''
+            let sessionFinal = ''
             let interim = ''
             for (let i = 0; i < event.results.length; i++) {
               if (event.results[i].isFinal) {
-                final += event.results[i][0].transcript + ' '
+                sessionFinal += event.results[i][0].transcript + ' '
               } else {
                 interim += event.results[i][0].transcript
               }
             }
-            const combined = (final + interim).trim()
+            sessionFinalTranscriptRef.current = sessionFinal.trim()
+            // Chrome restarts recognition after pauses; keep what was said before the restart
+            const combined = [committedTranscriptRef.current, sessionFinal, interim]
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim()
             if (combined) {
-              // Candidate Barge-in / Interruption check (Feature 2A):
-              // If AI interviewer was speaking and candidate speaks, immediately interrupt AI!
-              if (voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING) {
-                handleCandidateBargeIn(combined)
-              }
               updateLiveTranscript(combined)
-              // Reset and restart 3-second silence auto-send timer
+              // Reset and restart the silence auto-send timer
               startSilenceDetection()
             }
           }
 
           recognition.onerror = (e) => {
-            console.warn('[WebSpeech] Recognition notice:', e.error)
+            if (recognitionRef.current !== recognition) return
+            if (e.error === 'no-speech' || e.error === 'aborted') return
+            console.warn('[WebSpeech] Recognition unavailable, using recorded audio instead:', e.error)
+            // Fatal (blocked, offline, unsupported): fall back to volume detection + server transcription
+            speechRecognitionOkRef.current = false
+            recognitionRef.current = null
           }
 
           recognition.onend = () => {
-            // Auto-restart if candidate is still speaking/unmuted
-            if (
-              !isVoiceMutedRef.current &&
-              voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING &&
-              recognitionRef.current
-            ) {
-              try {
-                recognitionRef.current.start()
-              } catch { /* non-critical; safe to ignore */ }
+            if (recognitionRef.current !== recognition) return
+            committedTranscriptRef.current = [committedTranscriptRef.current, sessionFinalTranscriptRef.current]
+              .join(' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+            sessionFinalTranscriptRef.current = ''
+            // Auto-restart while it is still the candidate's turn
+            if (!isVoiceMutedRef.current && voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
+              setTimeout(() => {
+                if (recognitionRef.current !== recognition) return
+                try { recognition.start() } catch { /* already running */ }
+              }, 200)
             }
           }
 
-          try {
-            recognition.start()
-          } catch (recStartErr) {
-            console.warn('[WebSpeech] SpeechRecognition start warning, retrying:', recStartErr)
-            setTimeout(() => {
-              if (!isVoiceMutedRef.current && voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
-                try { recognition.start() } catch { /* non-critical; safe to ignore */ }
-              }
-            }, 150)
-          }
           recognitionRef.current = recognition
+          recognition.start()
+          speechRecognitionOkRef.current = true
         } catch (recErr) {
           console.warn('[WebSpeech] SpeechRecognition start notice:', recErr)
+          speechRecognitionOkRef.current = false
+          recognitionRef.current = null
         }
       }
 
-      // 2. Initialize MediaRecorder as reliable audio capture fallback
+      // 2. MediaRecorder: server-side transcription fallback when live typing captures nothing
       try {
         if (typeof MediaRecorder !== 'undefined' && stream) {
           let mimeType = 'audio/webm;codecs=opus'
@@ -1642,35 +1976,28 @@ export default function InterviewRoom() {
 
           recordedChunksRef.current = []
           const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
-          mediaRecorderRef.current = recorder
-
           recorder.ondataavailable = (event) => {
             if (event.data && event.data.size > 0) {
               recordedChunksRef.current.push(event.data)
             }
           }
-
-          recorder.onstop = () => {
-            const audioBlob = new Blob(recordedChunksRef.current, { type: mimeType || 'audio/webm' })
-            handleRecordedAudioStop(audioBlob)
-          }
-
+          mediaRecorderRef.current = recorder
           recorder.start(250)
         }
       } catch (recorderErr) {
         console.warn('[VoiceMode] MediaRecorder fallback init note:', recorderErr)
       }
 
-      setVoiceState(VOICE_STATES.CANDIDATE_SPEAKING)
+      recordingStartedAtRef.current = monotonicNow()
       setRecordingSeconds(0)
-
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => prev + 1)
       }, 1000)
     } catch (err) {
       console.error('[VoiceMode] Failed to start microphone:', err)
-      setVoiceState(VOICE_STATES.ERROR)
+      if (listenSession !== listenSessionRef.current) return
+      updateVoiceState(VOICE_STATES.ERROR)
 
       let errorMessage = 'Microphone permission was denied or microphone hardware is unavailable.'
       let errorDetails = ''
@@ -1699,80 +2026,57 @@ export default function InterviewRoom() {
     }
   }
 
-  // Toggle Mute / Unmute (Supports candidate barge-in when AI is speaking)
+  const unmuteMicrophone = () => {
+    setIsVoiceMuted(false)
+    isVoiceMutedRef.current = false
+    setIsAudioOn(true)
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = true
+        })
+      } catch { /* non-critical; safe to ignore */ }
+    }
+  }
+
+  // Toggle Mute / Unmute (acts as "Interject" while the interviewer is speaking)
   const handleToggleMute = () => {
-    if (voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING) {
+    const state = voiceStateRef.current
+    if (state === VOICE_STATES.INTERVIEWER_SPEAKING || state === VOICE_STATES.PREPARING_SPEECH) {
+      if (isVoiceMutedRef.current) unmuteMicrophone()
       handleCandidateBargeIn()
       return
     }
 
-    if (isVoiceMuted) {
-      setIsVoiceMuted(false)
-      isVoiceMutedRef.current = false
-      setIsAudioOn(true)
+    if (isVoiceMutedRef.current) {
+      unmuteMicrophone()
+      startVoiceListening()
+      return
+    }
 
-      // Stop interviewer audio immediately so candidate can speak without overlap
-      stopCurrentAudio()
-      voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
-      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
-
-      if (!mediaStreamRef.current || !mediaStreamRef.current.getAudioTracks().some((t) => t.readyState === 'live')) {
-        startMicrophone()
-          .then(() => {
-            if (interviewModeRef.current === 'voice' && !isCompleted) {
-              startVoiceListening()
-            }
-          })
-          .catch((err) => {
-            console.warn('Microphone start on unmute notice:', err)
-          })
-      } else {
-        try {
-          mediaStreamRef.current.getAudioTracks().forEach((track) => {
-            track.enabled = true
-          })
-        } catch { /* non-critical; safe to ignore */ }
-        if (
-          voiceStateRef.current !== VOICE_STATES.AI_PROCESSING &&
-          voiceStateRef.current !== VOICE_STATES.TRANSCRIBING &&
-          !isAiTyping &&
-          !isCompleted
-        ) {
-          startVoiceListening()
-        }
-      }
-    } else {
-      setIsVoiceMuted(true)
-      isVoiceMutedRef.current = true
-      resetSilenceDetection()
-      if (mediaStreamRef.current) {
-        try {
-          mediaStreamRef.current.getAudioTracks().forEach((track) => {
-            track.enabled = false
-          })
-        } catch { /* non-critical; safe to ignore */ }
-      }
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-      }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        try { mediaRecorderRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-      }
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current)
-        recordingTimerRef.current = null
-      }
-      voiceStateRef.current = VOICE_STATES.WAITING_FOR_CANDIDATE
-      setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+    // Muting discards the in-progress capture instead of submitting a half answer
+    setIsVoiceMuted(true)
+    isVoiceMutedRef.current = true
+    stopCandidateCapture()
+    updateLiveTranscript('')
+    if (mediaStreamRef.current) {
+      try {
+        mediaStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = false
+        })
+      } catch { /* non-critical; safe to ignore */ }
+    }
+    if (state === VOICE_STATES.CANDIDATE_SPEAKING || state === VOICE_STATES.ERROR) {
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     }
   }
 
-  // Backwards-compatible toggle bridge
+  // Explicit "Start Answering" / retry action
   const handleToggleVoiceMic = (turnOn) => {
     if (turnOn) {
-      if (isVoiceMuted) {
-        setIsVoiceMuted(false)
-        isVoiceMutedRef.current = false
+      if (isVoiceMutedRef.current) unmuteMicrophone()
+      if (voiceStateRef.current === VOICE_STATES.ERROR) {
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
       }
       startVoiceListening()
     } else {
@@ -1780,116 +2084,53 @@ export default function InterviewRoom() {
     }
   }
 
-  // Handle MediaRecorder completion
-  const handleRecordedAudioStop = async (audioBlob) => {
-    const candidateText = (liveTranscriptRef.current || '').trim()
-    if (candidateText) {
-      finalizeCandidateSpeech(candidateText)
-      return
-    }
-
-    // Fallback: If Web Speech API captured no text, transcribe audio with Whisper
-    setVoiceState(VOICE_STATES.TRANSCRIBING)
-    handleProcessRecordedAudio(audioBlob)
-  }
-
   // Finalize authentic candidate speech and dispatch to AI Interview Agent
-  const finalizeCandidateSpeech = (text) => {
+  const finalizeCandidateSpeech = (text, durationSeconds = 0) => {
     const trimmed = (text || '').trim()
     if (!trimmed) {
-      setVoiceState(VOICE_STATES.ERROR)
-      setVoiceError({
-        code: 'EMPTY_SPEECH',
-        message: "We couldn't hear any speech. Please turn on your microphone and try speaking again.",
-        canRetry: true,
-        canSwitchToText: true,
-      })
+      // Nothing was heard: gently re-open the mic instead of showing an error
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      triggerBargeInToast("We didn't catch that — please go ahead and answer again.")
+      startVoiceListening()
       return
     }
 
     updateLiveTranscript('')
-    submitCandidateAnswer(trimmed, 'voice', recordingSeconds)
+    voiceHandlersRef.current.submitCandidateAnswer?.(trimmed, 'voice', durationSeconds)
   }
 
-  // Fallback: Process Recorded Audio Blob via Whisper STT
-  const handleProcessRecordedAudio = async (audioBlob) => {
-    if (!audioBlob || audioBlob.size < 1000) {
-      setVoiceState(VOICE_STATES.ERROR)
-      setVoiceError({
-        code: 'EMPTY_AUDIO',
-        message: "We couldn't clearly capture that answer. Recording was empty or too brief. Please try again.",
-        canRetry: true,
-        canSwitchToText: true,
-      })
-      return
+  // Keep long-lived callbacks pointed at the latest render's handlers
+  useEffect(() => {
+    voiceHandlersRef.current = {
+      startVoiceListening,
+      handleCommitCandidateSpeech,
+      finalizeCandidateSpeech,
+      submitCandidateAnswer,
     }
-
-    const durationSnapshot = recordingSeconds || 1
-
-    try {
-      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
-      const formData = new FormData()
-      formData.append('audio', audioBlob, 'candidate_answer.webm')
-      formData.append('duration', durationSnapshot)
-
-      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/transcribe`), {
-        method: 'POST',
-        headers: {
-          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
-        },
-        body: formData,
-      })
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        throw new Error(errData.message || `Transcription failed with status ${res.status}`)
-      }
-
-      const data = await res.json()
-      const transcript = (data.text || '').trim()
-
-      if (!transcript || data.success === false) {
-        setVoiceState(VOICE_STATES.ERROR)
-        setVoiceError({
-          code: 'EMPTY_TRANSCRIPT',
-          message: "We couldn't clearly capture that answer. Please try turning on your microphone and answering again.",
-          canRetry: true,
-          canSwitchToText: true,
-        })
-        return
-      }
-
-      submitCandidateAnswer(transcript, 'voice', durationSnapshot, data.latencyMs)
-    } catch (err) {
-      console.warn('[VoiceMode] STT processing error:', err)
-      setVoiceState(VOICE_STATES.ERROR)
-      setVoiceError({
-        code: 'STT_FAILED',
-        message: 'Speech recognition was unable to transcribe your response. Please try recording again or switch to text mode.',
-        canRetry: true,
-        canSwitchToText: true,
-      })
-    }
-  }
+  })
 
   // Pause / Resume interview session
   const handleTogglePause = () => {
     if (isCompleted) return
 
     if (!isPaused) {
+      const wasInterviewerTalking =
+        voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING ||
+        voiceStateRef.current === VOICE_STATES.PREPARING_SPEECH
+      speechQueueRef.current.splice(0)
       stopCurrentAudio()
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop()
-        } catch { /* non-critical; safe to ignore */ }
-      }
-      resetSilenceDetection()
+      stopCandidateCapture()
+      isPausedRef.current = true
       setIsPaused(true)
       setIsRecording(false)
+      if (wasInterviewerTalking || voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING) {
+        updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      }
     } else {
+      isPausedRef.current = false
       setIsPaused(false)
       setIsRecording(true)
-      if (interviewMode === 'voice' && !isVoiceMuted && !isAiTyping && !isCompleted) {
+      if (interviewModeRef.current === 'voice' && !isVoiceMutedRef.current && !isAiTypingRef.current && !isCompletedRef.current) {
         startVoiceListening()
       }
     }
@@ -1898,21 +2139,19 @@ export default function InterviewRoom() {
   // Open modal to safely confirm interview conclusion mid-way or completely
   const handleEndCall = () => {
     // Immediately silence any interviewer voice playback and pause speech recognition
+    speechQueueRef.current.splice(0)
     stopCurrentAudio()
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
+    stopCandidateCapture()
+    if (voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING || voiceStateRef.current === VOICE_STATES.INTERVIEWER_SPEAKING) {
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
     }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch { /* non-critical; safe to ignore */ }
-    }
-    resetSilenceDetection()
     setIsEndModalOpen(true)
   }
 
   // Cancel conclusion modal and resume listening if voice mode active
   const handleCancelEndModal = () => {
     setIsEndModalOpen(false)
-    if (interviewMode === 'voice' && !isVoiceMuted && !isCompleted && !isPaused && !isTerminatedRef.current) {
+    if (interviewModeRef.current === 'voice' && !isVoiceMutedRef.current) {
       startVoiceListening()
     }
   }
@@ -1926,6 +2165,7 @@ export default function InterviewRoom() {
 
     // 2. Kill all active voice, speech synthesis, and audio buffers
     stopCurrentAudio()
+    stopCandidateCapture()
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try { window.speechSynthesis.cancel() } catch { /* non-critical; safe to ignore */ }
     }
@@ -2520,6 +2760,18 @@ export default function InterviewRoom() {
                 )}
 
                 <div className="int-room-voice-status-bar">
+                  {voiceState === VOICE_STATES.INITIALIZING && (
+                    <span className="int-room-voice-badge is-thinking">
+                      <span className="int-room-pulse-dot is-yellow" />
+                      Your interviewer is joining the room...
+                    </span>
+                  )}
+                  {voiceState === VOICE_STATES.PREPARING_SPEECH && (
+                    <span className="int-room-voice-badge is-thinking">
+                      <span className="int-room-pulse-dot is-cyan" />
+                      Interviewer is about to speak...
+                    </span>
+                  )}
                   {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span className="int-room-voice-badge is-speaking">
@@ -2550,7 +2802,7 @@ export default function InterviewRoom() {
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                         <line x1="12" y1="19" x2="12" y2="22" />
                       </svg>
-                      Ready for your answer (Turn ON mic below)
+                      {isVoiceMuted ? 'Your turn — unmute your microphone to answer' : 'Your turn — press "Start Answering" below'}
                     </span>
                   )}
                   {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (
@@ -2632,7 +2884,7 @@ export default function InterviewRoom() {
                             <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
                             <path d="M16 21h5v-5" />
                           </svg>
-                          Try Turning ON Mic Again
+                          {voiceError.code === 'MICROPHONE_PERMISSION_DENIED' ? 'Try Turning ON Mic Again' : 'Answer Again'}
                         </button>
                       )}
                       {voiceError.canSwitchToText && (
@@ -2726,7 +2978,10 @@ export default function InterviewRoom() {
                         )}
                       </div>
                     ) : (
-                      <div className="int-room-chat-msg__bubble">
+                      <div className={`int-room-chat-msg__bubble ${msg.isFeedback ? 'is-feedback-bubble' : ''}`}>
+                        {msg.isFeedback && (
+                          <span className="int-room-feedback-inline-label">Coaching feedback</span>
+                        )}
                         <p className="int-room-chat-msg__text">{msg.text}</p>
                         {/* Inline Audio Replay Button for AI Questions */}
                         {msg.sender === 'ai' && (
@@ -2764,7 +3019,7 @@ export default function InterviewRoom() {
               ))}
 
               {/* Real-time candidate speech typing automatically into UI */}
-              {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (
+              {(voiceState === VOICE_STATES.CANDIDATE_SPEAKING || (voiceState === VOICE_STATES.TRANSCRIBING && liveTranscript)) && (
                 <div className="int-room-chat-msg is-candidate is-live-typing">
                   <div className={`int-room-chat-msg__avatar ${user?.avatarUrl ? 'has-image' : ''}`}>
                     {user?.avatarUrl ? (
@@ -2776,7 +3031,11 @@ export default function InterviewRoom() {
                   <div className="int-room-chat-msg__content-wrap">
                     <div className="int-room-chat-msg__meta">
                       <span className="int-room-chat-msg__sender">{user?.firstName || 'You'}</span>
-                      {silenceCountdown > 0 ? (
+                      {voiceState === VOICE_STATES.TRANSCRIBING ? (
+                        <span className="int-room-live-speaking-badge">
+                          <span className="int-room-live-speaking-dot" /> Finalizing...
+                        </span>
+                      ) : silenceCountdown > 0 ? (
                         <span className="int-room-live-speaking-badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', borderColor: 'rgba(234, 179, 8, 0.3)' }}>
                           <span className="int-room-live-speaking-dot" style={{ background: '#facc15' }} /> Sending in {silenceCountdown}s...
                         </span>
@@ -2798,6 +3057,24 @@ export default function InterviewRoom() {
                         )}
                         <span className="int-room-live-cursor">|</span>
                       </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {interviewMode === 'voice' && voiceState === VOICE_STATES.INITIALIZING && transcriptMessages.length === 0 && (
+                <div className="int-room-chat-msg is-ai is-typing">
+                  <div className="int-room-chat-msg__avatar">
+                    <img src={chatbotIcon} alt="AI" className="int-room-chat-msg__ai-icon" />
+                  </div>
+                  <div className="int-room-chat-msg__content-wrap">
+                    <div className="int-room-chat-msg__bubble is-typing-bubble">
+                      <div className="int-room-typing-indicator">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                      <span className="int-room-typing-label">Your interviewer is reviewing your profile and will greet you shortly...</span>
                     </div>
                   </div>
                 </div>
@@ -2869,6 +3146,14 @@ export default function InterviewRoom() {
               <div className="int-room-voice-dock">
                 <div className="int-room-voice-dock__status-bar">
                   <div className="int-room-voice-dock__status">
+                    {(voiceState === VOICE_STATES.INITIALIZING || voiceState === VOICE_STATES.PREPARING_SPEECH) && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span className="int-room-pulse-dot is-yellow" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
+                        {voiceState === VOICE_STATES.INITIALIZING
+                          ? 'Setting up your interview. Please allow microphone access if your browser asks.'
+                          : 'Preparing the interviewer\'s voice...'}
+                      </span>
+                    )}
                     {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2892,7 +3177,7 @@ export default function InterviewRoom() {
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                         </svg>
-                        Finalizing speech transcription with Whisper...
+                        Polishing your transcript for accuracy...
                       </span>
                     )}
                     {voiceState === VOICE_STATES.ERROR && (
@@ -2902,7 +3187,7 @@ export default function InterviewRoom() {
                           <line x1="12" y1="9" x2="12" y2="13" />
                           <line x1="12" y1="17" x2="12.01" y2="17" />
                         </svg>
-                        Microphone attention needed. Please check the permission prompt above.
+                        Something needs your attention. See the message above to continue.
                       </span>
                     )}
                     {isVoiceMuted && voiceState !== VOICE_STATES.INTERVIEWER_SPEAKING && voiceState !== VOICE_STATES.AI_PROCESSING && (
@@ -2927,17 +3212,23 @@ export default function InterviewRoom() {
                     {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown === 0 && liveTranscript && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                         <span className="int-room-pulse-dot is-red" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
-                        Microphone is LIVE. Speaking... (Auto-sends 3s after you finish talking)
+                        Microphone is LIVE. Speaking... (sends automatically when you pause)
                       </span>
                     )}
-                    {!isVoiceMuted && (voiceState === VOICE_STATES.CANDIDATE_SPEAKING || voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE) && !liveTranscript && silenceCountdown === 0 && (
+                    {!isVoiceMuted && voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span className="int-room-pulse-dot is-green" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
+                        Your turn. Press <strong>Start Answering</strong> when you are ready, or replay the question.
+                      </span>
+                    )}
+                    {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && !liveTranscript && silenceCountdown === 0 && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                           <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                           <line x1="12" y1="19" x2="12" y2="22" />
                         </svg>
-                        Microphone is LIVE and listening. Speak your answer anytime (auto-sends 3s after you finish).
+                        Microphone is LIVE and listening. Speak your answer now — press <strong>Done</strong> when you finish.
                       </span>
                     )}
                   </div>
@@ -2994,8 +3285,26 @@ export default function InterviewRoom() {
                     </span>
                   </button>
 
-                  {/* Send Answer Now Button (Available if candidate has spoken text and doesn't want to wait 3s) */}
-                  {liveTranscript.trim().length > 0 && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (
+                  {/* Start Answering: opens the mic when it's the candidate's turn */}
+                  {!isVoiceMuted && voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && !isAiTyping && (
+                    <button
+                      type="button"
+                      className="int-room-voice-dock__send-btn"
+                      onClick={() => handleToggleVoiceMic(true)}
+                      title="Open your microphone and start answering"
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        </svg>
+                        Start Answering
+                      </span>
+                    </button>
+                  )}
+
+                  {/* Done / Send Now: always available while answering (works even if live typing captured nothing) */}
+                  {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (liveTranscript.trim().length > 0 || recordingSeconds >= 2) && (
                     <button
                       type="button"
                       className="int-room-voice-dock__send-btn"
@@ -3007,7 +3316,7 @@ export default function InterviewRoom() {
                           <line x1="22" y1="2" x2="11" y2="13" />
                           <polygon points="22 2 15 22 11 13 2 9 22 2" />
                         </svg>
-                        Send Now {silenceCountdown > 0 ? `(${silenceCountdown}s)` : ''}
+                        {liveTranscript.trim() ? 'Send Now' : 'Done Answering'} {silenceCountdown > 0 ? `(${silenceCountdown}s)` : ''}
                       </span>
                     </button>
                   )}
@@ -3018,7 +3327,13 @@ export default function InterviewRoom() {
                       type="button"
                       className="int-room-voice-dock__replay-btn"
                       onClick={() => handleSynthesizeSpeech(latestAiQuestion.text, latestAiQuestion.id)}
-                      disabled={voiceState === VOICE_STATES.INTERVIEWER_SPEAKING || voiceState === VOICE_STATES.AI_PROCESSING}
+                      disabled={
+                        voiceState === VOICE_STATES.INTERVIEWER_SPEAKING ||
+                        voiceState === VOICE_STATES.PREPARING_SPEECH ||
+                        voiceState === VOICE_STATES.AI_PROCESSING ||
+                        voiceState === VOICE_STATES.TRANSCRIBING ||
+                        isAiTyping
+                      }
                       title="Replay interviewer's question aloud"
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>

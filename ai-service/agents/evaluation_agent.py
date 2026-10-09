@@ -805,6 +805,54 @@ class InterviewEvaluationAgent:
 
 
 # Singleton instance
+def _quick_feedback_fallback(answer: str, topic: str) -> str:
+    words = len((answer or "").split())
+    topic_label = topic or "this question"
+    if words < 25:
+        return (
+            f"Thanks for that. Your answer touched on {topic_label}, but it was quite brief. "
+            "To make it stronger, walk through a specific example step by step and finish with the result you achieved."
+        )
+    return (
+        f"Good effort. You engaged directly with {topic_label} and explained your thinking clearly. "
+        "To improve, be more specific about the trade-offs you considered and back it up with a measurable outcome."
+    )
+
+
+def quick_spoken_feedback(
+    agent: "InterviewEvaluationAgent",
+    question: str,
+    answer: str,
+    target_role: str = "",
+    stage_name: str = "",
+    topic: str = "",
+) -> str:
+    """Short, conversational feedback the interviewer can say aloud right after an answer.
+
+    Kept deliberately small (one fast LLM call, ~3 sentences) so it does not slow
+    down the voice turn; the detailed evaluation is produced separately.
+    """
+    system_instruction = (
+        "You are a warm, professional interview coach giving spoken feedback in a live voice interview. "
+        "Speak directly to the candidate in the second person. In 2 to 3 short sentences (max 60 words): "
+        "first name one specific thing they did well in this answer, then give the single most important, "
+        "concrete way to improve it. Plain conversational English only: no scores, no lists, no markdown, "
+        "no quotation marks, and do not ask a new question."
+    )
+    prompt = (
+        f"ROLE: {target_role or 'Software Engineer'}\n"
+        f"STAGE: {stage_name or 'Interview'} (topic: {topic or 'general'})\n\n"
+        f"QUESTION: {question}\n\n"
+        f"CANDIDATE ANSWER: {answer}\n\n"
+        "Give the spoken feedback now."
+    )
+    raw = agent._call_llm(prompt, system_instruction=system_instruction, max_tokens=220)
+    text = (raw or "").strip().strip('"').replace("**", "").replace("\n", " ").strip()
+    if not text or text.startswith("{"):
+        return _quick_feedback_fallback(answer, topic)
+    return text
+
+
 evaluation_agent_instance = InterviewEvaluationAgent()
 evaluation_agent = evaluation_agent_instance
 

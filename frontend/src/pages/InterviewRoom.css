@@ -4373,5 +4373,22 @@
   border-color: rgba(16, 185, 129, 0.3);
 }
 
+/* Spoken coaching feedback shown inline in the transcript (voice Feedback Mode) */
+.int-room-chat-msg__bubble.is-feedback-bubble {
+  border-color: rgba(168, 85, 247, 0.45);
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.28), rgba(30, 27, 75, 0.35));
+}
 
-
+.int-room-feedback-inline-label {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #d8b4fe;
+  background: rgba(168, 85, 247, 0.16);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+}

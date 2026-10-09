@@ -1006,6 +1006,80 @@ exports.beginLiveInterview = async (req, res) => {
  * and returns the ONE next question.
  * POST /api/interview/:sessionId/answer
  */
+/**
+ * Flatten resumeAnalysis.skills (array or { technical: [...], soft: [...] } object)
+ * into a plain list of strings; the evaluation agent rejects non-list payloads.
+ */
+const normalizeSkillList = (skills) => {
+  if (!skills) return [];
+  const raw = Array.isArray(skills)
+    ? skills
+    : Object.values(skills).flatMap((v) => (Array.isArray(v) ? v : [v]));
+  return raw
+    .map((v) => (typeof v === 'string' ? v : v?.name || v?.skill || ''))
+    .filter((v) => typeof v === 'string' && v.trim())
+    .slice(0, 30);
+};
+
+/**
+ * Whisper uses the prompt as preceding context: giving it the question and the
+ * role's vocabulary makes it spell names and technical terms correctly.
+ */
+const buildTranscriptionPrompt = (session) => {
+  const lastQuestion = [...(session.chatMessages || [])].reverse().find((m) => m.role === 'interviewer')?.content || '';
+  const skills = normalizeSkillList(session.resumeAnalysis?.skills).slice(0, 15).join(', ');
+  const parts = [
+    session.targetRole ? `Interview for a ${session.targetRole} role${session.company ? ` at ${session.company}` : ''}.` : '',
+    skills ? `Technologies: ${skills}.` : '',
+    lastQuestion ? `Question: ${lastQuestion}` : '',
+  ];
+  return parts.filter(Boolean).join(' ').slice(0, 800);
+};
+
+const buildFallbackFeedback = (answer, topicLabel) => {
+  const words = answer.trim().split(/\s+/).length;
+  const fallbackScore = Math.min(88, Math.max(60, 65 + Math.min(words / 4, 20)));
+  return {
+    overallScore: Math.round(fallbackScore),
+    answerEvaluation: {
+      relevance: `Directly engages with ${topicLabel || 'the question topic'}.`,
+      relevanceScore: Math.round(fallbackScore),
+      technicalAccuracy: 'Demonstrates working foundational technical knowledge.',
+      technicalAccuracyScore: Math.round(fallbackScore - 2),
+      clarityAndOrganization: 'Logically organized response.',
+      clarityScore: Math.round(fallbackScore),
+      completeness: 'Addresses the core prompt. Articulating trade-offs and edge cases would increase depth.',
+      completenessScore: Math.round(fallbackScore - 3),
+      supportingExamples: 'References practical candidate experience.',
+      communicationEffectiveness: 'Professional, articulate delivery.',
+    },
+    strengths: [
+      `Addressed the core intent regarding ${topicLabel || 'the technical topic'}.`,
+      'Maintained clear, professional communication.',
+    ],
+    areasForImprovement: [
+      'Could state explicit trade-offs (e.g. latency, memory, consistency, or scale).',
+      'Include quantifiable metrics or production impact.',
+    ],
+    actionableSuggestions: [
+      'Structure technical responses using the STAR method (Situation, Task, Action, Result).',
+      'Highlight production edge cases and validation strategies.',
+    ],
+    improvedAnswerGuidance: {
+      structure: '1. Context & Objective -> 2. Architecture & Patterns -> 3. Trade-off Analysis -> 4. Measurable Result',
+      exampleAnswer: `When approaching ${topicLabel || 'this challenge'}, I assess requirements, choose a pattern balancing simplicity and scale, and validate edge cases with automated testing.`,
+    },
+  };
+};
+
+const fallbackSpokenFeedback = (answer, topicLabel) => {
+  const words = answer.trim().split(/\s+/).length;
+  if (words < 25) {
+    return `Thanks for that. Your answer touched on ${topicLabel || 'the question'}, but it was quite brief. To make it stronger, walk through a specific example step by step and finish with the result you achieved.`;
+  }
+  return `Good effort. You engaged directly with ${topicLabel || 'the question'} and explained your thinking clearly. To improve, be more specific about the trade-offs you considered and back it up with a measurable outcome.`;
+};
+
 exports.submitLiveAnswer = async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -1238,6 +1312,44 @@ exports.submitLiveAnswer = async (req, res) => {
       latestAnswer: answer.trim(),
     };
 
+    // Feedback Interview Mode: start the evaluation now so it runs in parallel with the
+    // interview agent instead of after it (this used to add a full LLM call per turn).
+    const isVoiceMode = mode === 'voice' || inputMode === 'voice' || req.body?.includeAudio;
+    const isFeedbackMode = session.interviewMode === 'FEEDBACK_COACHING';
+    const savedCandidateMsgId = session.chatMessages[session.chatMessages.length - 1]?._id;
+    const evalTopic = session.interviewState.currentTopic || 'Core Competency';
+    const evalPayload = {
+      question: questionBeingAnswered,
+      answer: answer.trim(),
+      targetRole: session.targetRole || session.interviewPlan?.role || 'Software Engineer',
+      company: session.company || '',
+      stageName: session.interviewState.currentStageName || currStage.name || 'Technical Stage',
+      topic: evalTopic,
+      candidateSkills: normalizeSkillList(session.resumeAnalysis?.skills),
+    };
+    const callEvaluationAgent = async (path, timeoutMs) => {
+      try {
+        const evalRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/${path}`, {
+          method: 'POST',
+          headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(evalPayload),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (evalRes.ok) return await evalRes.json();
+        console.warn(`[Interview Controller] Evaluation agent ${path} status HTTP ${evalRes.status}`);
+      } catch (evalErr) {
+        console.warn(`[Interview Controller] Evaluation agent ${path} request note:`, evalErr.message);
+      }
+      return null;
+    };
+    const fullFeedbackPromise = isFeedbackMode
+      ? callEvaluationAgent('evaluate-answer', 45000).then((json) => json?.feedback || buildFallbackFeedback(answer, evalTopic))
+      : null;
+    // Voice mode speaks a short summary instead of showing the detailed panel
+    const spokenFeedbackPromise = isFeedbackMode && isVoiceMode
+      ? callEvaluationAgent('quick-feedback', 15000).then((json) => (json?.spokenFeedback || '').trim() || fallbackSpokenFeedback(answer, evalTopic))
+      : null;
+
     let aiResult = null;
     try {
       const aiRes = await fetch(`${AI_SERVICE_URL}/agents/interview-agent/next`, {
@@ -1442,98 +1554,65 @@ exports.submitLiveAnswer = async (req, res) => {
       demoAccessUpdate = await recordCompletedDemoInterview(session);
     }
 
-    // Generate audio if voice mode is active
+    // Spoken feedback (voice) and the next question's audio are synthesized in parallel
     let audioUrl = null;
-    const isVoiceMode = mode === 'voice' || inputMode === 'voice' || req.body?.includeAudio;
-    if (isVoiceMode && nextQuestion) {
-      const speechRes = await textToSpeechService.generateSpeech({ text: nextQuestion });
-      if (speechRes.success) {
-        audioUrl = speechRes.audioUrl;
+    let spokenFeedback = null;
+    let feedbackAudioUrl = null;
+    const synthesize = async (text) => {
+      if (!isVoiceMode || !text) return null;
+      try {
+        const speechRes = await textToSpeechService.generateSpeech({ text });
+        return speechRes.success ? speechRes.audioUrl : null;
+      } catch (_) {
+        return null;
       }
+    };
+    const questionAudioPromise = synthesize(nextQuestion);
+    if (spokenFeedbackPromise) {
+      spokenFeedback = await spokenFeedbackPromise;
+      [feedbackAudioUrl, audioUrl] = await Promise.all([synthesize(spokenFeedback), questionAudioPromise]);
+    } else {
+      audioUrl = await questionAudioPromise;
     }
 
-    // Single Answer Feedback Evaluation for Feedback Interview Mode
+    // Text mode shows the detailed coaching panel, so it needs the full evaluation now.
+    // Voice mode stores it in the background once ready (used by the final report).
     let feedbackData = null;
-    if (session.interviewMode === 'FEEDBACK_COACHING') {
-      try {
-        const evalRes = await fetch(`${AI_SERVICE_URL}/agents/evaluation-agent/evaluate-answer`, {
-          method: 'POST',
-          headers: getAiServiceHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({
-            question: questionBeingAnswered,
-            answer: answer.trim(),
-            targetRole: session.targetRole || session.interviewPlan?.role || 'Software Engineer',
-            company: session.company || '',
-            stageName: session.interviewState.currentStageName || currStage.name || 'Technical Stage',
-            topic: session.interviewState.currentTopic || 'Core Competency',
-            candidateSkills: (session.resumeAnalysis?.skills?.technical || session.resumeAnalysis?.skills || []),
-          }),
-          signal: AbortSignal.timeout(45000),
-        });
-
-        if (evalRes.ok) {
-          const evalJson = await evalRes.json();
-          feedbackData = evalJson.feedback || null;
-        } else {
-          console.warn(`[Interview Controller] AI feedback evaluation status HTTP ${evalRes.status}`);
-        }
-      } catch (evalErr) {
-        console.warn('[Interview Controller] Single answer evaluation request note:', evalErr.message);
-      }
-
-      // Contextual fallback so candidate is never left without coaching
-      if (!feedbackData) {
-        const words = answer.trim().split(/\s+/).length;
-        const fallbackScore = Math.min(88, Math.max(60, 65 + Math.min(words / 4, 20)));
-        feedbackData = {
-          overallScore: Math.round(fallbackScore),
-          answerEvaluation: {
-            relevance: `Directly engages with ${session.interviewState.currentTopic || 'the question topic'}.`,
-            relevanceScore: Math.round(fallbackScore),
-            technicalAccuracy: 'Demonstrates working foundational technical knowledge.',
-            technicalAccuracyScore: Math.round(fallbackScore - 2),
-            clarityAndOrganization: 'Logically organized response.',
-            clarityScore: Math.round(fallbackScore),
-            completeness: 'Addresses the core prompt. Articulating trade-offs and edge cases would increase depth.',
-            completenessScore: Math.round(fallbackScore - 3),
-            supportingExamples: 'References practical candidate experience.',
-            communicationEffectiveness: 'Professional, articulate delivery.',
-          },
-          strengths: [
-            `Addressed the core intent regarding ${session.interviewState.currentTopic || 'the technical topic'}.`,
-            'Maintained clear, professional communication.',
-          ],
-          areasForImprovement: [
-            'Could state explicit trade-offs (e.g. latency, memory, consistency, or scale).',
-            'Include quantifiable metrics or production impact.',
-          ],
-          actionableSuggestions: [
-            'Structure technical responses using the STAR method (Situation, Task, Action, Result).',
-            'Highlight production edge cases and validation strategies.',
-          ],
-          improvedAnswerGuidance: {
-            structure: '1. Context & Objective -> 2. Architecture & Patterns -> 3. Trade-off Analysis -> 4. Measurable Result',
-            exampleAnswer: `When approaching ${session.interviewState.currentTopic || 'this challenge'}, I assess requirements, choose a pattern balancing simplicity and scale, and validate edge cases with automated testing.`,
-          },
-        };
-      }
-
-      // Attach feedback to the saved candidate message
-      const savedCandidateMsg = session.chatMessages[session.chatMessages.length - 1];
-      if (savedCandidateMsg && savedCandidateMsg.role === 'candidate') {
-        savedCandidateMsg.feedback = feedbackData;
+    const recordFeedback = (doc, fb) => {
+      const savedCandidateMsg = doc.chatMessages.find((m) => savedCandidateMsgId && String(m._id) === String(savedCandidateMsgId));
+      if (savedCandidateMsg) {
+        savedCandidateMsg.feedback = fb;
         if (!savedCandidateMsg.metrics) savedCandidateMsg.metrics = {};
-        savedCandidateMsg.metrics.feedback = feedbackData;
+        savedCandidateMsg.metrics.feedback = fb;
       }
+    };
+    const perAnswerEntry = (fb) => ({
+      turnIndex: session.interviewState.questionsAsked || 1,
+      question: questionBeingAnswered,
+      answer: answer.trim(),
+      feedback: fb,
+      timestamp: new Date(),
+    });
 
+    if (fullFeedbackPromise && !spokenFeedbackPromise) {
+      feedbackData = await fullFeedbackPromise;
+      recordFeedback(session, feedbackData);
       if (!session.perAnswerFeedbacks) session.perAnswerFeedbacks = [];
-      session.perAnswerFeedbacks.push({
-        turnIndex: session.interviewState.questionsAsked || 1,
-        question: questionBeingAnswered,
-        answer: answer.trim(),
-        feedback: feedbackData,
-        timestamp: new Date(),
-      });
+      session.perAnswerFeedbacks.push(perAnswerEntry(feedbackData));
+    } else if (fullFeedbackPromise) {
+      const entryTemplate = perAnswerEntry(null);
+      fullFeedbackPromise
+        .then(async (fb) => {
+          // Atomic update: the session document may already have moved on to later turns
+          const update = { $push: { perAnswerFeedbacks: { ...entryTemplate, feedback: fb } } };
+          const filter = { sessionId };
+          if (savedCandidateMsgId) {
+            filter['chatMessages._id'] = savedCandidateMsgId;
+            update.$set = { 'chatMessages.$.feedback': fb, 'chatMessages.$.metrics.feedback': fb };
+          }
+          await InterviewSession.updateOne(filter, update);
+        })
+        .catch((bgErr) => console.warn('[Interview Controller] Background feedback save note:', bgErr.message));
     }
 
     // Append interviewer's next question (or closing statement) to chatMessages (omit base64 from DB)
@@ -1558,7 +1637,9 @@ exports.submitLiveAnswer = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      feedback: session.interviewMode === 'FEEDBACK_COACHING' ? feedbackData : null,
+      feedback: isFeedbackMode ? feedbackData : null,
+      spokenFeedback,
+      feedbackAudioUrl,
       questionBeingAnswered,
       candidateAnswer: answer.trim(),
       nextQuestion,
@@ -1959,6 +2040,8 @@ exports.transcribeCandidateVoice = async (req, res) => {
       audioBuffer: req.file.buffer,
       filename: req.file.originalname || 'candidate_answer.webm',
       mimetype: req.file.mimetype || 'audio/webm',
+      prompt: buildTranscriptionPrompt(session),
+      language: 'en',
     });
 
     if (!result.success) {

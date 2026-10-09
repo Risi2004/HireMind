@@ -66,6 +66,8 @@ class SpeechToTextService:
         audio_bytes: bytes,
         filename: str = "recording.webm",
         mime_type: str = "audio/webm",
+        prompt: Optional[str] = None,
+        language: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Transcribe candidate speech using Whisper Large V3 Turbo.
 
@@ -111,13 +113,19 @@ class SpeechToTextService:
             file_tuple = (filename, io.BytesIO(audio_bytes), mime_type)
             files = {"file": file_tuple}
             data = {"model": self.model_name}
+            # Fixing the language stops Whisper mis-detecting accented English, and the
+            # prompt (question + role vocabulary) helps it spell technical terms correctly.
+            data["language"] = (language or "en").strip()[:5]
+            if prompt and prompt.strip():
+                data["prompt"] = prompt.strip()[:800]
+            data["temperature"] = "0"
 
             response = requests.post(
                 transcription_url,
                 headers=headers,
                 files=files,
                 data=data,
-                timeout=45,
+                timeout=30,
             )
 
             latency_ms = int((time.time() - start_time) * 1000)

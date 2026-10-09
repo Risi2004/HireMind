@@ -37,6 +37,27 @@ def pcm_to_wav(
     return buf.getvalue()
 
 
+def detect_audio_media_type(audio: bytes, content_type: str = "") -> str:
+    """Identify the audio container from magic bytes (falls back to the header)."""
+    head = audio[:12]
+    if head.startswith(b"RIFF") and head[8:12] == b"WAVE":
+        return "audio/wav"
+    if head.startswith(b"ID3") or (len(head) > 1 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0):
+        return "audio/mpeg"
+    if head.startswith(b"OggS"):
+        return "audio/ogg"
+    if head.startswith(b"fLaC"):
+        return "audio/flac"
+    if head[4:8] == b"ftyp":
+        return "audio/mp4"
+    if head.startswith(bytes([0x1A, 0x45, 0xDF, 0xA3])):
+        return "audio/webm"
+    for known in ("mpeg", "mp3", "ogg", "opus", "flac", "aac", "mp4", "webm", "wav"):
+        if known in content_type:
+            return "audio/mpeg" if known == "mp3" else f"audio/{known}"
+    return "audio/pcm"
+
+
 class TextToSpeechService:
     """Reusable Text-to-Speech service wrapping Gemini 3.8 Flash-Lite TTS."""
 
@@ -98,13 +119,13 @@ class TextToSpeechService:
 
         # Check in-memory audio cache
         if cache_key in self._cache:
-            audio_bytes, _ = self._cache[cache_key]
+            audio_bytes, _, cached_media_type = self._cache[cache_key]
             latency_ms = int((time.time() - start_time) * 1000)
             logger.info(f"[TTS_CACHED_HIT] Reusing cached audio for text: '{cleaned_text[:40]}...'")
             return {
                 "success": True,
                 "audio_bytes": audio_bytes,
-                "media_type": "audio/wav",
+                "media_type": cached_media_type,
                 "voice": chosen_voice,
                 "model": self.model_name,
                 "cached": True,
@@ -166,12 +187,30 @@ class TextToSpeechService:
                 }
 
             raw_audio = response.content
-            content_type = response.headers.get("Content-Type", "")
+            content_type = response.headers.get("Content-Type", "").lower()
 
-            # If raw PCM, wrap in standard RIFF WAV header for universal browser compatibility
-            if "pcm" in content_type or not raw_audio.startswith(b"RIFF"):
+            # Providers sometimes answer HTTP 200 with a JSON/text error body.
+            # Never wrap that in a WAV header (it plays as loud static).
+            if "json" in content_type or "text/" in content_type or len(raw_audio) < 256:
+                logger.error(
+                    f"[ERROR] TTS provider returned non-audio payload ({content_type}): {raw_audio[:200]!r}"
+                )
+                return {
+                    "success": False,
+                    "error": "TTS_FAILED: Provider returned no audio.",
+                    "audio_bytes": b"",
+                    "media_type": "audio/wav",
+                    "cached": False,
+                    "latencyMs": latency_ms,
+                }
+
+            media_type = detect_audio_media_type(raw_audio, content_type)
+            if media_type == "audio/pcm":
+                # Raw 16-bit PCM: wrap in a RIFF WAV header for browser playback
                 wav_audio = pcm_to_wav(raw_audio, sample_rate=24000, channels=1, sampwidth=2)
+                media_type = "audio/wav"
             else:
+                # Already a container format (wav/mp3/ogg/...) the browser can play as-is
                 wav_audio = raw_audio
 
             # Store in cache
@@ -180,7 +219,7 @@ class TextToSpeechService:
                 oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][1])
                 del self._cache[oldest_key]
 
-            self._cache[cache_key] = (wav_audio, time.time())
+            self._cache[cache_key] = (wav_audio, time.time(), media_type)
 
             logger.info(
                 f"[TTS_COMPLETED] Generated {len(wav_audio)} WAV bytes in {latency_ms}ms"
@@ -189,7 +228,7 @@ class TextToSpeechService:
             return {
                 "success": True,
                 "audio_bytes": wav_audio,
-                "media_type": "audio/wav",
+                "media_type": media_type,
                 "voice": chosen_voice,
                 "model": self.model_name,
                 "cached": False,
