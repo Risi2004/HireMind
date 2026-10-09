@@ -1292,6 +1292,37 @@
   box-shadow: none !important;
 }
 
+.new-int-pill.is-blocked {
+  opacity: 0.4 !important;
+  cursor: not-allowed !important;
+  pointer-events: auto !important;
+  filter: grayscale(0.7);
+  box-shadow: none !important;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #64748b;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  user-select: none;
+}
+
+.new-int-pill.is-blocked:hover {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #64748b !important;
+  background: rgba(14, 28, 58, 0.6) !important;
+  box-shadow: none !important;
+}
+
+.new-int-pill-lock-icon {
+  width: 9px;
+  height: 9px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
 .new-int-pills-row--types {
   display: flex;
   flex-wrap: wrap;
@@ -1811,20 +1842,24 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  width: 100%;
 }
 
 .new-int-pipe-card {
   background: rgba(8, 22, 48, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  padding: 16px 18px;
+  padding: 13px 16px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.4);
   transition: all 0.25s ease;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .new-int-pipe-card:hover {
@@ -1832,15 +1867,33 @@
   transform: translateY(-1px);
 }
 
+.new-int-pipe-card__main-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+  min-width: 0;
+}
+
 .new-int-pipe-card__left {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 11px;
+  min-width: 0;
+  flex: 1;
+}
+
+.new-int-pipe-card__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
 
 .new-int-pipe-card__icon-wrap {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -1850,22 +1903,28 @@
 
 .new-int-pipe-card__icon-wrap.is-done {
   background: rgba(168, 85, 247, 0.15);
-  border: 1px solid rgba(168, 85, 247, 0.3);
+  border: 1px solid rgba(168, 85, 247, 0.35);
 }
 
 .new-int-pipe-card__icon-wrap.is-analyzing {
-  background: rgba(168, 85, 247, 0.2);
-  border: 1px solid rgba(168, 85, 247, 0.4);
+  background: rgba(56, 189, 248, 0.18);
+  border: 1px solid rgba(56, 189, 248, 0.45);
 }
 
 .new-int-pipe-card__icon-wrap.is-queued {
-  background: rgba(148, 163, 184, 0.1);
+  background: rgba(148, 163, 184, 0.08);
   border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
+.new-int-pipe-card__icon-wrap.is-error {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
 .new-int-pipe-icon {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
+  display: block;
 }
 
 .new-int-pipe-icon--spin {
@@ -1882,46 +1941,104 @@
 }
 
 .new-int-pipe-card__title {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: #e2e8f0;
-  line-height: 1.35;
+  line-height: 1.3;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.new-int-pipe-skills-preview {
+  font-size: 10px;
+  color: #38bdf8;
+  font-weight: 500;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.new-int-pipe-error-preview {
+  font-size: 10px;
+  color: #f87171;
+  font-weight: 500;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .new-int-pipe-badge {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 6px;
+  align-self: center;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: #64748b;
 }
 
 .new-int-pipe-badge--done {
   color: #c084fc;
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.3);
 }
 
 .new-int-pipe-badge--analyzing {
-  color: #d8b4fe;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
 }
 
 .new-int-pipe-badge--queued {
   color: #64748b;
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.18);
 }
 
-/* Active Stage Card (Extracting Key Skills from JD) */
+.new-int-pipe-badge--active {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.new-int-pipe-badge--error {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Card State Variants */
 .new-int-pipe-card--active {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
   background: rgba(12, 26, 56, 0.95);
   border: 1.5px solid rgba(168, 85, 247, 0.4);
   box-shadow: 0 10px 30px -4px rgba(168, 85, 247, 0.2);
 }
 
-.new-int-pipe-card__main-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.new-int-pipe-card--done {
+  border-color: rgba(168, 85, 247, 0.22);
+}
+
+.new-int-pipe-card--ready {
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.new-int-pipe-card--error {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.new-int-pipe-card--queued {
+  opacity: 0.85;
 }
 
 /* Gradient Progress Bar */
