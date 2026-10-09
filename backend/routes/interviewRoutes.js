@@ -19,6 +19,7 @@ const {
   synthesizeInterviewerSpeech,
   runCode,
   submitCodeSolution,
+  retryAnswerEvaluation,
 } = require('../controllers/interviewController');
 
 // Multer memory storage configuration for PDF / DOCX files up to 10MB
@@ -159,6 +160,7 @@ router.post('/:sessionId/analyze-jd', ...demoOwner, analyzeJobDescription);
 router.post('/:sessionId/plan', ...demoOwner, generateInterviewPlan);
 router.post('/:sessionId/begin', ...demoOwner, beginLiveInterview);
 router.post('/:sessionId/answer', ...demoOwner, submitLiveAnswer);
+router.post('/:sessionId/retry-answer-evaluation', ...demoOwner, retryAnswerEvaluation);
 router.post('/:sessionId/voice/transcribe', ...demoOwner, audioUpload.single('audio'), transcribeCandidateVoice);
 router.post('/:sessionId/voice/speech', ...demoOwner, synthesizeInterviewerSpeech);
 router.post('/:sessionId/code/run', ...demoOwner, runCode);

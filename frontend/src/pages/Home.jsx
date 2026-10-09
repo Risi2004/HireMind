@@ -9,15 +9,8 @@ export default function Home() {
   const navigate = useNavigate()
   const { isAuthenticated } = useAuth()
 
-  // State for interactive hero role selector
-  const roles = [
-    'Full-Stack Developer',
-    'System Design & Architecture',
-    'Machine Learning / AI Engineer',
-    'Frontend Specialist (React/Next)',
-    'Engineering Manager / Leadership',
-  ]
-  const [selectedRole, setSelectedRole] = useState(roles[0])
+  // Role for mockup cockpit demonstration
+  const selectedRole = 'Full-Stack Developer'
 
   // Interactive Live Simulation State
   const [isSimulatingVoice, setIsSimulatingVoice] = useState(true)
@@ -476,10 +469,9 @@ export default function Home() {
       <section className="hm-hero">
         <div className="hm-hero__container">
           {/* Top Announcement Chip */}
-          <div className="hm-hero__badge" onClick={() => navigate(isAuthenticated ? '/dashboard' : '/profile-setup')}>
+          <div className="hm-hero__badge">
             <span className="hm-badge-dot" />
             <span className="hm-badge-text">Next-Gen Voice AI Interview Coach v2.4</span>
-            <span className="hm-badge-arrow">{isAuthenticated ? 'Go to Dashboard →' : 'Explore Live Demo →'}</span>
           </div>
 
           {/* Hero Main Headline */}
@@ -494,35 +486,8 @@ export default function Home() {
             Staff Engineer.
           </p>
 
-          {/* Quick Role Selector Filter */}
-          <div className="hm-hero__roles-wrapper">
-            <span className="hm-roles-label">Select Your Target Track:</span>
-            <div className="hm-roles-pills">
-              {roles.map((role) => (
-                <button
-                  key={role}
-                  type="button"
-                  className={`hm-role-pill ${selectedRole === role ? 'hm-role-pill--active' : ''}`}
-                  onClick={() => setSelectedRole(role)}
-                >
-                  {role}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Action CTAs */}
           <div className="hm-hero__cta-group">
-            <button
-              type="button"
-              className="hm-btn hm-btn--hero-primary"
-              onClick={() => navigate(isAuthenticated ? '/dashboard' : '/signup')}
-            >
-              <span className="hm-btn-icon-sparkle">✦</span>
-              {isAuthenticated ? 'Go to Dashboard' : 'Start Mock Interview Free'}
-              <span className="hm-btn__arrow">→</span>
-            </button>
-
             <button
               type="button"
               className="hm-btn hm-btn--hero-secondary"
@@ -669,7 +634,13 @@ export default function Home() {
                     </div>
 
                     <div className="hm-cockpit-tip">
-                      <span className="hm-tip-icon">💡</span>
+                      <span className="hm-tip-icon" aria-hidden="true">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 18h6" />
+                          <path d="M10 22h4" />
+                          <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14" />
+                        </svg>
+                      </span>
                       <p>
                         <strong>AI Instant Coaching:</strong> Great point on distributed leasing!
                         Remember to state the exact TTL trade-off before going into Raft quorum consensus.

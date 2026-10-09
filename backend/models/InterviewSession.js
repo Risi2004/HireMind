@@ -24,6 +24,10 @@ const chatMessageSchema = new mongoose.Schema({
     runOutput: { type: String, default: '' },
     aiReview: { type: String, default: '' },
   },
+  feedback: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+  },
   timestamp: {
     type: Date,
     default: Date.now,
@@ -76,6 +80,11 @@ const interviewSessionSchema = new mongoose.Schema(
     interviewType: {
       type: String,
       default: 'Role-Specific',
+    },
+    interviewMode: {
+      type: String,
+      enum: ['HR_SIMULATION', 'FEEDBACK_COACHING'],
+      default: 'HR_SIMULATION',
     },
     difficulty: {
       type: String,
@@ -139,6 +148,15 @@ const interviewSessionSchema = new mongoose.Schema(
       isEndedByUser: { type: Boolean, default: false },
     },
     chatMessages: [chatMessageSchema],
+    perAnswerFeedbacks: [
+      {
+        turnIndex: { type: Number, default: 0 },
+        question: { type: String, default: '' },
+        answer: { type: String, default: '' },
+        feedback: { type: mongoose.Schema.Types.Mixed, default: null },
+        timestamp: { type: Date, default: Date.now },
+      },
+    ],
     evaluation: {
       type: mongoose.Schema.Types.Mixed,
       default: null,

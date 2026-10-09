@@ -926,7 +926,17 @@ export default function AdminInterviews() {
                         {/* AI Interviewer Question */}
                         <div className="int-convo-bubble int-convo-bubble--ai">
                           <div className="int-convo-speaker-tag int-convo-speaker-tag--ai">
-                            <span>🤖 AI INTERVIEWER • Question {conv.qNum}</span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa' }} aria-hidden="true">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <rect width="18" height="12" x="3" y="8" rx="2" />
+                                  <path d="M12 2v6" />
+                                  <path d="M8 14v1" />
+                                  <path d="M16 14v1" />
+                                </svg>
+                              </span>
+                              AI INTERVIEWER • Question {conv.qNum}
+                            </span>
                             <span style={{ fontSize: '10.5px', color: 'var(--admin-text-dim)' }}>Audio Latency 210ms</span>
                           </div>
                           <p className="int-convo-text">{conv.question}</p>
@@ -935,7 +945,15 @@ export default function AdminInterviews() {
                         {/* Candidate Answer */}
                         <div className="int-convo-bubble int-convo-bubble--candidate">
                           <div className="int-convo-speaker-tag int-convo-speaker-tag--candidate">
-                            <span>👤 {selectedSession.participant.toUpperCase()} (Candidate)</span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399' }} aria-hidden="true">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                                  <circle cx="12" cy="7" r="4" />
+                                </svg>
+                              </span>
+                              {selectedSession.participant.toUpperCase()} (Candidate)
+                            </span>
                             <span style={{ fontSize: '10.5px', color: 'var(--admin-accent-emerald)' }}>STT Confidence 99.2%</span>
                           </div>
                           <p className="int-convo-text">"{conv.answer}"</p>

@@ -101,12 +101,20 @@ export default function InterviewAccessGate({ children }) {
     <div className="access-gate-container">
       <div className="access-gate-card">
         {isQuotaReached ? (
-          <div className="access-gate-badge quota-exceeded">
-            <span>⚠️</span> Demo Quota Reached
+          <div className="access-gate-badge quota-exceeded" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Demo Quota Reached
           </div>
         ) : (
-          <div className="access-gate-badge">
-            <span>✨</span> Feature Coming Soon
+          <div className="access-gate-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+            </svg>
+            Feature Coming Soon
           </div>
         )}
 
@@ -177,19 +185,41 @@ export default function InterviewAccessGate({ children }) {
         {/* Feature Preview Badges */}
         <div className="access-gate-features">
           <div className="feature-pill">
-            <span className="feature-pill-icon">🎙️</span>
+            <span className="feature-pill-icon-box feature-pill-icon-box--cyan">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="22" />
+              </svg>
+            </span>
             <span className="feature-pill-text">Whisper V3 Voice & Real-Time TTS</span>
           </div>
           <div className="feature-pill">
-            <span className="feature-pill-icon">💻</span>
+            <span className="feature-pill-icon-box feature-pill-icon-box--blue">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            </span>
             <span className="feature-pill-text">Live Code Sandbox & Automated Judge</span>
           </div>
           <div className="feature-pill">
-            <span className="feature-pill-icon">🧠</span>
+            <span className="feature-pill-icon-box feature-pill-icon-box--purple">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04Z" />
+                <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04Z" />
+              </svg>
+            </span>
             <span className="feature-pill-text">Adaptive Contextual Multi-Agent System</span>
           </div>
           <div className="feature-pill">
-            <span className="feature-pill-icon">📊</span>
+            <span className="feature-pill-icon-box feature-pill-icon-box--emerald">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10" />
+                <line x1="12" y1="20" x2="12" y2="4" />
+                <line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+            </span>
             <span className="feature-pill-text">Multi-Domain Scoring & STAR Analysis</span>
           </div>
         </div>

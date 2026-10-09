@@ -423,7 +423,25 @@ export default function AdminPilotAccess() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{ fontSize: '24px' }}>🛡️</div>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '38px',
+              height: '38px',
+              minWidth: '38px',
+              borderRadius: '8px',
+              background: 'rgba(59, 130, 246, 0.15)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              color: '#60a5fa',
+            }}
+            aria-hidden="true"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+            </svg>
+          </div>
           <div>
             <div style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc' }}>
               Enforced Private Preview Policy
@@ -1077,8 +1095,15 @@ export default function AdminPilotAccess() {
                   <strong style={{ color: '#f8fafc' }}>{cancelTargetUser.name}</strong> ({cancelTargetUser.email})?
                 </p>
 
-                <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '10px', padding: '14px', fontSize: '12.5px', color: '#fca5a5', lineHeight: 1.5 }}>
-                  ⚠️ This candidate will be immediately blocked from all AI interview routes and will see the private preview "Feature Coming Soon" page.
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '10px', padding: '14px', fontSize: '12.5px', color: '#fca5a5', lineHeight: 1.5 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', minWidth: '22px', borderRadius: '5px', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }} aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                  </span>
+                  <span>This candidate will be immediately blocked from all AI interview routes and will see the private preview &quot;Feature Coming Soon&quot; page.</span>
                 </div>
 
                 <div>

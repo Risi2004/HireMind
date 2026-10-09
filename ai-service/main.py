@@ -395,6 +395,45 @@ def evaluation_agent_endpoint(payload: EvaluationPayload):
         raise HTTPException(status_code=500, detail=f"Failed to evaluate interview: {str(e)}")
 
 
+class SingleAnswerEvaluationPayload(BaseModel):
+    question: str = Field(..., description="The interview question that was asked")
+    answer: str = Field(..., description="Candidate's submitted answer")
+    target_role: Optional[str] = Field(default="", description="Target job title")
+    targetRole: Optional[str] = Field(default="", description="Alternative target job title")
+    company: Optional[str] = Field(default="", description="Target company name")
+    stage_name: Optional[str] = Field(default="", description="Interview stage name")
+    stageName: Optional[str] = Field(default="", description="Alternative stage name")
+    topic: Optional[str] = Field(default="", description="Topic being probed")
+    candidate_skills: Optional[List[str]] = Field(default_factory=list, description="Candidate skills")
+    candidateSkills: Optional[List[str]] = Field(default_factory=list, description="Alternative candidate skills")
+
+
+@app.post("/agents/evaluation-agent/evaluate-answer")
+def evaluate_single_answer_endpoint(payload: SingleAnswerEvaluationPayload):
+    """Evaluate an individual candidate answer in real-time for Feedback Interview Mode."""
+    try:
+        resolved_role = payload.target_role or payload.targetRole or "Software Engineer"
+        resolved_stage = payload.stage_name or payload.stageName or "Technical Interview"
+        resolved_skills = payload.candidate_skills or payload.candidateSkills or []
+
+        feedback = evaluation_agent_instance.evaluate_single_answer(
+            question=payload.question,
+            answer=payload.answer,
+            target_role=resolved_role,
+            company=payload.company or "",
+            stage_name=resolved_stage,
+            topic=payload.topic or "",
+            candidate_skills=resolved_skills,
+        )
+        return {
+            "status": "success",
+            "feedback": feedback,
+        }
+    except Exception as e:
+        logger.exception("Failed to evaluate single answer:")
+        raise HTTPException(status_code=500, detail=f"Failed to evaluate answer: {str(e)}")
+
+
 # -------------------------------------------------------------
 # Voice Interview Endpoints (STT & TTS)
 # -------------------------------------------------------------

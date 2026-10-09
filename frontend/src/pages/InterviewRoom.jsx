@@ -284,6 +284,13 @@ export default function InterviewRoom() {
   const [silenceCountdown, setSilenceCountdown] = useState(0)
   const silenceCountdownIntervalRef = useRef(null)
 
+  // Dual Interview Mode - Feedback Coaching State
+  const [activeFeedback, setActiveFeedback] = useState(null)
+  const [feedbackContext, setFeedbackContext] = useState(null)
+  const [pendingTurnData, setPendingTurnData] = useState(null)
+  const [isRetryingFeedback, setIsRetryingFeedback] = useState(false)
+  const [feedbackError, setFeedbackError] = useState(null)
+
   // Interview Mode Selection Modal state
   const [isModeModalOpen, setIsModeModalOpen] = useState(false)
   const [liveTranscript, setLiveTranscript] = useState('')
@@ -652,6 +659,26 @@ export default function InterviewRoom() {
           setInterviewState(data.interviewState)
         }
 
+        if (data.feedback) {
+          // Feedback Interview Mode: Hold next turn and display immediate coaching panel
+          setActiveFeedback(data.feedback)
+          setFeedbackContext({
+            question: latestAiQuestion?.text || 'Coding Task Solution',
+            answer: `[${codeLanguage.toUpperCase()}]\n${codeContent}\n\nExplanation: ${codeExplanation || 'None provided'}`,
+          })
+          setPendingTurnData({
+            nextQuestion: data.nextQuestion,
+            stage: data.stage || 'Evaluation & Next Stage',
+            audioUrl: data.audioUrl,
+            isComplete: Boolean(data.isComplete),
+            demoAccess: data.demoAccess,
+            interviewState: data.interviewState,
+          })
+          setIsAiTyping(false)
+          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          return
+        }
+
         if (data.nextQuestion) {
           const aiMsgId = createMessageId('ai-code')
           const aiMsg = {
@@ -893,6 +920,11 @@ export default function InterviewRoom() {
 
     stopCurrentAudio()
 
+    const questionBeingAnswered =
+      latestAiQuestion?.text ||
+      transcriptMessages.slice().reverse().find((m) => m.sender === 'ai')?.text ||
+      'Current Question'
+
     const candidateMsg = {
       id: createMessageId('cand'),
       sender: 'candidate',
@@ -935,6 +967,26 @@ export default function InterviewRoom() {
 
         if (data.interviewState) {
           setInterviewState(data.interviewState)
+        }
+
+        if (data.feedback) {
+          // Feedback Interview Mode: Hold next turn and display immediate coaching panel
+          setActiveFeedback(data.feedback)
+          setFeedbackContext({
+            question: questionBeingAnswered,
+            answer: trimmed,
+          })
+          setPendingTurnData({
+            nextQuestion: data.nextQuestion,
+            stage: data.stage || data.interviewState?.currentStageName || null,
+            audioUrl: data.audioUrl,
+            isComplete: Boolean(data.isComplete),
+            demoAccess: data.demoAccess,
+            interviewState: data.interviewState,
+          })
+          setIsAiTyping(false)
+          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+          return
         }
 
         if (data.nextQuestion) {
@@ -1005,6 +1057,84 @@ export default function InterviewRoom() {
       })
       setVoiceState(VOICE_STATES.ERROR)
       setIsAiTyping(false)
+    }
+  }
+
+  // Continue to the next question from Feedback Coaching Panel
+  const handleContinueFromFeedback = () => {
+    if (!pendingTurnData) return
+    const { nextQuestion, stage, audioUrl, isComplete, demoAccess, interviewState: nextIntState } = pendingTurnData
+
+    setActiveFeedback(null)
+    setPendingTurnData(null)
+    setFeedbackError(null)
+
+    if (nextIntState) {
+      setInterviewState(nextIntState)
+    }
+
+    if (isComplete) {
+      if (demoAccess && updateDemoQuota) updateDemoQuota(demoAccess)
+      if (checkInterviewAccessStatus) checkInterviewAccessStatus().catch(() => {})
+      setIsCompleted(true)
+      setVoiceState(VOICE_STATES.INTERVIEW_COMPLETE)
+      return
+    }
+
+    if (nextQuestion) {
+      const aiMsgId = createMessageId('ai')
+      const aiMsg = {
+        id: aiMsgId,
+        sender: 'ai',
+        senderName: 'HireMind AI Interviewer',
+        time: formatTimer(secondsElapsed + 2),
+        stage: stage || interviewState?.currentStageName || null,
+        text: nextQuestion,
+      }
+      setTranscriptMessages((prev) => [...prev, aiMsg])
+      setIsAiTyping(false)
+
+      if (!isCompleted && !isTerminatedRef.current) {
+        if (audioUrl) {
+          audioCacheRef.current.set(aiMsgId, audioUrl)
+          playInterviewerAudio(audioUrl, aiMsgId, nextQuestion)
+        } else if (interviewMode === 'voice') {
+          handleSynthesizeSpeech(nextQuestion, aiMsgId)
+        } else {
+          setVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+        }
+      }
+    }
+  }
+
+  // Retry Answer Evaluation safely without re-submitting candidate answer
+  const handleRetryFeedback = async () => {
+    if (!feedbackContext || isRetryingFeedback) return
+    setIsRetryingFeedback(true)
+    setFeedbackError(null)
+    try {
+      const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+      const res = await fetch(getApiUrl(`/api/interview/${interviewId}/retry-answer-evaluation`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({
+          question: feedbackContext.question,
+          answer: feedbackContext.answer,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok && data.success && data.feedback) {
+        setActiveFeedback(data.feedback)
+      } else {
+        setFeedbackError(data.message || 'Retry evaluation failed. Please check your connection.')
+      }
+    } catch (err) {
+      setFeedbackError(err.message || 'Network error retrying evaluation.')
+    } finally {
+      setIsRetryingFeedback(false)
     }
   }
 
@@ -1235,7 +1365,7 @@ export default function InterviewRoom() {
 
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         errorMessage = 'Microphone permission is blocked in your browser.'
-        errorDetails = 'Click the lock or tune icon 🔒 in your browser address bar (next to the URL), change Microphone to "Allow", and then click "Try Turning ON Mic Again".'
+        errorDetails = 'Click the lock or tune icon in your browser address bar (next to the URL), change Microphone to "Allow", and then click "Try Turning ON Mic Again".'
       } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
         errorMessage = 'No microphone device was detected on your computer.'
         errorDetails = 'Please ensure your microphone or headset is connected and enabled in your sound settings, then click "Try Turning ON Mic Again".'
@@ -1753,7 +1883,11 @@ export default function InterviewRoom() {
             className={`int-room-mobile-tab ${activeMobileTab === 'code' ? 'is-active' : ''}`}
             onClick={() => setActiveMobileTab('code')}
           >
-            💻 Code IDE
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px', verticalAlign: '-1px' }}>
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+            Code IDE
           </button>
         )}
       </div>
@@ -1925,6 +2059,23 @@ export default function InterviewRoom() {
               </div>
 
               <div className="int-room-stage-actions">
+                {/* Active Interview Mode Badge */}
+                <div
+                  className={`int-room-mode-pill ${session?.interviewMode === 'FEEDBACK_COACHING' ? 'int-room-mode-pill--feedback' : 'int-room-mode-pill--hr'}`}
+                  title={
+                    session?.interviewMode === 'FEEDBACK_COACHING'
+                      ? 'Feedback Interview Mode: Immediate Coaching & Answer Evaluation'
+                      : 'HR Interview Mode: Realistic Simulation Without Immediate Interruptions'
+                  }
+                >
+                  <span className={`int-room-mode-dot ${session?.interviewMode === 'FEEDBACK_COACHING' ? 'is-purple' : 'is-cyan'}`} />
+                  <span>
+                    {session?.interviewMode === 'FEEDBACK_COACHING'
+                      ? 'Feedback Interview Mode'
+                      : 'HR Interview Mode'}
+                  </span>
+                </div>
+
                 {/* Active Stage Indicator */}
                 {currentStage && (
                   <div className="int-room-stage-pill">
@@ -1941,7 +2092,12 @@ export default function InterviewRoom() {
                   title={isCodeStudioOpen ? 'Close Code Studio' : 'Open in-browser Code IDE'}
                   aria-label="Toggle Code Editor"
                 >
-                  <span className="int-room-code-btn-icon">💻</span>
+                  <span className="int-room-code-btn-icon">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  </span>
                   <span>{isCodeStudioOpen ? 'Close IDE' : 'Code IDE'}</span>
                   {isCodingStage && <span className="int-room-code-live-pill">Coding Task</span>}
                 </button>
@@ -1992,37 +2148,58 @@ export default function InterviewRoom() {
                   {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
                     <span className="int-room-voice-badge is-speaking">
                       <span className="int-room-pulse-dot is-cyan" />
-                      🔊 AI Interviewer Speaking... (Please Listen)
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                      </svg>
+                      AI Interviewer Speaking... (Please Listen)
                     </span>
                   )}
                   {voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && (
                     <span className="int-room-voice-badge is-waiting">
                       <span className="int-room-pulse-dot is-green" />
-                      🎤 Ready for your answer (Turn ON mic below)
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                      Ready for your answer (Turn ON mic below)
                     </span>
                   )}
                   {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (
                     <span className="int-room-voice-badge is-recording">
                       <span className="int-room-pulse-dot is-red" />
-                      🔴 Microphone ON • Speech typing live...
+                      Microphone ON • Speech typing live...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.TRANSCRIBING && (
                     <span className="int-room-voice-badge is-transcribing">
                       <span className="int-room-pulse-dot is-purple" />
-                      ⚡ Finalizing speech transcription...
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                      Finalizing speech transcription...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.AI_PROCESSING && (
                     <span className="int-room-voice-badge is-thinking">
                       <span className="int-room-pulse-dot is-yellow" />
-                      🧠 HireMind AI thinking...
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04Z" />
+                        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04Z" />
+                      </svg>
+                      HireMind AI thinking...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.ERROR && (
                     <span className="int-room-voice-badge is-error">
                       <span className="int-room-pulse-dot is-red" />
-                      ⚠️ Attention Needed
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
+                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      Attention Needed
                     </span>
                   )}
 
@@ -2062,7 +2239,13 @@ export default function InterviewRoom() {
                           className="int-room-voice-error-btn"
                           onClick={() => handleToggleVoiceMic(true)}
                         >
-                          🔄 Try Turning ON Mic Again
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                            <path d="M3 3v5h5" />
+                            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                            <path d="M16 21h5v-5" />
+                          </svg>
+                          Try Turning ON Mic Again
                         </button>
                       )}
                       {voiceError.canSwitchToText && (
@@ -2074,7 +2257,10 @@ export default function InterviewRoom() {
                             setInterviewMode('text')
                           }}
                         >
-                          💬 Type Answer Instead
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                          </svg>
+                          Type Answer Instead
                         </button>
                       )}
                     </div>
@@ -2089,7 +2275,11 @@ export default function InterviewRoom() {
               {isCodingStage && !isCodeStudioOpen && !isCompleted && (
                 <div className="int-room-coding-alert-banner">
                   <div className="int-room-coding-alert-left">
-                    <span className="int-room-coding-alert-pulse">⚡</span>
+                    <span className="int-room-coding-alert-pulse">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                    </span>
                     <div className="int-room-coding-alert-info">
                       <strong>Interactive Coding Challenge Active</strong>
                       <span>Solve the problem, test with custom inputs, and submit to the AI interviewer.</span>
@@ -2100,7 +2290,11 @@ export default function InterviewRoom() {
                     className="int-room-coding-alert-open-btn"
                     onClick={() => setIsCodeStudioOpen(true)}
                   >
-                    Open In-Browser IDE 💻
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px' }}>
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                    Open In-Browser IDE
                   </button>
                 </div>
               )}
@@ -2155,7 +2349,25 @@ export default function InterviewRoom() {
                             onClick={() => handleSynthesizeSpeech(msg.text, msg.id)}
                             title={playingMessageId === msg.id ? 'Playing audio...' : 'Play question audio'}
                           >
-                            <span>{playingMessageId === msg.id ? '🔊 Playing...' : '▶ Listen'}</span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                              {playingMessageId === msg.id ? (
+                                <>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                                  </svg>
+                                  Playing...
+                                </>
+                              ) : (
+                                <>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                  </svg>
+                                  Listen
+                                </>
+                              )}
+                            </span>
                           </button>
                         )}
                       </div>
@@ -2271,28 +2483,75 @@ export default function InterviewRoom() {
                 <div className="int-room-voice-dock__status-bar">
                   <div className="int-room-voice-dock__status">
                     {voiceState === VOICE_STATES.INTERVIEWER_SPEAKING && (
-                      <span>🔊 AI Interviewer is speaking... Please listen to the question.</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                        AI Interviewer is speaking... Please listen to the question.
+                      </span>
                     )}
                     {voiceState === VOICE_STATES.AI_PROCESSING && (
-                      <span>🧠 AI is processing your answer and formulating the next question...</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04Z" />
+                          <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04Z" />
+                        </svg>
+                        AI is processing your answer and formulating the next question...
+                      </span>
                     )}
                     {voiceState === VOICE_STATES.TRANSCRIBING && (
-                      <span>⚡ Finalizing speech transcription with Whisper...</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                        </svg>
+                        Finalizing speech transcription with Whisper...
+                      </span>
                     )}
                     {voiceState === VOICE_STATES.ERROR && (
-                      <span>⚠️ Microphone attention needed. Please check the permission prompt above.</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                          <line x1="12" y1="9" x2="12" y2="13" />
+                          <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                        Microphone attention needed. Please check the permission prompt above.
+                      </span>
                     )}
                     {isVoiceMuted && voiceState !== VOICE_STATES.INTERVIEWER_SPEAKING && voiceState !== VOICE_STATES.AI_PROCESSING && (
-                      <span>🔇 Microphone is MUTED. Click Unmute when you are ready to speak your answer.</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="2" y1="2" x2="22" y2="22" />
+                          <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" />
+                          <path d="M5 10v2a7 7 0 0 0 12 5" />
+                        </svg>
+                        Microphone is MUTED. Click Unmute when you are ready to speak your answer.
+                      </span>
                     )}
                     {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown > 0 && (
-                      <span>⏱️ Silence detected. Auto-sending your answer in <strong>{silenceCountdown}s</strong>...</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                        Silence detected. Auto-sending your answer in <strong>{silenceCountdown}s</strong>...
+                      </span>
                     )}
                     {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown === 0 && liveTranscript && (
-                      <span>🔴 Microphone is LIVE. Speaking... (Auto-sends 3s after you finish talking)</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span className="int-room-pulse-dot is-red" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
+                        Microphone is LIVE. Speaking... (Auto-sends 3s after you finish talking)
+                      </span>
                     )}
                     {!isVoiceMuted && (voiceState === VOICE_STATES.CANDIDATE_SPEAKING || voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE) && !liveTranscript && silenceCountdown === 0 && (
-                      <span>🎤 Microphone is LIVE and listening. Speak your answer anytime (auto-sends 3s after you finish).</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                          <line x1="12" y1="19" x2="12" y2="22" />
+                        </svg>
+                        Microphone is LIVE and listening. Speak your answer anytime (auto-sends 3s after you finish).
+                      </span>
                     )}
                   </div>
                 </div>
@@ -2317,12 +2576,37 @@ export default function InterviewRoom() {
                         : 'Click to Mute Microphone'
                     }
                   >
-                    <span>
-                      {isVoiceMuted
-                        ? '🎙️ Unmute Microphone'
-                        : voiceState === VOICE_STATES.INTERVIEWER_SPEAKING
-                        ? '🔊 Interviewer Speaking (Click to Answer)'
-                        : '🔇 Mute Microphone'}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      {isVoiceMuted ? (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="22" />
+                          </svg>
+                          Unmute Microphone
+                        </>
+                      ) : voiceState === VOICE_STATES.INTERVIEWER_SPEAKING ? (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                          </svg>
+                          Interviewer Speaking (Click to Answer)
+                        </>
+                      ) : (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="2" y1="2" x2="22" y2="22" />
+                            <path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2" />
+                            <path d="M5 10v2a7 7 0 0 0 12 5" />
+                            <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33" />
+                            <path d="M9 9v3a3 3 0 0 0 5.12 2.12" />
+                            <line x1="12" y1="19" x2="12" y2="22" />
+                          </svg>
+                          Mute Microphone
+                        </>
+                      )}
                     </span>
                   </button>
 
@@ -2334,7 +2618,13 @@ export default function InterviewRoom() {
                       onClick={() => handleCommitCandidateSpeech()}
                       title="Send answer immediately without waiting for 3s silence"
                     >
-                      <span>🚀 Send Now {silenceCountdown > 0 ? `(${silenceCountdown}s)` : ''}</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="22" y1="2" x2="11" y2="13" />
+                          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                        Send Now {silenceCountdown > 0 ? `(${silenceCountdown}s)` : ''}
+                      </span>
                     </button>
                   )}
 
@@ -2347,7 +2637,13 @@ export default function InterviewRoom() {
                       disabled={voiceState === VOICE_STATES.INTERVIEWER_SPEAKING || voiceState === VOICE_STATES.AI_PROCESSING}
                       title="Replay interviewer's question aloud"
                     >
-                      <span>🔊 Replay Question</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                          <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        </svg>
+                        Replay Question
+                      </span>
                     </button>
                   )}
                 </div>
@@ -2427,7 +2723,12 @@ export default function InterviewRoom() {
               {/* Code Studio Header */}
               <div className="int-room-code-header">
                 <div className="int-room-code-header-left">
-                  <span className="int-room-code-title-icon">💻</span>
+                  <span className="int-room-code-title-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="16 18 22 12 16 6" />
+                      <polyline points="8 6 2 12 8 18" />
+                    </svg>
+                  </span>
                   <div>
                     <div className="int-room-code-title">HireMind Code Studio</div>
                     <div className="int-room-code-subtitle">In-Browser Sandbox • Judge0 CE Powered</div>
@@ -2560,7 +2861,13 @@ export default function InterviewRoom() {
                       </>
                     ) : (
                       <>
-                        <span>🚀 Submit Solution to AI</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                          </svg>
+                          Submit Solution to AI
+                        </span>
                       </>
                     )}
                   </button>
@@ -2591,8 +2898,24 @@ export default function InterviewRoom() {
                       <span className={`int-room-term-status ${codeOutput.success ? 'is-success' : 'is-error'}`}>
                         {codeOutput.status || (codeOutput.success ? 'Success' : 'Failed')}
                       </span>
-                      {codeOutput.time && <span className="int-room-term-metric">⏱ {codeOutput.time}s</span>}
-                      {codeOutput.memory && <span className="int-room-term-metric">💾 {codeOutput.memory} KB</span>}
+                      {codeOutput.time && (
+                        <span className="int-room-term-metric" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                          </svg>
+                          {codeOutput.time}s
+                        </span>
+                      )}
+                      {codeOutput.memory && (
+                        <span className="int-room-term-metric" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect width="18" height="18" x="3" y="3" rx="2" />
+                            <path d="M7 7h10v10H7z" />
+                          </svg>
+                          {codeOutput.memory} KB
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2647,17 +2970,41 @@ export default function InterviewRoom() {
               <div className="int-room-mode-card is-voice" onClick={() => handleSelectMode('voice')}>
                 <div className="int-room-mode-card__badge">Recommended • Hands-Free</div>
                 <div className="int-room-mode-card__icon-wrap">
-                  <span className="int-room-mode-card__icon">🎙️</span>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="22" />
+                  </svg>
                 </div>
                 <h3 className="int-room-mode-card__title">Voice-Based Interview</h3>
                 <p className="int-room-mode-card__desc">
                   The AI interviewer asks questions aloud automatically. You answer naturally using your microphone, with live speech transcription typed directly on screen.
                 </p>
                 <ul className="int-room-mode-card__features">
-                  <li>✓ AI automatically reads questions aloud</li>
-                  <li>✓ Real-time speech typing — words appear as you speak</li>
-                  <li>✓ Simple microphone ON / OFF controls (no chatbox needed)</li>
-                  <li>✓ Realistic, immersive conversational practice</li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    AI automatically reads questions aloud
+                  </li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Real-time speech typing — words appear as you speak
+                  </li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Simple microphone ON / OFF controls (no chatbox needed)
+                  </li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Realistic, immersive conversational practice
+                  </li>
                 </ul>
                 <button
                   type="button"
@@ -2675,17 +3022,39 @@ export default function InterviewRoom() {
               <div className="int-room-mode-card is-text" onClick={() => handleSelectMode('text')}>
                 <div className="int-room-mode-card__badge is-muted">Standard Format</div>
                 <div className="int-room-mode-card__icon-wrap">
-                  <span className="int-room-mode-card__icon">💬</span>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
                 </div>
                 <h3 className="int-room-mode-card__title">Text-Based Interview</h3>
                 <p className="int-room-mode-card__desc">
                   Traditional format with on-screen reading and keyboard input. Type your responses and insert code snippets at your own pace.
                 </p>
                 <ul className="int-room-mode-card__features">
-                  <li>✓ Read questions on screen</li>
-                  <li>✓ Type responses using the keyboard chatbox</li>
-                  <li>✓ Insert formatted code snippets</li>
-                  <li>✓ Self-paced response writing</li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Read questions on screen
+                  </li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Type responses using the keyboard chatbox
+                  </li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Insert formatted code snippets
+                  </li>
+                  <li>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginRight: '8px' }}>
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Self-paced response writing
+                  </li>
                 </ul>
                 <button
                   type="button"
@@ -2735,7 +3104,10 @@ export default function InterviewRoom() {
         <div className="int-room-pause-overlay" role="dialog" aria-modal="true" aria-labelledby="pause-modal-title">
           <div className="int-room-pause-modal">
             <div className="int-room-pause-modal__icon-wrap">
-              <span className="int-room-pause-modal__badge-icon">⏸</span>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" color="#38bdf8">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+              </svg>
             </div>
             <div className="int-room-pause-modal__badge">Session Paused</div>
             <h2 id="pause-modal-title" className="int-room-pause-modal__title">Interview Is On Pause</h2>
@@ -2757,8 +3129,12 @@ export default function InterviewRoom() {
                 type="button"
                 className="int-room-pause-modal__resume-btn"
                 onClick={handleTogglePause}
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
               >
-                ▶ Resume Interview
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Resume Interview
               </button>
               <button
                 type="button"
@@ -2790,7 +3166,11 @@ export default function InterviewRoom() {
               (<strong>Stage {currentStageNumber} of {totalStages}</strong>) will be safely preserved.
             </p>
             <div className="int-room-end-modal__ai-note">
-              <span className="int-room-end-modal__ai-sparkle">✨</span>
+              <span className="int-room-end-modal__ai-sparkle">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                </svg>
+              </span>
               <span>
                 <strong>Comprehensive AI Evaluation:</strong> Our evaluation agent will thoroughly analyze all topics and answers covered during this session and generate your domain skill breakdown without penalizing for unreached stages.
               </span>
@@ -2818,6 +3198,239 @@ export default function InterviewRoom() {
                   'Conclude & View Evaluation →'
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          FEEDBACK COACHING MODAL / PANEL (Active in Feedback Interview Mode)
+          ===================================================================== */}
+      {activeFeedback && (
+        <div
+          className="int-room-feedback-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="feedback-panel-title"
+        >
+          <div className="int-room-feedback-panel">
+            {/* Top Bar / Header */}
+            <div className="int-room-feedback-header">
+              <div className="int-room-feedback-header-left">
+                <div className="int-room-feedback-badge">
+                  <span className="int-room-feedback-badge-dot" />
+                  FEEDBACK COACHING MODE • ANSWER EVALUATION
+                </div>
+                <h2 id="feedback-panel-title" className="int-room-feedback-title">
+                  Immediate AI Feedback & Coaching
+                </h2>
+                <p className="int-room-feedback-subtitle">
+                  Review how your response performed on key interview dimensions, learn actionable improvements, and continue when ready.
+                </p>
+              </div>
+
+              {/* Overall Score Badge */}
+              <div className="int-room-feedback-score-card">
+                <div className="int-room-feedback-score-num">
+                  {activeFeedback.score ?? activeFeedback.overallScore ?? 80}
+                  <span className="int-room-feedback-score-pct">%</span>
+                </div>
+                <div className="int-room-feedback-score-label">ANSWER SCORE</div>
+              </div>
+            </div>
+
+            <div className="int-room-feedback-body">
+              {/* Executive Summary */}
+              {activeFeedback.summary && (
+                <div className="int-room-feedback-summary-box">
+                  <div className="int-room-feedback-summary-label">COACH SUMMARY</div>
+                  <p className="int-room-feedback-summary-text">{activeFeedback.summary}</p>
+                </div>
+              )}
+
+              {/* Reference Accordion: Question & Answer Context */}
+              {feedbackContext && (
+                <div className="int-room-feedback-context-block">
+                  <div className="int-room-feedback-context-row">
+                    <span className="int-room-feedback-context-label">QUESTION ASKED:</span>
+                    <p className="int-room-feedback-context-q">{feedbackContext.question}</p>
+                  </div>
+                  <div className="int-room-feedback-context-row">
+                    <span className="int-room-feedback-context-label">YOUR ANSWER:</span>
+                    <div className="int-room-feedback-context-a">{feedbackContext.answer}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION A: ANSWER EVALUATION CRITERIA METRICS */}
+              {activeFeedback.evaluation && (
+                <div className="int-room-feedback-section">
+                  <h3 className="int-room-feedback-section-title">
+                    <span className="int-room-feedback-section-num">A</span>
+                    Evaluation Criteria Breakdown
+                  </h3>
+                  <div className="int-room-feedback-metrics-grid">
+                    {[
+                      { key: 'relevance', label: 'Relevance to Question' },
+                      { key: 'technical_accuracy', label: 'Technical Accuracy & Depth' },
+                      { key: 'clarity', label: 'Clarity & Organization' },
+                      { key: 'completeness', label: 'Completeness of Response' },
+                      { key: 'supporting_examples', label: 'Quality of Examples (STAR)' },
+                      { key: 'communication', label: 'Communication Effectiveness' },
+                    ].map(({ key, label }) => {
+                      const item = activeFeedback.evaluation?.[key]
+                      if (!item) return null
+                      const scoreVal = typeof item === 'object' ? item.score : item
+                      const comment = typeof item === 'object' ? item.comment : ''
+                      return (
+                        <div key={key} className="int-room-feedback-metric-card">
+                          <div className="int-room-feedback-metric-header">
+                            <span className="int-room-feedback-metric-name">{label}</span>
+                            <span className={`int-room-feedback-metric-score ${scoreVal >= 75 ? 'is-high' : scoreVal >= 55 ? 'is-mid' : 'is-low'}`}>
+                              {scoreVal}%
+                            </span>
+                          </div>
+                          {comment && <p className="int-room-feedback-metric-comment">{comment}</p>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTIONS B & C: STRENGTHS & AREAS FOR IMPROVEMENT */}
+              <div className="int-room-feedback-columns-row">
+                {/* Strengths */}
+                <div className="int-room-feedback-card int-room-feedback-card--strengths">
+                  <div className="int-room-feedback-card-heading">
+                    <span className="int-room-feedback-card-badge is-green">B. Strengths</span>
+                    <span className="int-room-feedback-card-sub">What you did well</span>
+                  </div>
+                  <ul className="int-room-feedback-list">
+                    {(activeFeedback.strengths && activeFeedback.strengths.length > 0
+                      ? activeFeedback.strengths
+                      : ['Clear and direct communication style']
+                    ).map((str, idx) => (
+                      <li key={idx} className="int-room-feedback-list-item">
+                        <span className="int-room-feedback-icon-check">✓</span>
+                        <span>{str}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Areas for Improvement */}
+                <div className="int-room-feedback-card int-room-feedback-card--improvements">
+                  <div className="int-room-feedback-card-heading">
+                    <span className="int-room-feedback-card-badge is-amber">C. Areas for Improvement</span>
+                    <span className="int-room-feedback-card-sub">Gaps & missing evidence</span>
+                  </div>
+                  <ul className="int-room-feedback-list">
+                    {(activeFeedback.areas_for_improvement && activeFeedback.areas_for_improvement.length > 0
+                      ? activeFeedback.areas_for_improvement
+                      : ['Could provide more tangible quantitative results or metrics.']
+                    ).map((imp, idx) => (
+                      <li key={idx} className="int-room-feedback-list-item">
+                        <span className="int-room-feedback-icon-target">→</span>
+                        <span>{imp}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* SECTION D: ACTIONABLE SUGGESTIONS */}
+              {activeFeedback.actionable_suggestions && activeFeedback.actionable_suggestions.length > 0 && (
+                <div className="int-room-feedback-section">
+                  <h3 className="int-room-feedback-section-title">
+                    <span className="int-room-feedback-section-num">D</span>
+                    Actionable Recommendations for Next Answers
+                  </h3>
+                  <div className="int-room-feedback-suggestions-box">
+                    {activeFeedback.actionable_suggestions.map((sug, idx) => (
+                      <div key={idx} className="int-room-feedback-suggestion-row">
+                        <span className="int-room-feedback-sug-num">{idx + 1}</span>
+                        <span className="int-room-feedback-sug-text">{sug}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION E: IMPROVED ANSWER GUIDANCE */}
+              {activeFeedback.improved_answer_guidance && (
+                <div className="int-room-feedback-section">
+                  <div className="int-room-feedback-guidance-card">
+                    <div className="int-room-feedback-guidance-header">
+                      <span className="int-room-feedback-section-num">E</span>
+                      <div>
+                        <h3 className="int-room-feedback-guidance-title">Improved Answer Guidance</h3>
+                        <span className="int-room-feedback-guidance-tag">
+                          Learning Example — Illustrative model structure, not candidate's original text
+                        </span>
+                      </div>
+                    </div>
+
+                    {activeFeedback.improved_answer_guidance.structure && (
+                      <div className="int-room-feedback-model-structure">
+                        <strong>Recommended Response Framework:</strong>{' '}
+                        <span>{activeFeedback.improved_answer_guidance.structure}</span>
+                      </div>
+                    )}
+
+                    {activeFeedback.improved_answer_guidance.example_model_answer && (
+                      <div className="int-room-feedback-model-quote">
+                        <div className="int-room-feedback-model-quote-lbl">ILLUSTRATIVE MODEL ANSWER:</div>
+                        <p>{activeFeedback.improved_answer_guidance.example_model_answer}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Error banner if retry failed */}
+              {feedbackError && (
+                <div className="int-room-feedback-err-banner">
+                  <span>{feedbackError}</span>
+                  <button type="button" className="int-room-feedback-retry-btn" onClick={handleRetryFeedback} disabled={isRetryingFeedback}>
+                    {isRetryingFeedback ? 'Retrying...' : 'Retry Evaluation'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* ACTION FOOTER */}
+            <div className="int-room-feedback-footer">
+              <div className="int-room-feedback-footer-left">
+                {pendingTurnData?.nextQuestion && (
+                  <span className="int-room-feedback-next-hint">
+                    Adaptive follow-up question ready: &ldquo;{pendingTurnData.nextQuestion.slice(0, 75)}...&rdquo;
+                  </span>
+                )}
+              </div>
+              <div className="int-room-feedback-footer-right">
+                <button
+                  type="button"
+                  className="int-room-feedback-retry-subtle-btn"
+                  onClick={handleRetryFeedback}
+                  disabled={isRetryingFeedback}
+                  title="Re-run AI evaluation on this answer"
+                >
+                  {isRetryingFeedback ? 'Re-evaluating...' : 'Re-evaluate Answer'}
+                </button>
+
+                <button
+                  type="button"
+                  className="int-room-feedback-continue-btn"
+                  onClick={handleContinueFromFeedback}
+                >
+                  <span>
+                    {pendingTurnData?.isComplete
+                      ? 'Complete Interview & View Final Report →'
+                      : 'Continue to Next Question →'}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

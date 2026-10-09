@@ -35,9 +35,15 @@ export default function Dashboard() {
       const detail = e.detail || {}
       if (detail.action === 'grant' || detail.action === 'refresh') {
         const attempts = detail.demoAccess?.allowedInterviews || remainingInterviews || 1
-        setRealtimeNotification(`🎉 Live Update: Demo Access Activated! You have ${attempts} interview attempt(s) ready to start.`)
+        setRealtimeNotification({
+          type: 'success',
+          text: `Live Update: Demo Access Activated! You have ${attempts} interview attempt(s) ready to start.`,
+        })
       } else if (detail.action === 'cancel') {
-        setRealtimeNotification(`⚠️ Demo access has been revoked by an administrator.`)
+        setRealtimeNotification({
+          type: 'warning',
+          text: 'Demo access has been revoked by an administrator.',
+        })
       }
     }
 
@@ -383,19 +389,59 @@ export default function Dashboard() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '14px 20px',
-                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(59, 130, 246, 0.18))',
-                border: '1px solid rgba(16, 185, 129, 0.5)',
+                padding: '12px 18px',
+                background:
+                  realtimeNotification.type === 'warning'
+                    ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(239, 68, 68, 0.12))'
+                    : 'linear-gradient(135deg, rgba(16, 185, 129, 0.14), rgba(59, 130, 246, 0.12))',
+                border:
+                  realtimeNotification.type === 'warning'
+                    ? '1px solid rgba(245, 158, 11, 0.4)'
+                    : '1px solid rgba(16, 185, 129, 0.4)',
                 borderRadius: '12px',
                 marginBottom: '20px',
-                color: '#34d399',
-                fontSize: '14px',
+                color: realtimeNotification.type === 'warning' ? '#fbbf24' : '#34d399',
+                fontSize: '13.5px',
                 fontWeight: 600,
-                boxShadow: '0 4px 24px rgba(16, 185, 129, 0.2)',
+                boxShadow:
+                  realtimeNotification.type === 'warning'
+                    ? '0 4px 20px rgba(245, 158, 11, 0.15)'
+                    : '0 4px 20px rgba(16, 185, 129, 0.15)',
                 animation: 'fadeIn 0.3s ease-in-out',
+                gap: '12px',
               }}
             >
-              <span>{realtimeNotification}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '6px',
+                    background:
+                      realtimeNotification.type === 'warning'
+                        ? 'rgba(245, 158, 11, 0.2)'
+                        : 'rgba(16, 185, 129, 0.2)',
+                    color: realtimeNotification.type === 'warning' ? '#fbbf24' : '#34d399',
+                  }}
+                  aria-hidden="true"
+                >
+                  {realtimeNotification.type === 'warning' ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                    </svg>
+                  )}
+                </span>
+                <span>{realtimeNotification.text || realtimeNotification}</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setRealtimeNotification(null)}
@@ -441,16 +487,41 @@ export default function Dashboard() {
                   <img src={arrowIcon} alt="" className="dash-btn-arrow" aria-hidden="true" />
                 </button>
                 {isAdmin ? (
-                  <span style={{ fontSize: '12px', background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#60a5fa', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
-                    👑 Admin Full Access
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', background: 'rgba(59, 130, 246, 0.2)', border: '1px solid rgba(59, 130, 246, 0.4)', color: '#60a5fa', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14" />
+                    </svg>
+                    Admin Full Access
                   </span>
                 ) : hasDemoAccess ? (
-                  <span style={{ fontSize: '12px', background: remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)', border: `1px solid ${remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`, color: remainingInterviews > 0 ? '#34d399' : '#fbbf24', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
-                    {remainingInterviews > 0 ? `🎯 Demo Pass: ${remainingInterviews} of ${allowedInterviews} attempts left` : `⚠️ Demo Limit Reached (${allowedInterviews}/${allowedInterviews})`}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', background: remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)', border: `1px solid ${remainingInterviews > 0 ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`, color: remainingInterviews > 0 ? '#34d399' : '#fbbf24', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    {remainingInterviews > 0 ? (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="10" />
+                          <circle cx="12" cy="12" r="6" />
+                          <circle cx="12" cy="12" r="2" />
+                        </svg>
+                        Demo Pass: {remainingInterviews} of {allowedInterviews} attempts left
+                      </>
+                    ) : (
+                      <>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                          <line x1="12" y1="9" x2="12" y2="13" />
+                          <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                        Demo Limit Reached ({allowedInterviews}/{allowedInterviews})
+                      </>
+                    )}
                   </span>
                 ) : (
-                  <span style={{ fontSize: '12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
-                    🔒 Private Preview (Coming Soon)
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '6px 14px', borderRadius: '20px', fontWeight: 600 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    Private Preview (Coming Soon)
                   </span>
                 )}
               </div>
