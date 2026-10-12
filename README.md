@@ -26,8 +26,6 @@
   - [3. Frontend Setup](#3-frontend-setup-react--vite)
 - [Environment Variables Guide](#-environment-variables-guide)
 - [Deployment Architecture](#-deployment-architecture)
-- [License](#-license)
-
 ---
 
 ## 🏛 System Architecture
