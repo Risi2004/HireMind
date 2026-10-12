@@ -285,3 +285,57 @@
     transform: scale(1);
   }
 }
+
+@media (max-width: 640px) {
+  .lg-tabs-bar {
+    padding: 0.75rem 1rem;
+  }
+
+  .lg-tabs-group {
+    width: 100%;
+  }
+
+  .lg-tab-btn {
+    flex: 1;
+    justify-content: center;
+    font-size: 12px;
+    padding: 7px 10px;
+  }
+
+  .lg-toolbar {
+    padding: 0.85rem 1rem;
+  }
+
+  .lg-toolbar-left {
+    width: 100%;
+    max-width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .lg-toolbar-left .admin-search-input-wrap {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .lg-toolbar-left select {
+    width: 100%;
+  }
+
+  .lg-toolbar-right {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .lg-modal-overlay {
+    padding: 0.75rem;
+  }
+
+  .lg-modal-header,
+  .lg-modal-body {
+    padding: 1rem;
+  }
+}
+

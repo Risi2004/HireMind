@@ -235,3 +235,20 @@
     align-items: center;
   }
 }
+
+@media (max-width: 480px) {
+  .career-stage__interests-container {
+    padding: 16px 12px;
+    margin-top: 1.25rem;
+  }
+
+  .career-stage__interest-pill {
+    padding: 0 12px;
+    height: 40px;
+    font-size: 13px;
+  }
+
+  .career-stage__interest-add-wrap {
+    padding: 0 10px;
+  }
+}

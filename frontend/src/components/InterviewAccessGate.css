@@ -301,3 +301,48 @@
 .access-gate-footer a:hover {
   text-decoration: underline;
 }
+
+@media (max-width: 640px) {
+  .access-gate-container {
+    padding: 24px 14px;
+  }
+
+  .access-gate-card {
+    padding: 32px 20px;
+    border-radius: 20px;
+  }
+
+  .access-gate-title {
+    font-size: 24px;
+  }
+
+  .access-gate-desc {
+    font-size: 14px;
+    margin-bottom: 22px;
+  }
+
+  .access-gate-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .gate-btn-primary,
+  .gate-btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .access-gate-card {
+    padding: 24px 14px;
+  }
+
+  .access-gate-title {
+    font-size: 21px;
+  }
+
+  .access-gate-status-box {
+    padding: 14px 12px;
+  }
+}

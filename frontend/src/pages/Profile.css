@@ -1245,6 +1245,43 @@
   }
 }
 
+@media (max-width: 480px) {
+  .prof-container {
+    padding: 12px 10px 32px;
+    gap: 12px;
+  }
+
+  .prof-top-nav {
+    padding: 10px 12px;
+  }
+
+  .prof-heading {
+    font-size: 22px;
+  }
+
+  .prof-hero-card {
+    padding: 16px 12px;
+    gap: 14px;
+    border-radius: 14px;
+  }
+
+  .prof-hero-user {
+    gap: 12px;
+  }
+
+  .prof-card {
+    padding: 16px 12px;
+    border-radius: 14px;
+  }
+
+  .prof-toast {
+    right: 12px;
+    left: 12px;
+    max-width: calc(100vw - 24px);
+    justify-content: center;
+  }
+}
+
 /* Danger Zone Card */
 .prof-card--danger {
   border-color: rgba(239, 68, 68, 0.25) !important;

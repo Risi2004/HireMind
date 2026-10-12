@@ -451,3 +451,29 @@
   align-items: center;
   gap: 0.5rem;
 }
+
+@media (max-width: 480px) {
+  .del-modal-overlay {
+    padding: 10px;
+  }
+
+  .del-modal-card {
+    border-radius: 16px;
+  }
+
+  .del-modal-body {
+    padding: 1.35rem 1rem;
+    gap: 1rem;
+  }
+
+  .del-modal-actions {
+    flex-direction: column-reverse;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .del-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

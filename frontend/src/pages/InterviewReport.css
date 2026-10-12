@@ -869,4 +869,22 @@
     padding: 3px 6px;
     font-size: 10px;
   }
+
+  .rep-chat-drawer {
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-width: calc(100vw - 24px);
+    bottom: 12px;
+  }
+
+  .rep-hero-card {
+    padding: 16px 14px;
+    border-radius: 16px;
+  }
+
+  .rep-score-box {
+    padding: 16px;
+    border-radius: 16px;
+  }
 }
