@@ -464,3 +464,57 @@
   color: #94a3b8;
   max-width: 360px;
 }
+
+@media (max-width: 480px) {
+  .mfa-modal-overlay {
+    padding: 10px;
+  }
+
+  .mfa-modal-card {
+    padding: 1.5rem 1rem;
+    border-radius: 16px;
+  }
+
+  .mfa-digits-row {
+    gap: 0.35rem;
+  }
+
+  .mfa-digit-input {
+    width: clamp(36px, 11vw, 44px);
+    height: clamp(44px, 13vw, 50px);
+    font-size: 1.2rem;
+  }
+
+  .mfa-frequency-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mfa-modal-actions {
+    flex-direction: column-reverse;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .mfa-btn {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .mfa-qr-img {
+    width: clamp(140px, 45vw, 170px);
+    height: auto;
+  }
+
+  .mfa-manual-box {
+    max-width: 100%;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: stretch;
+  }
+
+  .mfa-manual-code {
+    word-break: break-all;
+    text-align: center;
+  }
+}

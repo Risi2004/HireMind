@@ -2339,6 +2339,40 @@
   .new-int-listening-title {
     font-size: 14px;
   }
+
+  .new-int-chat-drawer {
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-width: calc(100vw - 24px);
+    bottom: 12px;
+  }
+
+  .new-int-modal {
+    width: calc(100% - 20px);
+    margin: 10px;
+    padding: 18px 14px;
+    border-radius: 14px;
+  }
+
+  .new-int-modal__actions {
+    flex-direction: column-reverse;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .new-int-modal__cancel-btn,
+  .new-int-modal__submit-btn {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .new-int-planning-modal-card {
+    padding: 24px 16px;
+    margin: 12px;
+    width: calc(100% - 24px);
+  }
 }
 
 /* Resume Analysis Error Card */

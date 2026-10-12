@@ -634,6 +634,7 @@
   top: calc(100% + 10px);
   right: 0;
   width: 340px;
+  max-width: calc(100vw - 24px);
   background: var(--admin-bg-sidebar);
   border: 1px solid var(--admin-border-subtle);
   border-radius: var(--admin-radius-lg);

@@ -764,6 +764,39 @@
     align-items: flex-start;
     gap: 0.65rem;
   }
+
+  .auth-avatar-btns {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .otp-input-container {
+    gap: 0.35rem;
+  }
+
+  .otp-digit-input {
+    width: clamp(36px, 11vw, 44px);
+    height: clamp(44px, 13vw, 50px);
+    font-size: 1.25rem;
+  }
+
+  .auth-mfa-qr-image {
+    max-width: 100%;
+    width: clamp(140px, 45vw, 180px);
+    height: auto;
+  }
+
+  .auth-mfa-secret-box {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .auth-mfa-secret-box code {
+    word-break: break-all;
+    white-space: normal;
+    text-align: center;
+  }
 }
 
 /* ==========================================================================

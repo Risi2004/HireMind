@@ -415,3 +415,35 @@
   justify-content: flex-end;
   background: rgba(7, 12, 24, 0.65);
 }
+
+@media (max-width: 640px) {
+  .int-toolbar__left {
+    width: 100%;
+  }
+
+  .int-toolbar__left .admin-search-input-wrap {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .int-details-backdrop {
+    padding: 0.75rem;
+  }
+
+  .int-details-modal__header,
+  .int-details-modal__body,
+  .int-details-modal__footer {
+    padding: 1rem;
+  }
+
+  .int-convo-bubble--ai {
+    margin-right: 0.5rem;
+  }
+
+  .int-convo-bubble--candidate {
+    margin-left: 0.5rem;
+  }
+}
+

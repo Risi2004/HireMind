@@ -1164,16 +1164,34 @@
 }
 
 @media (max-width: 480px) {
+  .dash-header {
+    padding: 0 0.85rem;
+    height: 56px;
+  }
+
+  .dash-logo {
+    height: 32px;
+  }
+
   .dash-welcome__title {
-    font-size: 1.65rem;
+    font-size: 1.45rem;
+  }
+
+  .dash-hero-card {
+    padding: 1.25rem 1rem;
+    border-radius: 18px;
   }
 
   .dash-hero-card__headline {
-    font-size: 1.55rem;
+    font-size: 1.4rem;
   }
 
   .dash-pill-badge {
     font-size: 0.68rem;
     padding: 0.25rem 0.55rem;
+  }
+
+  .dash-workspace {
+    padding: 0.75rem 0.75rem 2rem;
   }
 }
