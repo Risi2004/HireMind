@@ -173,7 +173,7 @@
 
 .access-gate-features {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 32px;
   text-align: left;
@@ -181,7 +181,7 @@
 
 @media (max-width: 580px) {
   .access-gate-features {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

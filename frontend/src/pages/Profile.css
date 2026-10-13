@@ -642,7 +642,7 @@
    ========================================================================== */
 .prof-middle-grid {
   display: grid;
-  grid-template-columns: 1fr 0.9fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -1173,7 +1173,7 @@
 /* Tablets (<= 1024px) */
 @media (max-width: 1024px) {
   .prof-middle-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .prof-card--connected {
@@ -1223,7 +1223,7 @@
   }
 
   .prof-middle-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
   }
 
@@ -1885,4 +1885,42 @@
 
 .prof-danger-btn:active {
   transform: translateY(0);
+}
+
+/* ==========================================================================
+   RESPONSIVE: SECURITY & DANGER ZONE CARDS
+   ========================================================================== */
+@media (max-width: 768px) {
+  .prof-card--mfa .prof-card-header,
+  .prof-card--danger .prof-card-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .prof-card--mfa .prof-card-title-group,
+  .prof-card--danger .prof-card-title-group {
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .prof-mfa-title-row {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+
+  .prof-mfa-actions-wrap {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .prof-mfa-action-btn {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .prof-danger-btn {
+    justify-content: center;
+    width: 100%;
+  }
 }

@@ -6,20 +6,20 @@
 /* Summary Grid */
 .pilot-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.15rem;
   margin-bottom: 1.5rem;
 }
 
 @media (max-width: 1024px) {
   .pilot-summary-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 600px) {
   .pilot-summary-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -554,3 +554,55 @@
   }
 }
 
+
+/* ==========================================================================
+   RESPONSIVE: PAGE HEADER & TABLE TOOLBAR (tablet / mobile)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .admin-page-header {
+    margin-bottom: 1.25rem;
+  }
+
+  .admin-page-title {
+    flex-wrap: wrap;
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  .admin-page-title > span:last-child {
+    white-space: nowrap;
+  }
+
+  .admin-page-subtitle {
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--admin-text-muted);
+  }
+
+  .admin-page-header > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .pilot-summary-grid ~ .admin-table-container > div:first-child > div:first-child > button {
+    white-space: nowrap;
+  }
+
+  .pilot-summary-grid ~ .admin-table-container > div:first-child > div:last-child {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .pilot-summary-grid ~ .admin-table-container > div:first-child {
+    padding: 12px !important;
+  }
+
+  .pilot-summary-grid ~ .admin-table-container > div:first-child > div:first-child > button {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+  }
+}

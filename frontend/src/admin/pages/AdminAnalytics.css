@@ -121,26 +121,26 @@
 /* 6 KPI Cards Grid */
 .an-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
 @media (max-width: 1400px) {
   .an-kpi-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 768px) {
   .an-kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 500px) {
   .an-kpi-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -260,33 +260,33 @@
 /* Charts Grid Layouts */
 .an-charts-row-2col {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 1.25rem;
   margin-bottom: 1.5rem;
 }
 
 @media (max-width: 1080px) {
   .an-charts-row-2col {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 .an-charts-row-3col {
   display: grid;
-  grid-template-columns: 1fr 1.2fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
   gap: 1.25rem;
   margin-bottom: 1.5rem;
 }
 
 @media (max-width: 1200px) {
   .an-charts-row-3col {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 
 @media (max-width: 768px) {
   .an-charts-row-3col {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -680,20 +680,27 @@
 /* Pilot Highlights (5 KPI Stat Chips) */
 .an-pilot-stats-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 2rem;
 }
 
 @media (max-width: 1024px) {
   .an-pilot-stats-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
   .an-pilot-stats-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .an-pilot-stats-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -885,5 +892,71 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   RESPONSIVE: PILOT SECTION & FUNNEL
+   ========================================================================== */
+@media (max-width: 640px) {
+  .an-pilot-section {
+    padding: 1.15rem 1rem;
+  }
+
+  .an-pilot-title-group {
+    align-items: flex-start;
+  }
+
+  .an-pilot-icon-badge {
+    flex-shrink: 0;
+  }
+
+  .an-funnel-card {
+    padding: 1rem 0.85rem;
+  }
+
+  .an-funnel-header {
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+  }
+
+  .an-funnel-stage-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+    padding: 0.85rem 0.9rem;
+  }
+
+  .an-funnel-stage-info {
+    gap: 0.7rem;
+    align-items: flex-start;
+  }
+
+  .an-funnel-stage-number {
+    flex-shrink: 0;
+  }
+
+  .an-funnel-stage-metrics {
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-left: calc(26px + 0.7rem);
+  }
+
+  .an-funnel-stage-metrics > div:first-child {
+    text-align: left !important;
+  }
+
+  .an-funnel-stage-count {
+    font-size: 15px;
+  }
+
+  .an-funnel-connector {
+    flex-wrap: wrap;
+    text-align: center;
+  }
+
+  .an-date-pill {
+    white-space: nowrap;
+    padding: 6px 10px;
   }
 }

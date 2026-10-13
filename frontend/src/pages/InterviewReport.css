@@ -183,7 +183,7 @@
 /* ROW 1: TOP GRID */
 .rep-grid-top {
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 22px;
 }
 
@@ -352,7 +352,7 @@
 
 .rep-bar-row {
   display: grid;
-  grid-template-columns: 140px 1fr 45px;
+  grid-template-columns: 140px minmax(0, 1fr) 45px;
   align-items: center;
   gap: 14px;
 }
@@ -406,7 +406,7 @@
 /* Technical Highlights (STRONGEST / NEEDS ATTENTION) */
 .rep-tech-highlights {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   margin-top: 4px;
 }
@@ -449,7 +449,7 @@
    ========================================================================== */
 .rep-grid-bottom {
   display: grid;
-  grid-template-columns: 460px 1fr;
+  grid-template-columns: 460px minmax(0, 1fr);
   gap: 22px;
   align-items: start;
 }
@@ -536,7 +536,7 @@
 /* Media Row (Dynamic Transcript Card) */
 .rep-media-row {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -792,15 +792,20 @@
 /* Tablet (851px - 1200px) */
 @media (max-width: 1200px) {
   .rep-grid-top {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .rep-grid-bottom {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .rep-media-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rep-col-left,
+  .rep-col-right {
+    min-width: 0;
   }
 }
 
@@ -829,11 +834,27 @@
   }
 
   .rep-media-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rep-card,
+  .rep-card--transcript,
+  .rep-card--trend {
+    padding: 18px 16px;
+  }
+
+  .rep-transcript-header,
+  .rep-trend-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .rep-transcript-actions {
+    margin-left: auto;
   }
 
   .rep-bar-row {
-    grid-template-columns: 110px 1fr 35px;
+    grid-template-columns: 110px minmax(0, 1fr) 35px;
     gap: 8px;
   }
 }
@@ -858,7 +879,7 @@
   }
 
   .rep-tech-highlights {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .rep-time-pills {

@@ -365,7 +365,7 @@
 
 .your-field__segment {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   width: 100%;
   height: 40px;
   overflow: hidden;
@@ -428,8 +428,8 @@
   .your-field__card {
     width: 100%;
     min-height: 0;
-    margin-top: 3.5rem;
-    margin-bottom: 1.5rem;
+    margin-top: 0;
+    margin-bottom: 0;
   }
 
   .your-field__form {
@@ -452,7 +452,7 @@
 @media (max-width: 480px) {
   .your-field__segment {
     height: auto;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .your-field__option {
