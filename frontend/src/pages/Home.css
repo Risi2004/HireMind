@@ -701,7 +701,7 @@
 .hm-cockpit__body {
   padding: 1.75rem 2rem 2.25rem;
   display: grid;
-  grid-template-columns: 1.25fr 1fr;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: 2rem;
   background: rgba(8, 18, 36, 0.7);
   backdrop-filter: blur(12px);
@@ -963,7 +963,7 @@
 
 .hm-journey-grid {
   display: grid;
-  grid-template-columns: 1.1fr 1fr;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: 3rem;
   align-items: center;
 }
@@ -1131,7 +1131,7 @@
    ========================================================================== */
 .hm-bento-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.75rem;
 }
 
@@ -1257,7 +1257,7 @@
 
 .hm-pricing-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2rem;
   align-items: stretch;
 }
@@ -1373,14 +1373,18 @@
 .hm-plan-features li {
   font-size: 0.9rem;
   color: #cbd5e1;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.65rem;
+  display: block;
+  position: relative;
+  padding-left: 1.4rem;
+  line-height: 1.5;
 }
 
 .hm-check {
   color: var(--hm-text-muted);
   font-weight: 700;
+  position: absolute;
+  left: 0;
+  top: 0;
 }
 
 .hm-check--glow {
@@ -1421,7 +1425,7 @@
    ========================================================================== */
 .hm-testimonials-grid {
   display: grid;
-  grid-template-columns: 1.15fr 1fr;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 3rem;
   align-items: flex-start;
 }
@@ -1601,7 +1605,7 @@
 
 .hm-form-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
 }
 
@@ -1815,7 +1819,7 @@
 
 .hm-footer__top {
   display: grid;
-  grid-template-columns: 1.25fr 2fr;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 2fr);
   gap: 4rem;
   margin-bottom: 3.5rem;
 }
@@ -1837,7 +1841,7 @@
 
 .hm-footer__links-group {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 2rem;
 }
 
@@ -1897,19 +1901,19 @@
    ========================================================================== */
 @media (max-width: 1024px) {
   .hm-cockpit__body {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .hm-journey-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .hm-bento-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .hm-pricing-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     max-width: 480px;
     margin: 0 auto;
   }
@@ -1923,12 +1927,12 @@
   }
 
   .hm-testimonials-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2.5rem;
   }
 
   .hm-footer__top {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 3rem;
   }
 }
@@ -1968,11 +1972,11 @@
   }
 
   .hm-bento-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .hm-form-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .hm-hero__cta-group {
@@ -2017,7 +2021,7 @@
   }
 
   .hm-footer__links-group {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 2rem 1.5rem;
   }
 
@@ -2097,7 +2101,7 @@
     padding: 2rem 1.25rem;
   }
 
-  .hm-billing-toggle {
+  .hm-billing-toggle-wrapper {
     padding: 3px;
     max-width: 100%;
     width: 100%;
@@ -2105,9 +2109,74 @@
 
   .hm-toggle-btn {
     font-size: 0.82rem;
-    padding: 0.45rem 0.75rem;
+    padding: 0.45rem 0.6rem;
     flex: 1;
     justify-content: center;
+    white-space: nowrap;
+    gap: 0.35rem;
+  }
+
+  .hm-discount-pill {
+    font-size: 0.66rem;
+    padding: 0.1rem 0.4rem;
+    white-space: nowrap;
+  }
+
+  .hm-section {
+    padding: 4rem 0;
+  }
+
+  .hm-trust-companies {
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+    row-gap: 0.35rem;
+  }
+
+  .hm-trust-companies > span {
+    flex-basis: 100%;
+  }
+
+  .hm-footer__status {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .hm-trust-strip {
+    padding: 1.1rem 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .hm-audio-studio__header {
+    gap: 0.75rem;
+  }
+
+  .hm-audio-toggle {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .hm-audio-studio__footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  .hm-display-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    text-align: center;
+  }
+
+  .hm-feedback-box {
+    padding: 1.5rem 1.15rem;
+  }
+
+  .hm-feedback-box__header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
   }
 
   .hm-reviews-vertical-container {
@@ -2195,7 +2264,7 @@
   }
 
   .hm-footer__links-group {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 2rem;
   }
 

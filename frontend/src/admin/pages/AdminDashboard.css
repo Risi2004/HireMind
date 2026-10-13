@@ -6,20 +6,20 @@
 /* Top 8-Statistic Cards Grid */
 .dash-stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.15rem;
   margin-bottom: 1.75rem;
 }
 
 @media (max-width: 1280px) {
   .dash-stat-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
   .dash-stat-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -205,14 +205,14 @@
 
 .pilot-progress-card__stats-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
 @media (max-width: 768px) {
   .pilot-progress-card__stats-row {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -309,14 +309,14 @@
    ========================================================================== */
 .dash-charts-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 1.5rem;
   margin-bottom: 1.75rem;
 }
 
 @media (max-width: 1023px) {
   .dash-charts-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -494,14 +494,14 @@
    ========================================================================== */
 .dash-content-split {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 1.5rem;
   margin-bottom: 1.75rem;
 }
 
 @media (max-width: 1023px) {
   .dash-content-split {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -587,20 +587,20 @@
    ========================================================================== */
 .system-status-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.15rem;
   margin-bottom: 1.5rem;
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 1279px) {
   .system-status-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 560px) {
   .system-status-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -625,6 +625,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .system-status-card__name-group {
@@ -651,6 +653,7 @@
 }
 
 .system-status-pill {
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 5px;

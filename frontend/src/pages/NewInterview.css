@@ -2243,6 +2243,7 @@
     grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
     gap: 20px;
     padding: 20px 24px;
+    align-content: start;
   }
 
   .new-int-col--pipeline {
@@ -2280,6 +2281,12 @@
     width: 100%;
   }
 
+  .new-int-col--setup,
+  .new-int-col--pipeline {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
   .new-int-col.is-mobile-hidden {
     display: none;
   }
@@ -2304,6 +2311,53 @@
   .new-int-gauge-circle {
     width: 240px;
     height: 240px;
+  }
+}
+
+/* Phones (<= 640px): keep the top bar on one line, quota pill on its own row */
+@media (max-width: 640px) {
+  .new-int-nav {
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    padding: 10px 12px;
+  }
+
+  .new-int-nav__left {
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .new-int-nav__title-group {
+    min-width: 0;
+  }
+
+  .new-int-nav__title {
+    max-width: 100%;
+  }
+
+  .new-int-nav__right {
+    display: contents;
+  }
+
+  .new-int-nav__right > * {
+    flex-shrink: 0;
+  }
+
+  .new-int-nav__right > span {
+    order: 10;
+    flex: 1 0 100%;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .new-int-nav__plan-pill-btn span {
+    display: none;
+  }
+
+  .new-int-mobile-tab {
+    padding: 8px 6px;
+    white-space: nowrap;
   }
 }
 
@@ -3067,7 +3121,7 @@
     font-size: 22px;
   }
   .new-int-plan-objectives-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .new-int-plan-stage-row {
     flex-direction: column;
@@ -3106,13 +3160,13 @@
 
 .new-int-mode-cards-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
 @media (max-width: 820px) {
   .new-int-mode-cards-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

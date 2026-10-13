@@ -150,20 +150,20 @@
    ========================================================================== */
 .ai-services-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.25rem;
   margin-bottom: 1.75rem;
 }
 
 @media (max-width: 1200px) {
   .ai-services-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
   .ai-services-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -269,7 +269,7 @@
 /* Service Metrics 3-Item Strip */
 .ai-service-metrics {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
   padding-top: 0.85rem;
   border-top: 1px solid var(--admin-border-subtle);
@@ -307,20 +307,20 @@
 
 .ai-runtime-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.25rem;
   margin-top: 1.25rem;
 }
 
 @media (max-width: 1100px) {
   .ai-runtime-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 600px) {
   .ai-runtime-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -383,26 +383,26 @@
 
 .ai-usage-kpis-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
 @media (max-width: 1300px) {
   .ai-usage-kpis-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 680px) {
   .ai-usage-kpis-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 440px) {
   .ai-usage-kpis-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -558,4 +558,22 @@
   font-size: 12px;
   color: var(--admin-text-muted);
   margin: 2px 0 0 0;
+}
+
+/* Small screens: keep the hourly bar chart inside its card */
+@media (max-width: 640px) {
+  .ai-chart-bars-wrap {
+    gap: 0.25rem;
+    padding: 1rem 0 0.5rem;
+  }
+
+  .ai-chart-bar-col {
+    min-width: 0;
+  }
+
+  .ai-chart-label,
+  .ai-chart-val {
+    font-size: 9px;
+    white-space: nowrap;
+  }
 }

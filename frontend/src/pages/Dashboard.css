@@ -1091,26 +1091,38 @@
    ========================================================================== */
 @media (max-width: 1200px) {
   .dash-workspace {
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: 260px minmax(0, 1fr);
     gap: 1.15rem;
+    align-content: start;
   }
 
   .dash-insights-col {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 1.25rem;
   }
 }
 
 @media (max-width: 900px) {
   .dash-workspace {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     padding: 1rem 1rem 2rem;
+    align-content: start;
+  }
+
+  /* Lead with the welcome / start-interview column on stacked layouts */
+  .dash-main-col {
+    order: 1;
   }
 
   .dash-sidebar {
+    order: 2;
     max-height: 380px;
+  }
+
+  .dash-insights-col {
+    order: 3;
   }
 
   .dash-history-scroll {
@@ -1118,7 +1130,7 @@
   }
 
   .dash-insights-col {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

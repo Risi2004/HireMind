@@ -173,8 +173,8 @@
 @media (max-width: 640px) {
   .about-you__card {
     width: 100%;
-    margin-top: 3.5rem;
-    margin-bottom: 1.5rem;
+    margin-top: 0;
+    margin-bottom: 0;
   }
 
   .about-you__dropzone {

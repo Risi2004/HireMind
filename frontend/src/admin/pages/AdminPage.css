@@ -129,14 +129,14 @@
 /* Two Column Layout */
 .admin-grid-2col {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 1.5rem;
   margin-bottom: 1.5rem;
 }
 
 @media (max-width: 1023px) {
   .admin-grid-2col {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -451,13 +451,13 @@
 
 @media (max-width: 1023px) {
   .admin-kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
   .admin-kpi-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.85rem;
   }
 
@@ -497,5 +497,43 @@
 
   .admin-btn {
     justify-content: center;
+  }
+
+  /* Shared search box used by Users / Interviews toolbars */
+  .users-search-box {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .int-toolbar,
+  .int-toolbar__left {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .int-toolbar__left > div {
+    width: 100%;
+  }
+
+  .int-toolbar__left > div > .admin-select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Tables scroll horizontally instead of crushing columns */
+  .admin-table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .admin-table td {
+    padding: 0.8rem 0.85rem;
+  }
+
+  .admin-table th {
+    padding: 0.75rem 0.85rem;
   }
 }
