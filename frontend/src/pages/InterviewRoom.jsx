@@ -71,7 +71,12 @@ const SILENT_WAV = 'data:audio/wav;base64,UklGRsQAAABXQVZFZm10IBAAAAABAAEAQB8AAI
 // Voice activity detection: average analyser level that counts as speech,
 // and how long the candidate must stay quiet before their answer is sent
 const VAD_SPEECH_LEVEL = 18
-const SILENCE_AUTO_SEND_MS = 2500
+const SILENCE_AUTO_SEND_MS = 3000
+// Whisper is the accurate transcript; give it time before falling back to the browser's live text
+// (the backend aborts its AI-service call at 35s)
+const WHISPER_TIMEOUT_MS = 25000
+// How often the recording so far is uploaded for incremental transcription while speaking
+const PARTIAL_STT_INTERVAL_MS = 4000
 // After this much silence we start transcribing the recording in the background,
 // so the accurate (Whisper) transcript is usually ready when the answer is sent
 const SPECULATIVE_STT_DELAY_MS = 1000
@@ -79,26 +84,104 @@ const monotonicNow = () => performance.now()
 
 const countWords = (text) => (text || '').trim().split(/\s+/).filter(Boolean).length
 
-// Whisper sometimes "hears" these on near-silent audio
+// Whisper sometimes "hears" these on near-silent audio or background noise
 const WHISPER_HALLUCINATION = /^(thanks?( you)?( so much)?( for watching)?|you|bye|okay|\.+)[.!]*$/i
 
-// Prefer the server (Whisper) transcript: it is far more accurate than the browser's
-// live captions. Fall back to the live text if Whisper looks truncated or hallucinated.
+const isHallucinationOrLoop = (text) => {
+  if (!text) return true
+  const trimmed = text.trim()
+  if (WHISPER_HALLUCINATION.test(trimmed)) return true
+  if (/take a little bit of water/i.test(trimmed)) return true
+  if (/(subtitles? by|closed captioning|translated by)/i.test(trimmed)) return true
+  // Check for repeated phrases (e.g. "phrase phrase phrase")
+  const words = trimmed.split(/\s+/)
+  if (words.length >= 6) {
+    for (let n = 2; n <= 8; n++) {
+      for (let i = 0; i <= words.length - n; i++) {
+        const phrase = words.slice(i, i + n).join(' ').toLowerCase()
+        if (phrase.length > 7) {
+          const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+          const matches = (trimmed.match(regex) || []).length
+          if (matches >= 3 && matches * phrase.length > trimmed.length * 0.4) {
+            return true
+          }
+        }
+      }
+    }
+  }
+  return false
+}
+
+// Prefer Whisper for high accuracy on technical terms, casing, and punctuation.
+// Fall back to live browser speech recognition if Whisper is empty or hallucinated.
 const chooseBestTranscript = (liveText, whisperText) => {
   const live = (liveText || '').trim()
   const whisper = (whisperText || '').trim()
-  if (!whisper || WHISPER_HALLUCINATION.test(whisper)) return live
+  if (!whisper || isHallucinationOrLoop(whisper)) return live
   if (!live) return whisper
   const liveWords = countWords(live)
   const whisperWords = countWords(whisper)
-  if (whisperWords < liveWords * 0.5 || whisperWords > liveWords * 2 + 8) return live
+  // Only reject Whisper if it captured less than a third of the words said
+  if (whisperWords < Math.max(1, Math.floor(liveWords * 0.35))) return live
   return whisper
 }
 
-// Browser speech recognition locale: the candidate's own English variant if they have one
+// Technical speech normalization: corrects common phonetic mishearings in tech interviews
+const correctTechTerms = (text) => {
+  if (!text) return ''
+  let cleaned = text
+  
+  const rules = [
+    // Only rewrite phrases that cannot be ordinary English ("go back and forth" must stay intact)
+    [/\b(on\s*stack|fall\s*stack|fool\s*stack)\s*developer\b/gi, 'full-stack developer'],
+    [/\b(fall\s*stack|fool\s*stack)\b/gi, 'full-stack'],
+    [/\bfront\s+and\s+back\s+and\b/gi, 'frontend and backend'],
+    [/\bfront\s+and\s+(developer|development|engineer|engineering|framework|frameworks)\b/gi, 'frontend $1'],
+    [/\bback\s+and\s+(developer|development|engineer|engineering|framework|frameworks)\b/gi, 'backend $1'],
+    [/\b(react\s*js|reactjs)\b/gi, 'React'],
+    [/\b(next\s*js|nextjs)\b/gi, 'Next.js'],
+    [/\b(node\s*js|nodejs)\b/gi, 'Node.js'],
+    [/\b(java\s*script)\b/gi, 'JavaScript'],
+    [/\b(type\s*script)\b/gi, 'TypeScript'],
+    [/\b(mongo\s*db)\b/gi, 'MongoDB'],
+    [/\b(post\s*gres|postgress|post\s*grey)\b/gi, 'PostgreSQL'],
+    [/\b(rest\s*api|rest\s*apis)\b/gi, 'REST API'],
+    [/\b(fast\s*api)\b/gi, 'FastAPI'],
+    [/\b(git\s*hub)\b/gi, 'GitHub'],
+    [/\b(ws\s*o\s*2|wso\s*2|ws02)\b/gi, 'WSO2'],
+    [/\b(cooper\s*nettes|cube\s*nettes|coober\s*nettes)\b/gi, 'Kubernetes'],
+    [/\b(micro\s*services)\b/gi, 'microservices'],
+  ]
+
+  for (const [pattern, replacement] of rules) {
+    cleaned = cleaned.replace(pattern, replacement)
+  }
+
+  // Capitalize first letter of sentences
+  cleaned = cleaned.replace(/(^\s*|[.?!]\s+)([a-z])/g, (_, p1, p2) => p1 + p2.toUpperCase())
+  return cleaned
+}
+
+// Browser speech recognition locale: detect candidate's optimal acoustic dialect
 const getRecognitionLang = () => {
   const langs = typeof navigator !== 'undefined' ? (navigator.languages || [navigator.language]) : []
-  return langs.find((l) => /^en-[A-Z]{2}$/i.test(l || '')) || 'en-US'
+  const explicitDialect = langs.find((l) => /^en-[A-Z]{2}$/i.test(l || ''))
+  if (explicitDialect && explicitDialect.toLowerCase() !== 'en-us') {
+    return explicitDialect
+  }
+
+  // Detect region from timezone for optimal acoustic phoneme matching
+  try {
+    const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone || '').toLowerCase()
+    if (tz.includes('calcutta') || tz.includes('kolkata') || tz.includes('colombo') || tz.includes('delhi') || tz.includes('mumbai') || tz.includes('chennai')) {
+      return 'en-IN'
+    }
+    if (tz.includes('london')) return 'en-GB'
+    if (tz.includes('sydney') || tz.includes('melbourne')) return 'en-AU'
+    if (tz.includes('singapore') || tz.includes('kuala_lumpur')) return 'en-SG'
+  } catch {}
+
+  return explicitDialect || 'en-US'
 }
 
 let messageIdCounter = 0
@@ -294,8 +377,7 @@ export default function InterviewRoom() {
             // mic volume picked up the interviewer's own voice through the speakers and
             // cut every question off within a fraction of a second.
 
-            // Volume-based silence detection: used when live speech-to-text gives us
-            // nothing (unsupported browser or recognition service error)
+            // Volume-based silence detection: used only as fallback if speech recognition gives no events
             if (voiceStateRef.current === VOICE_STATES.CANDIDATE_SPEAKING && !isVoiceMutedRef.current) {
               if (avgVol > VAD_SPEECH_LEVEL) {
                 lastSpeechAtRef.current = now
@@ -640,6 +722,11 @@ export default function InterviewRoom() {
   const sessionFinalTranscriptRef = useRef('')
   // Background Whisper transcription started during the silence countdown
   const speculativeSttRef = useRef(null)
+  // Incremental Whisper: one stream id per answer, partial uploads while speaking
+  const sttStreamIdRef = useRef(null)
+  const partialSttTimerRef = useRef(null)
+  const partialSttInFlightRef = useRef(false)
+  const incrementalSttDisabledRef = useRef(false)
   const speculativeTimerRef = useRef(null)
   // Interviewer messages waiting to be spoken after the current one (e.g. feedback, then question)
   const speechQueueRef = useRef([])
@@ -1714,21 +1801,26 @@ export default function InterviewRoom() {
     silenceTimerRef.current = setTimeout(() => {
       resetSilenceDetection()
       const textToSend = (liveTranscriptRef.current || '').trim()
-      if (textToSend && !isVoiceMutedRef.current) {
-        console.log('[VoiceMode] Silence reached, auto-submitting answer:', textToSend)
-        voiceHandlersRef.current.handleCommitCandidateSpeech?.(textToSend)
+      if ((textToSend || hasSpokenRef.current) && !isVoiceMutedRef.current) {
+        console.log('[VoiceMode] 3s silence reached, auto-submitting answer via Whisper STT...')
+        voiceHandlersRef.current.handleCommitCandidateSpeech?.()
       }
     }, SILENCE_AUTO_SEND_MS)
   }
 
   // Send recorded audio to Whisper. Never throws: resolves to '' on any failure.
-  const transcribeRecording = async (audioBlob, timeoutMs) => {
+  // With a streamId, earlier partial uploads of the same answer are reused server-side.
+  const transcribeRecording = async (audioBlob, timeoutMs, { streamId = null, final = true } = {}) => {
     if (!audioBlob || audioBlob.size < 1000) return ''
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
       const formData = new FormData()
+      if (streamId) {
+        formData.append('streamId', streamId)
+        formData.append('final', final ? 'true' : 'false')
+      }
       formData.append('audio', audioBlob, 'candidate_answer.webm')
       const res = await fetch(getApiUrl(`/api/interview/${interviewId}/voice/transcribe`), {
         method: 'POST',
@@ -1740,6 +1832,14 @@ export default function InterviewRoom() {
       })
       if (!res.ok) return ''
       const data = await res.json()
+      if (data.partial && data.incremental === false) {
+        // Hosted STT cannot reuse partial uploads; stop sending them for this interview
+        incrementalSttDisabledRef.current = true
+        if (partialSttTimerRef.current) {
+          clearInterval(partialSttTimerRef.current)
+          partialSttTimerRef.current = null
+        }
+      }
       return data.success === false ? '' : (data.text || '').trim()
     } catch (err) {
       if (err.name !== 'AbortError') console.warn('[VoiceMode] Whisper transcription notice:', err)
@@ -1762,8 +1862,26 @@ export default function InterviewRoom() {
     const audioBlob = new Blob(recordedChunksRef.current.slice(), { type: recorder.mimeType || 'audio/webm' })
     speculativeSttRef.current = {
       words: countWords(liveText),
-      promise: transcribeRecording(audioBlob, 15000),
+      promise: transcribeRecording(audioBlob, WHISPER_TIMEOUT_MS, { streamId: sttStreamIdRef.current }),
     }
+  }
+
+  // While the candidate is still talking, upload the recording so far so the server can
+  // transcribe finished sentences early; the final upload then only covers the last few seconds.
+  const sendPartialTranscription = () => {
+    const recorder = mediaRecorderRef.current
+    const streamId = sttStreamIdRef.current
+    if (
+      partialSttInFlightRef.current ||
+      !streamId ||
+      !recorder ||
+      voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING ||
+      recordedChunksRef.current.length === 0
+    ) return
+    const audioBlob = new Blob(recordedChunksRef.current.slice(), { type: recorder.mimeType || 'audio/webm' })
+    partialSttInFlightRef.current = true
+    transcribeRecording(audioBlob, WHISPER_TIMEOUT_MS, { streamId, final: false })
+      .finally(() => { partialSttInFlightRef.current = false })
   }
 
   // Stop recognition + recording WITHOUT submitting anything (mute, pause, replay, end)
@@ -1777,6 +1895,10 @@ export default function InterviewRoom() {
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = null
+    }
+    if (partialSttTimerRef.current) {
+      clearInterval(partialSttTimerRef.current)
+      partialSttTimerRef.current = null
     }
 
     if (recognitionRef.current) {
@@ -1806,9 +1928,9 @@ export default function InterviewRoom() {
     return Math.max(1, Math.round((monotonicNow() - recordingStartedAtRef.current) / 1000))
   }
 
-  // Finalize speech and commit to transcript / backend
+  // Finalize speech and commit to transcript / backend using Whisper STT
   const handleCommitCandidateSpeech = (explicitText = null) => {
-    // Silence timer, volume detector and "Send Now" can race; only the first commit counts
+    // Silence timer, volume detector and "Done Answering" can race; only the first commit counts
     if (voiceStateRef.current !== VOICE_STATES.CANDIDATE_SPEAKING) return
 
     const liveText = (explicitText !== null ? explicitText : (liveTranscriptRef.current || '')).trim()
@@ -1816,40 +1938,62 @@ export default function InterviewRoom() {
     const recorder = mediaRecorderRef.current
     const mimeType = recorder?.mimeType || 'audio/webm'
     const hasRecording = Boolean(recorder && recorder.state !== 'inactive')
+    const streamId = sttStreamIdRef.current
 
-    // A background transcription is reusable if the candidate hasn't said more since it started
+    if (!hasRecording && !liveText) {
+      stopCandidateCapture()
+      updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+      return
+    }
+
+    // A speculative transcription running during the 3s silence countdown can be reused
     const speculative = speculativeSttRef.current
     const speculativeUsable = Boolean(speculative && liveText && countWords(liveText) <= speculative.words + 1)
 
     if (hasRecording && !speculativeUsable) {
-      // Detach the recorder so stopCandidateCapture lets it finish and flush its audio
       mediaRecorderRef.current = null
-    }
-    stopCandidateCapture()
-
-    if (!hasRecording && !speculativeUsable) {
-      finalizeCandidateSpeech(liveText, durationSeconds)
-      return
     }
 
     updateVoiceState(VOICE_STATES.TRANSCRIBING)
 
-    const whisperPromise = speculativeUsable
+    const audioBlobPromise = speculativeUsable
       ? speculative.promise
       : new Promise((resolve) => {
+          if (!recorder) return resolve(null)
           recorder.onstop = () => resolve(new Blob(recordedChunksRef.current, { type: mimeType }))
           try {
             recorder.stop()
           } catch {
-            resolve(null)
+            resolve(new Blob(recordedChunksRef.current, { type: mimeType }))
           }
-        }).then((audioBlob) => transcribeRecording(audioBlob, liveText ? 8000 : 30000))
+        }).then((audioBlob) => transcribeRecording(audioBlob, WHISPER_TIMEOUT_MS, { streamId }))
 
-    whisperPromise.then((whisperText) => {
-      if (isCompletedRef.current || isTerminatedRef.current) return
-      if (voiceStateRef.current !== VOICE_STATES.TRANSCRIBING) return
-      voiceHandlersRef.current.finalizeCandidateSpeech?.(chooseBestTranscript(liveText, whisperText), durationSeconds)
-    })
+    stopCandidateCapture()
+
+    audioBlobPromise
+      .then((whisperText) => {
+        if (isCompletedRef.current || isTerminatedRef.current) return
+        if (voiceStateRef.current !== VOICE_STATES.TRANSCRIBING) return
+        const cleanWhisper = (whisperText || '').trim()
+        const bestText = chooseBestTranscript(liveText, cleanWhisper)
+        const finalAccurate = correctTechTerms(bestText)
+        if (finalAccurate) {
+          updateLiveTranscript(finalAccurate)
+          voiceHandlersRef.current.finalizeCandidateSpeech?.(finalAccurate, durationSeconds)
+        } else {
+          console.warn('[VoiceMode] Detected no clear speech in recording.')
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+        }
+      })
+      .catch((err) => {
+        console.error('[VoiceMode] Whisper transcription error, using live transcript:', err)
+        if (liveText) {
+          const fallbackAccurate = correctTechTerms(liveText)
+          voiceHandlersRef.current.finalizeCandidateSpeech?.(fallbackAccurate, durationSeconds)
+        } else {
+          updateVoiceState(VOICE_STATES.WAITING_FOR_CANDIDATE)
+        }
+      })
   }
 
   // Start continuous listening when candidate's turn begins
@@ -1890,7 +2034,7 @@ export default function InterviewRoom() {
       })
       setIsAudioOn(true)
 
-      // 1. Web Speech API for real-time live typing directly into the UI
+      // 1. Web Speech API for real-time live typing directly into the candidate speech bubble
       const SpeechRecognition = typeof window !== 'undefined'
         ? (window.SpeechRecognition || window.webkitSpeechRecognition)
         : null
@@ -1902,6 +2046,22 @@ export default function InterviewRoom() {
           recognition.interimResults = true
           recognition.lang = getRecognitionLang()
           recognition.maxAlternatives = 1
+
+          const SpeechGrammarList = window.SpeechGrammarList || window.webkitSpeechGrammarList
+          if (SpeechGrammarList) {
+            try {
+              const grammarList = new SpeechGrammarList()
+              const techTokens = [
+                'full-stack developer', 'frontend', 'backend', 'React', 'Next.js', 'Node.js',
+                'JavaScript', 'TypeScript', 'MongoDB', 'PostgreSQL', 'Express', 'Python',
+                'FastAPI', 'Docker', 'Kubernetes', 'REST API', 'GraphQL', 'microservices',
+                'WSO2', 'AWS', 'Git', 'GitHub', 'CI/CD', 'software engineer'
+              ]
+              const grammar = '#JSGF V1.0; grammar tech; public <tech> = ' + techTokens.join(' | ') + ' ;'
+              grammarList.addFromString(grammar, 1)
+              recognition.grammars = grammarList
+            } catch {}
+          }
 
           recognition.onresult = (event) => {
             if (recognitionRef.current !== recognition || isVoiceMutedRef.current) return
@@ -1917,14 +2077,17 @@ export default function InterviewRoom() {
               }
             }
             sessionFinalTranscriptRef.current = sessionFinal.trim()
-            // Chrome restarts recognition after pauses; keep what was said before the restart
+            // Keep what was said across browser restarts
             const combined = [committedTranscriptRef.current, sessionFinal, interim]
               .join(' ')
               .replace(/\s+/g, ' ')
               .trim()
             if (combined) {
-              updateLiveTranscript(combined)
-              // Reset and restart the silence auto-send timer
+              const accurateCombined = correctTechTerms(combined)
+              updateLiveTranscript(accurateCombined)
+              hasSpokenRef.current = true
+              lastSpeechAtRef.current = performance.now()
+              // Reset and restart the 3s silence auto-send timer
               startSilenceDetection()
             }
           }
@@ -1932,10 +2095,8 @@ export default function InterviewRoom() {
           recognition.onerror = (e) => {
             if (recognitionRef.current !== recognition) return
             if (e.error === 'no-speech' || e.error === 'aborted') return
-            console.warn('[WebSpeech] Recognition unavailable, using recorded audio instead:', e.error)
-            // Fatal (blocked, offline, unsupported): fall back to volume detection + server transcription
+            console.warn('[WebSpeech] SpeechRecognition notice:', e.error)
             speechRecognitionOkRef.current = false
-            recognitionRef.current = null
           }
 
           recognition.onend = () => {
@@ -1955,16 +2116,18 @@ export default function InterviewRoom() {
           }
 
           recognitionRef.current = recognition
-          recognition.start()
-          speechRecognitionOkRef.current = true
+          try {
+            recognition.start()
+          } catch (startErr) {
+            console.warn('[WebSpeech] Recognition start notice:', startErr)
+          }
         } catch (recErr) {
-          console.warn('[WebSpeech] SpeechRecognition start notice:', recErr)
-          speechRecognitionOkRef.current = false
-          recognitionRef.current = null
+          console.warn('[WebSpeech] SpeechRecognition init notice:', recErr)
         }
       }
 
-      // 2. MediaRecorder: server-side transcription fallback when live typing captures nothing
+      // 2. Direct Whisper Audio Recording (MediaRecorder records audio for accurate Whisper transcription)
+      speechRecognitionOkRef.current = true
       try {
         if (typeof MediaRecorder !== 'undefined' && stream) {
           let mimeType = 'audio/webm;codecs=opus'
@@ -1983,9 +2146,13 @@ export default function InterviewRoom() {
           }
           mediaRecorderRef.current = recorder
           recorder.start(250)
+          sttStreamIdRef.current = createMessageId('stt')
+          if (!incrementalSttDisabledRef.current) {
+            partialSttTimerRef.current = setInterval(sendPartialTranscription, PARTIAL_STT_INTERVAL_MS)
+          }
         }
       } catch (recorderErr) {
-        console.warn('[VoiceMode] MediaRecorder fallback init note:', recorderErr)
+        console.warn('[VoiceMode] MediaRecorder init note:', recorderErr)
       }
 
       recordingStartedAtRef.current = monotonicNow()
@@ -2741,7 +2908,7 @@ export default function InterviewRoom() {
                 >
                   <img src={audioIcon} alt="Mic" className="int-room-mic-status-icon" />
                   <span>{isAudioOn && !isVoiceMuted ? 'Mic Active' : 'Muted'}</span>
-                  {isAudioOn && !isVoiceMuted && audioVolume > 5 && <span className="int-room-mic-wave-pulse" />}
+                  <span className={`int-room-mic-dot ${isAudioOn && !isVoiceMuted ? 'is-active' : 'is-muted'}`} />
                 </button>
               </div>
             </div>
@@ -2817,7 +2984,7 @@ export default function InterviewRoom() {
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '5px', verticalAlign: '-1px' }}>
                         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
                       </svg>
-                      Finalizing speech transcription...
+                      Processing your answer...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.AI_PROCESSING && (
@@ -2827,7 +2994,7 @@ export default function InterviewRoom() {
                         <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.04Z" />
                         <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.04Z" />
                       </svg>
-                      HireMind AI thinking...
+                      Reviewing your answer...
                     </span>
                   )}
                   {voiceState === VOICE_STATES.ERROR && (
@@ -3018,8 +3185,8 @@ export default function InterviewRoom() {
                 </div>
               ))}
 
-              {/* Real-time candidate speech typing automatically into UI */}
-              {(voiceState === VOICE_STATES.CANDIDATE_SPEAKING || (voiceState === VOICE_STATES.TRANSCRIBING && liveTranscript)) && (
+              {/* Real-time candidate speech status */}
+              {(voiceState === VOICE_STATES.CANDIDATE_SPEAKING || voiceState === VOICE_STATES.TRANSCRIBING) && (
                 <div className="int-room-chat-msg is-candidate is-live-typing">
                   <div className={`int-room-chat-msg__avatar ${user?.avatarUrl ? 'has-image' : ''}`}>
                     {user?.avatarUrl ? (
@@ -3032,8 +3199,8 @@ export default function InterviewRoom() {
                     <div className="int-room-chat-msg__meta">
                       <span className="int-room-chat-msg__sender">{user?.firstName || 'You'}</span>
                       {voiceState === VOICE_STATES.TRANSCRIBING ? (
-                        <span className="int-room-live-speaking-badge">
-                          <span className="int-room-live-speaking-dot" /> Finalizing...
+                        <span className="int-room-live-speaking-badge" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                          <span className="int-room-spinner" style={{ width: '8px', height: '8px', marginRight: '4px', display: 'inline-block' }} /> Processing...
                         </span>
                       ) : silenceCountdown > 0 ? (
                         <span className="int-room-live-speaking-badge" style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', borderColor: 'rgba(234, 179, 8, 0.3)' }}>
@@ -3041,18 +3208,25 @@ export default function InterviewRoom() {
                         </span>
                       ) : (
                         <span className="int-room-live-speaking-badge">
-                          <span className="int-room-live-speaking-dot" /> Speaking...
+                          <span className="int-room-live-speaking-dot" /> Speaking... ({recordingSeconds}s)
                         </span>
                       )}
                       <span className="int-room-chat-msg__time">{formatTimer(secondsElapsed)}</span>
                     </div>
                     <div className="int-room-chat-msg__bubble is-live-speaking-bubble">
                       <p className="int-room-chat-msg__text">
-                        {liveTranscript ? (
-                          liveTranscript
+                        {voiceState === VOICE_STATES.TRANSCRIBING ? (
+                          <span className="int-room-speaking-placeholder" style={{ color: '#38bdf8' }}>
+                            <span className="int-room-spinner" style={{ width: '8px', height: '8px', marginRight: '6px', display: 'inline-block' }} />
+                            {liveTranscript ? liveTranscript : 'Processing your response...'}
+                          </span>
+                        ) : liveTranscript ? (
+                          <span>{liveTranscript}</span>
                         ) : (
                           <span className="int-room-speaking-placeholder">
-                            Listening to your voice... Speak your answer now.
+                            {audioVolume > VAD_SPEECH_LEVEL
+                              ? 'Listening... Speak your answer'
+                              : 'Listening to your voice... Speak naturally, then pause for 3s to auto-send.'}
                           </span>
                         )}
                         <span className="int-room-live-cursor">|</span>
@@ -3174,10 +3348,8 @@ export default function InterviewRoom() {
                     )}
                     {voiceState === VOICE_STATES.TRANSCRIBING && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                        </svg>
-                        Polishing your transcript for accuracy...
+                        <span className="int-room-spinner" style={{ width: '10px', height: '10px', display: 'inline-block' }} />
+                        Processing your answer...
                       </span>
                     )}
                     {voiceState === VOICE_STATES.ERROR && (
@@ -3200,35 +3372,27 @@ export default function InterviewRoom() {
                         Microphone is MUTED. Click Unmute when you are ready to speak your answer.
                       </span>
                     )}
-                    {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown > 0 && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="10" />
-                          <polyline points="12 6 12 12 16 14" />
-                        </svg>
-                        Silence detected. Auto-sending your answer in <strong>{silenceCountdown}s</strong>...
-                      </span>
-                    )}
-                    {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown === 0 && liveTranscript && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                        <span className="int-room-pulse-dot is-red" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
-                        Microphone is LIVE. Speaking... (sends automatically when you pause)
-                      </span>
-                    )}
                     {!isVoiceMuted && voiceState === VOICE_STATES.WAITING_FOR_CANDIDATE && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                         <span className="int-room-pulse-dot is-green" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
                         Your turn. Press <strong>Start Answering</strong> when you are ready, or replay the question.
                       </span>
                     )}
-                    {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && !liveTranscript && silenceCountdown === 0 && (
+                    {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown > 0 && (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                          <line x1="12" y1="19" x2="12" y2="22" />
+                          <circle cx="12" cy="12" r="10" />
+                          <polyline points="12 6 12 12 16 14" />
                         </svg>
-                        Microphone is LIVE and listening. Speak your answer now — press <strong>Done</strong> when you finish.
+                        Silence detected. Auto-submitting in <strong>{silenceCountdown}s</strong>...
+                      </span>
+                    )}
+                    {!isVoiceMuted && voiceState === VOICE_STATES.CANDIDATE_SPEAKING && silenceCountdown === 0 && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <span className="int-room-pulse-dot is-red" style={{ display: 'inline-block', width: '8px', height: '8px' }} />
+                        {liveTranscript
+                          ? 'Microphone is LIVE. Speaking... (auto-sends 3s after you finish talking)'
+                          : 'Microphone is LIVE. Speak your answer (auto-sends 3s after you finish talking).'}
                       </span>
                     )}
                   </div>
@@ -3303,13 +3467,13 @@ export default function InterviewRoom() {
                     </button>
                   )}
 
-                  {/* Done / Send Now: always available while answering (works even if live typing captured nothing) */}
-                  {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (liveTranscript.trim().length > 0 || recordingSeconds >= 2) && (
+                  {/* Done / Send Now: available while answering in voice mode */}
+                  {voiceState === VOICE_STATES.CANDIDATE_SPEAKING && (liveTranscript.trim().length > 0 || recordingSeconds >= 1 || hasSpokenRef.current) && (
                     <button
                       type="button"
                       className="int-room-voice-dock__send-btn"
                       onClick={() => handleCommitCandidateSpeech()}
-                      title="Send answer immediately without waiting for 3s silence"
+                      title="Done speaking — submit answer to interviewer"
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

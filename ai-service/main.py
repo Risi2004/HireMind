@@ -20,6 +20,7 @@ import hmac
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
@@ -39,6 +40,12 @@ app = FastAPI(
     description="Multi-agent interview orchestration layer powered by Google ADK (Agent Development Kit)",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+async def warm_up_speech_model():
+    """Load Whisper in the background so the first voice answer is not slowed by model download."""
+    stt_service_instance.warm_up()
 
 # This service is called server-to-server by the HireMind backend only.
 # Browsers never call it directly, so no cross-origin access is granted.
@@ -478,19 +485,28 @@ async def voice_transcribe_endpoint(
     file: UploadFile = File(...),
     prompt: Optional[str] = Form(None),
     language: Optional[str] = Form(None),
+    stream_id: Optional[str] = Form(None),
+    final: Optional[bool] = Form(True),
 ):
-    """Transcribe candidate speech audio to text using Whisper Large V3 Turbo."""
+    """Transcribe candidate speech audio to text using Whisper Large V3 Turbo.
+
+    stream_id/final enable incremental transcription while the candidate is still speaking.
+    """
     try:
         content = await file.read()
         filename = file.filename or "recording.webm"
         mime_type = file.content_type or "audio/webm"
 
-        result = stt_service_instance.transcribe_audio(
+        # Whisper is CPU-bound; run it off the event loop so other endpoints stay responsive
+        result = await run_in_threadpool(
+            stt_service_instance.transcribe_audio,
             audio_bytes=content,
             filename=filename,
             mime_type=mime_type,
             prompt=prompt,
             language=language,
+            stream_id=(stream_id or "").strip()[:64] or None,
+            final=final is not False,
         )
         if not result.get("success"):
             return {
@@ -505,6 +521,8 @@ async def voice_transcribe_endpoint(
             "text": result["text"],
             "language": result.get("language", "en"),
             "duration": result.get("duration"),
+            "partial": bool(result.get("partial")),
+            "incremental": result.get("incremental", stt_service_instance.provider == "local"),
             "latencyMs": result.get("latencyMs", 0)
         }
     except Exception as e:

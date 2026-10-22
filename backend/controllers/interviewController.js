@@ -2056,7 +2056,20 @@ exports.transcribeCandidateVoice = async (req, res) => {
       mimetype: req.file.mimetype || 'audio/webm',
       prompt: buildTranscriptionPrompt(session),
       language: 'en',
+      // Scoped to the session so two interviews can never share a stream
+      streamId: req.body?.streamId ? `${sessionId}:${String(req.body.streamId).slice(0, 24)}` : '',
+      final: req.body?.final !== 'false',
     });
+
+    if (result.partial) {
+      return res.status(200).json({
+        success: true,
+        partial: true,
+        incremental: result.incremental,
+        text: result.text,
+        latencyMs: result.latencyMs,
+      });
+    }
 
     if (!result.success) {
       return res.status(400).json({
