@@ -30,6 +30,12 @@ GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 
 # Voice Interview Configuration (STT & TTS)
 STT_MODEL = os.getenv("STT_MODEL", "openai/whisper-large-v3-turbo")
+# "local" runs faster-whisper on this machine (STT_MODEL = model size, e.g. large-v3-turbo);
+# "remote" sends audio to OpenRouter's hosted Whisper (STT_MODEL = provider model id).
+# Use "remote" on small hosts (e.g. Render free: 512 MB RAM, a fraction of a CPU).
+STT_PROVIDER = os.getenv("STT_PROVIDER", "local").strip().lower()
+# Local only: "auto" uses an NVIDIA GPU when available (falls back to CPU), "cpu" forces CPU
+STT_DEVICE = os.getenv("STT_DEVICE", "auto").strip().lower()
 TTS_MODEL = os.getenv("TTS_MODEL", "gemini-3.8-flash-lite-tts")
 TTS_VOICE = os.getenv("TTS_VOICE", "Puck")
 

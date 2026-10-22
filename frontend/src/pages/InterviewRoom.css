@@ -726,13 +726,24 @@
   height: 14px;
 }
 
+.int-room-mic-dot,
 .int-room-mic-wave-pulse {
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.int-room-mic-dot.is-active,
+.int-room-mic-wave-pulse {
   background: #34d399;
-  box-shadow: 0 0 6px #34d399;
-  animation: intBlink 1s infinite alternate;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+}
+
+.int-room-mic-dot.is-muted {
+  background: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.5);
 }
 
 /* Stage Messages Container */

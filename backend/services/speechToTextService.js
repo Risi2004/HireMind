@@ -20,9 +20,11 @@ class SpeechToTextService {
    * @param {string} params.mimetype - MIME type (e.g. audio/webm)
    * @param {string} [params.prompt] - Context (question, role, skills) that helps Whisper spell technical terms
    * @param {string} [params.language] - ISO language code; defaults to English
-   * @returns {Promise<{success: boolean, text?: string, error?: string, latencyMs?: number, duration?: number}>}
+   * @param {string} [params.streamId] - Groups uploads of one answer for incremental transcription
+   * @param {boolean} [params.final] - false for mid-answer uploads that only pre-transcribe
+   * @returns {Promise<{success: boolean, text?: string, error?: string, latencyMs?: number, duration?: number, partial?: boolean}>}
    */
-  async transcribeAudio({ audioBuffer, filename = 'recording.webm', mimetype = 'audio/webm', prompt = '', language = 'en' }) {
+  async transcribeAudio({ audioBuffer, filename = 'recording.webm', mimetype = 'audio/webm', prompt = '', language = 'en', streamId = '', final = true }) {
     const startTime = Date.now();
 
     // 1. Basic validation
@@ -51,6 +53,10 @@ class SpeechToTextService {
       formData.append('file', blob, filename);
       if (prompt) formData.append('prompt', prompt);
       if (language) formData.append('language', language);
+      if (streamId) {
+        formData.append('stream_id', streamId);
+        formData.append('final', final ? 'true' : 'false');
+      }
 
       const response = await fetch(`${AI_SERVICE_URL}/voice/transcribe`, {
         method: 'POST',
@@ -73,6 +79,18 @@ class SpeechToTextService {
       }
 
       const result = await response.json();
+
+      if (!final && result.status !== 'error') {
+        // Mid-answer upload: an empty result just means nothing was committed yet
+        return {
+          success: true,
+          partial: true,
+          // false when the AI service uses a hosted provider that cannot reuse partial uploads
+          incremental: result.incremental !== false,
+          text: (result.text || '').trim(),
+          latencyMs: totalLatency,
+        };
+      }
 
       if (result.status === 'error' || !result.text || !result.text.trim()) {
         console.warn('[SpeechToTextService] [STT_COMPLETED] Empty or invalid transcription received.');

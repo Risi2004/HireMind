@@ -82,6 +82,10 @@ services:
         sync: false
       - key: GEMINI_MODEL_NAME
         value: gemini-2.0-flash
+      # Hosted Whisper via OpenRouter: the free plan (512 MB RAM, a fraction of a CPU) is far too
+      # small to run Whisper locally. Use STT_PROVIDER=local only on a host with a GPU or many cores.
+      - key: STT_PROVIDER
+        value: remote
       - key: STT_MODEL
         value: openai/whisper-large-v3-turbo
       - key: TTS_MODEL
