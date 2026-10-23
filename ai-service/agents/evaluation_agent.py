@@ -506,10 +506,22 @@ PER_ANSWER_SYSTEM_INSTRUCTION = (
     "- 60-74: relevant with some concrete details, but missing important reasoning, depth or parts of the question.\n"
     "- 75-89: specific, correct and well reasoned; minor gaps only.\n"
     "- 90-100: exceptional depth, precise, with clear reasoning and outcomes.\n\n"
-    "IMPROVED ANSWER: write a short model answer (max 80 words) that BUILDS ON the candidate's own "
-    "content and fixes the gaps you listed. Do not invent experience: never state in the first person a fix, "
-    "tool, number or result the candidate did not mention. Phrase such additions as placeholders the candidate "
-    "fills in, e.g. '[how you prevented the race, e.g. a version in the cache key]' or '[your result]'.\n\n"
+    "EXAMPLE ANSWER (the candidate will practise saying it, so it must be a complete, strong answer):\n"
+    "- Write what an excellent candidate for this role and difficulty would say out loud to THIS question: "
+    "first person, natural spoken style, 90-150 words, following the structure you recommend, and covering "
+    "every key point you list.\n"
+    "- Conceptual / technical / design questions (explain, compare, how would you design or debug): give a "
+    "complete, technically correct answer using general knowledge; do not leave the substance as placeholders.\n"
+    "- Experience / behavioral / project questions: build on the candidate's own story and fix the gaps you "
+    "listed, explaining the approach in full (what was done and why).\n"
+    "- NEVER INVENT THE CANDIDATE'S EXPERIENCE, in any question type. Anything about THEIR work that they did "
+    "not say (numbers, metrics, durations, results, settings, team size, other projects or modules) must be a "
+    "bracketed placeholder with a hint. Only general technical facts may be stated directly.\n"
+    "  BAD: 'This cut p95 latency from 800ms to 120ms.' (made-up result)\n"
+    "  GOOD: 'This cut p95 latency [from X ms to Y ms - your measured result].'\n"
+    "  BAD: 'I set a 10-minute TTL.'  GOOD: 'I set a TTL of [your TTL, e.g. 10 minutes] because [reason].'\n"
+    "  Use 1-4 placeholders where needed; never fill them with numbers yourself.\n"
+    "- KEY POINTS: 3-5 short points that any strong answer to this question must cover.\n\n"
     "Respond with ONLY this JSON object (no markdown, no extra keys):\n"
     "{\n"
     '  "overallScore": <int>,\n'
@@ -524,7 +536,11 @@ PER_ANSWER_SYSTEM_INSTRUCTION = (
     '  "strengths": ["<1-2 grounded items, max 30 words each; empty list if none>"],\n'
     '  "areas_for_improvement": ["<1-2 specific gaps, max 30 words each>"],\n'
     '  "actionable_suggestions": ["<1-2 concrete next steps, max 25 words each>"],\n'
-    '  "improved_answer_guidance": {"structure": "<short outline>", "example_model_answer": "<max 80 words>"}\n'
+    '  "improved_answer_guidance": {\n'
+    '    "structure": "<short outline, e.g. Context -> Approach -> Trade-off -> Result>",\n'
+    '    "key_points": ["<3-5 items, max 12 words each>"],\n'
+    '    "example_model_answer": "<90-150 words>"\n'
+    "  }\n"
     "}"
 )
 
@@ -585,8 +601,12 @@ def _normalize_answer_feedback(parsed: Dict[str, Any]) -> Optional[Dict[str, Any
     if isinstance(guidance_raw, dict):
         structure = str(guidance_raw.get("structure") or "").strip()
         example = str(guidance_raw.get("example_model_answer") or guidance_raw.get("exampleAnswer") or "").strip()
+        key_points = _clean_text_list(guidance_raw.get("key_points") or guidance_raw.get("keyPoints"), limit=5)
         if structure:
             guidance["structure"] = structure
+        if key_points:
+            guidance["key_points"] = key_points
+            guidance["keyPoints"] = key_points
         if example:
             guidance["example_model_answer"] = example
             guidance["exampleAnswer"] = example

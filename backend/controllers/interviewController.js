@@ -1671,6 +1671,10 @@ exports.submitLiveAnswer = async (req, res) => {
       feedback: isFeedbackMode ? feedbackData : null,
       spokenFeedback,
       feedbackAudioUrl,
+      // Voice Feedback Mode: the detailed evaluation (with an example answer) is still being
+      // generated; the client fetches it from /answer-feedback/:messageId when ready.
+      feedbackPending: Boolean(fullFeedbackPromise && spokenFeedbackPromise && savedCandidateMsgId),
+      candidateMessageId: savedCandidateMsgId ? String(savedCandidateMsgId) : null,
       questionBeingAnswered,
       candidateAnswer: answer.trim(),
       nextQuestion,
@@ -1693,6 +1697,37 @@ exports.submitLiveAnswer = async (req, res) => {
       await InterviewSession.updateOne({ sessionId: req.params.sessionId }, { $set: { 'interviewState.isProcessing': false } });
     } catch (_) {}
     return res.status(500).json({ success: false, message: 'Failed to process interview answer', error: error.message });
+  }
+};
+
+/**
+ * Detailed feedback saved for one candidate answer (voice Feedback Mode generates it in the
+ * background after the turn response). Read-only; ready=false until it has been stored.
+ * GET /api/interview/:sessionId/answer-feedback/:messageId
+ */
+exports.getAnswerFeedback = async (req, res) => {
+  try {
+    const { sessionId, messageId } = req.params;
+    const session = await InterviewSession.findOne({ sessionId }, { userId: 1, chatMessages: 1 });
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Interview session not found.' });
+    }
+    if (session.userId && req.user?._id && session.userId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized access to this session.' });
+    }
+
+    const message = (session.chatMessages || []).find(
+      (m) => m.role === 'candidate' && String(m._id) === String(messageId)
+    );
+    if (!message) {
+      return res.status(404).json({ success: false, message: 'Answer not found.' });
+    }
+
+    const feedback = message.feedback || null;
+    return res.status(200).json({ success: true, ready: Boolean(feedback), feedback });
+  } catch (error) {
+    console.error('[Interview Controller] Error loading answer feedback:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load answer feedback.' });
   }
 };
 
@@ -2076,6 +2111,7 @@ exports.transcribeCandidateVoice = async (req, res) => {
         success: false,
         error: result.error || 'STT_FAILED',
         message: result.message || "We couldn't clearly capture that answer. Please try again.",
+        detail: result.detail || null,
         latencyMs: result.latencyMs,
       });
     }
