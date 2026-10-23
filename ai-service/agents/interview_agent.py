@@ -193,7 +193,7 @@ class InterviewAgent:
         "13. CLOSING BEHAVIOR:\n"
         "   - Near completion, invite candidate questions. Conclude warmly and professionally as an interview simulation. Never make promises about real-world hiring decisions, offers, or next steps.\n"
         "14. DURATION & PACING PRINCIPLES (CRITICAL):\n"
-        "   - TARGET DURATION IS THE GOAL: The selected duration (15m, 30m, 60m) is the TARGET INTERVIEW EXPERIENCE, not merely an upper ceiling to exit as soon as stages are touched.\n"
+        "   - TARGET DURATION IS THE GOAL: The selected duration (15m, 30m, 45m, 60m) is the TARGET INTERVIEW EXPERIENCE, not merely an upper ceiling to exit as soon as stages are touched.\n"
         "   - DO NOT END EARLY: Touching each stage or objective once DOES NOT mean the interview is finished. If substantial target time remains (less than 85-90% of target duration elapsed), you MUST NOT end the interview.\n"
         "   - USE REMAINING TIME TO INCREASE DEPTH: When target time remains, intelligently deepen the conversation:\n"
         "     * Probe implementation details, system architecture, and concrete code/data flow.\n"
