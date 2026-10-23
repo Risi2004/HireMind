@@ -86,7 +86,7 @@ export default function NewInterview() {
   const fileInputRef = useRef(null)
   const isLoadedRef = useRef(false)
 
-  // Temporary lock: Only Full Interview, Intermediate difficulty, and 30 min duration are currently available
+  // Temporary lock: Only Full Interview and Intermediate difficulty are locked; interview durations (15m, 30m, 45m, 60m) are fully enabled
   useEffect(() => {
     if (interviewType !== 'Full Interview') {
       setInterviewType('Full Interview')
@@ -94,7 +94,8 @@ export default function NewInterview() {
     if (difficulty !== 'Intermediate') {
       setDifficulty('Intermediate')
     }
-    if (duration !== '30 min') {
+    const allowedDurations = ['15 min', '30 min', '45 min', '60 min']
+    if (!allowedDurations.includes(duration)) {
       setDuration('30 min')
     }
   }, [interviewType, difficulty, duration])
@@ -113,7 +114,7 @@ export default function NewInterview() {
       if (cached.interviewType) setInterviewType(cached.interviewType === 'Full Interview' ? cached.interviewType : 'Full Interview')
       if (cached.interviewMode) setInterviewMode(cached.interviewMode)
       if (cached.difficulty) setDifficulty(cached.difficulty === 'Intermediate' ? cached.difficulty : 'Intermediate')
-      if (cached.duration) setDuration(cached.duration === '30 min' ? cached.duration : '30 min')
+      if (cached.duration) setDuration(['15 min', '30 min', '45 min', '60 min'].includes(cached.duration) ? cached.duration : '30 min')
       if (cached.uploadedResume) setUploadedResume(cached.uploadedResume)
       if (cached.resumeAnalysis) setResumeAnalysis(cached.resumeAnalysis)
       if (cached.jdAnalysis) setJdAnalysis(cached.jdAnalysis)
@@ -217,7 +218,7 @@ export default function NewInterview() {
     if (s.interviewType) setInterviewType(s.interviewType === 'Full Interview' ? s.interviewType : 'Full Interview')
     if (s.interviewMode) setInterviewMode(s.interviewMode)
     if (s.difficulty) setDifficulty(s.difficulty === 'Intermediate' ? s.difficulty : 'Intermediate')
-    if (s.duration) setDuration(s.duration === '30 min' ? s.duration : '30 min')
+    if (s.duration) setDuration(['15 min', '30 min', '45 min', '60 min'].includes(s.duration) ? s.duration : '30 min')
     if (s.resumeFileName) setUploadedResume(s.resumeFileName.replace(/^resumes\//, ''))
     if (s.jdAnalysis) setJdAnalysis(s.jdAnalysis)
     if (s.userFacingPlan || s.interviewPlan) {
@@ -1422,27 +1423,17 @@ export default function NewInterview() {
                 )}
               </div>
               <div className="new-int-pills-row">
-                {['15 min', '30 min', '60 min'].map((dur) => {
-                  const isBlocked = dur !== '30 min'
-                  return (
-                    <button
-                      key={dur}
-                      type="button"
-                      disabled={isOptionsLocked || isBlocked}
-                      title={isBlocked ? 'Temporarily blocked' : undefined}
-                      className={`new-int-pill ${duration === dur ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''} ${isBlocked ? 'is-blocked' : ''}`}
-                      onClick={() => !isBlocked && setDuration(dur)}
-                    >
-                      {isBlocked && (
-                        <svg className="new-int-pill-lock-icon" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                        </svg>
-                      )}
-                      <span>{dur}</span>
-                    </button>
-                  )
-                })}
+                {['15 min', '30 min', '45 min', '60 min'].map((dur) => (
+                  <button
+                    key={dur}
+                    type="button"
+                    disabled={isOptionsLocked}
+                    className={`new-int-pill ${duration === dur ? 'is-active' : ''} ${isOptionsLocked ? 'is-disabled' : ''}`}
+                    onClick={() => setDuration(dur)}
+                  >
+                    <span>{dur}</span>
+                  </button>
+                ))}
               </div>
             </div>
 

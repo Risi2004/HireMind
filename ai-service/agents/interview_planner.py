@@ -104,6 +104,7 @@ class InterviewPlannerAgent:
         "6. Calibrate question count and depth to the selected duration and difficulty:\n"
         "   - 15 min: 4-6 questions across 3-4 stages.\n"
         "   - 30 min: 8-12 questions across 5-6 stages.\n"
+        "   - 45 min: 11-15 questions across 5-6 stages.\n"
         "   - 60 min: 14-18 questions across 6-7 stages.\n"
         "7. Support non-technical roles (e.g. Marketing, Business Analyst, HR, Finance) equally well when provided.\n"
         "8. You MUST respond ONLY with a complete, fully closed valid JSON object matching this schema:\n"
@@ -809,6 +810,272 @@ class InterviewPlannerAgent:
                         name="Behavioral Fit & Closing",
                         order=5,
                         durationMinutes=4,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Collaboration", "Candidate Q&A"],
+                        objectives=["Evaluate team fit and answer candidate questions"],
+                        questionIntents=["Assess collaboration style and invite candidate questions"]
+                    ),
+                ]
+        elif duration_minutes <= 45:
+            # 45-Minute In-Depth Plan (5-6 stages, 11-14 questions)
+            if interview_type == "HR & Behavioral":
+                stages = [
+                    StageSchema(
+                        id="stage_intro",
+                        name="Introduction & Career Narrative",
+                        order=1,
+                        durationMinutes=4,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Personal Background", "Professional Growth"],
+                        objectives=["Understand candidate trajectory and communication style"],
+                        questionIntents=["Review career transitions and motivation for this role"]
+                    ),
+                    StageSchema(
+                        id="stage_teamwork",
+                        name="Teamwork & Cross-functional Collaboration",
+                        order=2,
+                        durationMinutes=10,
+                        targetQuestionCount=3,
+                        difficulty=difficulty.lower(),
+                        topics=["Cross-functional Collaboration", "Communication", "Stakeholder Alignment"],
+                        objectives=["Evaluate ability to work in multidisciplinary teams under pressure"],
+                        questionIntents=["Discuss working with diverse stakeholders and handling conflicting priorities"]
+                    ),
+                    StageSchema(
+                        id="stage_adversity",
+                        name="Conflict, Feedback & Adaptability",
+                        order=3,
+                        durationMinutes=11,
+                        targetQuestionCount=3,
+                        difficulty=difficulty.lower(),
+                        topics=["Constructive Feedback", "Handling Ambiguity", "Resilience"],
+                        objectives=["Assess resilience, emotional intelligence, and reception to critical feedback"],
+                        questionIntents=["Explore navigation of shifting organizational goals and direct disagreements"]
+                    ),
+                    StageSchema(
+                        id="stage_leadership",
+                        name="Initiative, Ownership & Impact",
+                        order=4,
+                        durationMinutes=12,
+                        targetQuestionCount=3,
+                        difficulty=difficulty.lower(),
+                        topics=["Driving Outcomes", "Problem Solving", "Mentorship"],
+                        objectives=["Assess autonomous initiative, accountability, and leadership mindset"],
+                        questionIntents=["Examine high-impact projects where candidate demonstrated strong ownership"]
+                    ),
+                    StageSchema(
+                        id="stage_closing",
+                        name="Company Fit & Candidate Questions",
+                        order=5,
+                        durationMinutes=8,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=["Culture & Values", "Closing Q&A"],
+                        objectives=["Ensure mutual alignment and comprehensively address candidate questions"],
+                        questionIntents=["Discuss team mission alignment and field candidate inquiries"]
+                    ),
+                ]
+            elif interview_type == "Case & Situational":
+                stages = [
+                    StageSchema(
+                        id="stage_intro",
+                        name="Introduction & Problem Context",
+                        order=1,
+                        durationMinutes=4,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Role Context", "Framing"],
+                        objectives=["Set problem-solving baseline and outline case format"],
+                        questionIntents=["Outline interview format and confirm candidate focus areas"]
+                    ),
+                    StageSchema(
+                        id="stage_scenario_1",
+                        name="Operational Case Scenario & System Architecture",
+                        order=2,
+                        durationMinutes=15,
+                        targetQuestionCount=4,
+                        difficulty=difficulty.lower(),
+                        topics=["Requirements Clarification", "Structured Thinking", "System Breakdown"],
+                        objectives=["Assess structured thinking, edge case identification, and architectural decomposition"],
+                        questionIntents=["Present complex real-world scenario and probe end-to-end design choices"]
+                    ),
+                    StageSchema(
+                        id="stage_tradeoffs",
+                        name="Trade-off Analysis, Scalability & Incident Response",
+                        order=3,
+                        durationMinutes=16,
+                        targetQuestionCount=4,
+                        difficulty=difficulty.lower(),
+                        topics=["Trade-offs", "Edge Cases", "Scalability", "Risk Mitigation"],
+                        objectives=["Evaluate decision-making under resource constraints and unexpected production incidents"],
+                        questionIntents=["Test handling of shifting requirements, latency spikes, and reliability bottlenecks"]
+                    ),
+                    StageSchema(
+                        id="stage_closing",
+                        name="Retrospective, Reflection & Conclusion",
+                        order=4,
+                        durationMinutes=10,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=["Reflections", "Candidate Q&A"],
+                        objectives=["Reflect on proposed solutions, lessons learned, and wrap up"],
+                        questionIntents=["Evaluate self-reflection and answer questions about the role"]
+                    ),
+                ]
+            elif interview_type == "Full Interview":
+                is_tech = candidate.get("is_technical_role", True)
+                coding_stage_name = "Interactive Coding Challenge" if is_tech else "Domain Logic & Analytical Challenge"
+                coding_topics = ["Data Structures & Algorithms", "Clean Code Implementation"] if is_tech else ["Quantitative Analysis", "Structured Logic"]
+                coding_intents = [
+                    "Present coding problem for candidate to write, run, and submit in the Code Editor",
+                    "Evaluate correctness, time/space complexity, and code quality"
+                ] if is_tech else ["Present domain analytical puzzle and evaluate reasoning"]
+
+                stages = [
+                    StageSchema(
+                        id="stage_intro",
+                        name="Introduction & Role Context",
+                        order=1,
+                        durationMinutes=3,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Candidate Profile", "Role Overview"],
+                        objectives=["Set conversational tone and outline agenda"],
+                        questionIntents=["Brief review of background and role interest"]
+                    ),
+                    StageSchema(
+                        id="stage_experience",
+                        name="CV Project Architecture Deep Dive",
+                        order=2,
+                        durationMinutes=8,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=[f"{project_name} Architecture", "Engineering Trade-offs"],
+                        objectives=["Directly probe architecture and implementation choices in candidate resume project"],
+                        questionIntents=[
+                            f"Explore architecture, data flow, and tech stack choices in {project_name}",
+                            "Discuss challenges faced and how candidate solved bottlenecks"
+                        ]
+                    ),
+                    StageSchema(
+                        id="stage_theory",
+                        name="Role-Based Theory & Core Principles",
+                        order=3,
+                        durationMinutes=8,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=[all_skills[0]] + (all_skills[1:3] if len(all_skills) > 1 else ["Core Principles"]),
+                        objectives=["Validate core theoretical depth (indexing, concurrency, memory, network protocols)"],
+                        questionIntents=[
+                            f"Probe intermediate principles of {all_skills[0]}",
+                            "Assess practical application and foundational knowledge"
+                        ]
+                    ),
+                    StageSchema(
+                        id="stage_scenario",
+                        name="Case Study & System Troubleshooting",
+                        order=4,
+                        durationMinutes=8,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=["Real-world Scenario", "Troubleshooting"],
+                        objectives=["Assess root cause analysis, incident response, and edge case resilience"],
+                        questionIntents=["Present a realistic high-stakes workplace or production issue and evaluate reasoning"]
+                    ),
+                    StageSchema(
+                        id="stage_coding",
+                        name=coding_stage_name,
+                        order=5,
+                        durationMinutes=10,
+                        targetQuestionCount=2,
+                        difficulty=difficulty.lower(),
+                        topics=coding_topics,
+                        objectives=["Assess hands-on coding, algorithmic problem-solving, and time/space complexity"],
+                        questionIntents=coding_intents
+                    ),
+                    StageSchema(
+                        id="stage_gk_behavioral",
+                        name="Industry GK, Trends & Collaboration",
+                        order=6,
+                        durationMinutes=5,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Industry Trends & Ecosystem", "Collaboration & Conflict"],
+                        objectives=["Evaluate domain awareness, technology trends, and interpersonal fit"],
+                        questionIntents=["Ask about modern industry trends, trade-offs, and team collaboration"]
+                    ),
+                    StageSchema(
+                        id="stage_closing",
+                        name="Summary & Candidate Questions",
+                        order=7,
+                        durationMinutes=3,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Role Expectations", "Candidate Q&A"],
+                        objectives=["Conclude interview professionally and address candidate questions"],
+                        questionIntents=["Invite candidate questions and provide clear closing summary"]
+                    ),
+                ]
+            else:
+                # Role-Specific / Skills Assessment (Default 45-min plan)
+                stages = [
+                    StageSchema(
+                        id="stage_intro",
+                        name="Introduction & Overview",
+                        order=1,
+                        durationMinutes=3,
+                        targetQuestionCount=1,
+                        difficulty=difficulty.lower(),
+                        topics=["Candidate Profile", "Role Overview"],
+                        objectives=["Set conversational tone and outline agenda"],
+                        questionIntents=["Brief review of background and role interest"]
+                    ),
+                    StageSchema(
+                        id="stage_experience",
+                        name="Experience & Project Deep Dive",
+                        order=2,
+                        durationMinutes=10,
+                        targetQuestionCount=3,
+                        difficulty=difficulty.lower(),
+                        topics=[f"{project_name} Architecture", "Personal Contributions"],
+                        objectives=["Assess candidate depth in past projects and engineering choices"],
+                        questionIntents=[
+                            f"Explore candidate contribution and technical choices in {project_name}",
+                            "Discuss challenges faced and how candidate debugged or solved them"
+                        ]
+                    ),
+                    StageSchema(
+                        id="stage_technical_core",
+                        name="Role-Specific Skills & Validation",
+                        order=3,
+                        durationMinutes=15,
+                        targetQuestionCount=4,
+                        difficulty=difficulty.lower(),
+                        topics=[all_skills[0]] + (all_skills[1:3] if len(all_skills) > 1 else ["Best Practices"]),
+                        objectives=["Validate core competencies required by the job description"],
+                        questionIntents=[
+                            f"Probe intermediate principles of {all_skills[0]}",
+                            "Assess practical application to real-world production environments"
+                        ]
+                    ),
+                    StageSchema(
+                        id="stage_problem_solving",
+                        name="Scenario & Problem Solving",
+                        order=4,
+                        durationMinutes=11,
+                        targetQuestionCount=3,
+                        difficulty=difficulty.lower(),
+                        topics=["Real-world Scenario", "Troubleshooting"],
+                        objectives=["Assess logical reasoning and resilience under edge cases"],
+                        questionIntents=["Present a practical issue and observe reasoning process"]
+                    ),
+                    StageSchema(
+                        id="stage_closing",
+                        name="Behavioral Fit & Closing",
+                        order=5,
+                        durationMinutes=6,
                         targetQuestionCount=1,
                         difficulty=difficulty.lower(),
                         topics=["Collaboration", "Candidate Q&A"],
