@@ -20,6 +20,7 @@ const {
   runCode,
   submitCodeSolution,
   retryAnswerEvaluation,
+  getAnswerFeedback,
 } = require('../controllers/interviewController');
 
 // Multer memory storage configuration for PDF / DOCX files up to 10MB
@@ -168,6 +169,7 @@ router.post('/:sessionId/code/submit', ...demoOwner, submitCodeSolution);
 router.post('/:sessionId/chat', ...demoOwner, sendChatMessage);
 router.post('/:sessionId/end', ...owner, manualEndLiveInterview);
 router.get('/:sessionId/evaluation', ...owner, getOrGenerateEvaluation);
+router.get('/:sessionId/answer-feedback/:messageId', ...owner, getAnswerFeedback);
 router.post('/:sessionId/evaluate', ...owner, getOrGenerateEvaluation);
 router.get('/my-sessions', protect, getMySessions);
 router.get('/:sessionId', ...owner, getSession);

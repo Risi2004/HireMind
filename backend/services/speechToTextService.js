@@ -69,11 +69,13 @@ class SpeechToTextService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[SpeechToTextService] [ERROR] AI Service STT failed with status ${response.status}:`, errorText.slice(0, 200));
+        console.error(`[SpeechToTextService] [ERROR] AI Service STT failed with status ${response.status} after ${totalLatency}ms:`, errorText.slice(0, 200));
         return {
           success: false,
           error: 'STT_FAILED',
           message: 'Speech recognition service encountered an error. Please try again.',
+          // Shown in the browser console so production fallbacks can be diagnosed
+          detail: `AI service returned HTTP ${response.status}`,
           latencyMs: totalLatency,
         };
       }
@@ -92,12 +94,30 @@ class SpeechToTextService {
         };
       }
 
-      if (result.status === 'error' || !result.text || !result.text.trim()) {
-        console.warn('[SpeechToTextService] [STT_COMPLETED] Empty or invalid transcription received.');
+      if (result.status === 'error') {
+        // e.g. "STT_FAILED: Provider returned error HTTP 401." or "STT_CONFIG_ERROR: ..."
+        const aiError = String(result.error || 'Unknown AI service STT error').slice(0, 200);
+        const isEmpty = aiError.startsWith('EMPTY_');
+        const log = isEmpty ? console.warn : console.error;
+        log(`[SpeechToTextService] [${isEmpty ? 'STT_COMPLETED' : 'ERROR'}] AI service STT error after ${totalLatency}ms: ${aiError}`);
+        return {
+          success: false,
+          error: isEmpty ? 'EMPTY_TRANSCRIPT' : 'STT_FAILED',
+          message: isEmpty
+            ? "We couldn't clearly capture that answer. Please try again."
+            : 'Speech recognition service encountered an error. Please try again.',
+          detail: aiError,
+          latencyMs: totalLatency,
+        };
+      }
+
+      if (!result.text || !result.text.trim()) {
+        console.warn(`[SpeechToTextService] [STT_COMPLETED] Empty transcription received after ${totalLatency}ms.`);
         return {
           success: false,
           error: 'EMPTY_TRANSCRIPT',
           message: "We couldn't clearly capture that answer. Please try again.",
+          detail: 'AI service returned empty text',
           latencyMs: totalLatency,
         };
       }
@@ -113,11 +133,14 @@ class SpeechToTextService {
       };
     } catch (err) {
       const totalLatency = Date.now() - startTime;
-      console.error('[SpeechToTextService] [ERROR] STT request failed:', err.message);
+      console.error(`[SpeechToTextService] [ERROR] STT request to AI service failed after ${totalLatency}ms:`, err.message);
       return {
         success: false,
         error: err.name === 'TimeoutError' ? 'STT_TIMEOUT' : 'STT_FAILED',
         message: 'Could not complete audio transcription. Please check your connection or try again.',
+        detail: err.name === 'TimeoutError'
+          ? `AI service did not answer within 35s`
+          : `Could not reach AI service: ${String(err.message || '').slice(0, 120)}`,
         latencyMs: totalLatency,
       };
     }

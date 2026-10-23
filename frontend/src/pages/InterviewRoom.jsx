@@ -77,6 +77,35 @@ const SILENCE_AUTO_SEND_MS = 3000
 const WHISPER_TIMEOUT_MS = 25000
 // How often the recording so far is uploaded for incremental transcription while speaking
 const PARTIAL_STT_INTERVAL_MS = 4000
+// Voice Feedback Mode: wait for the background evaluation (backend allows it 35s)
+const PRACTICE_GUIDANCE_POLL_MS = 3000
+const PRACTICE_GUIDANCE_MAX_ATTEMPTS = 15
+
+// Example answer + key points the candidate can practise from (voice Feedback Mode)
+const PracticeGuidance = ({ guidance }) => {
+  const keyPoints = guidance.key_points || guidance.keyPoints || []
+  return (
+    <details className="int-room-practice">
+      <summary className="int-room-practice__summary">Example answer to practise</summary>
+      {guidance.structure && (
+        <p className="int-room-practice__structure">
+          <strong>Structure:</strong> {guidance.structure}
+        </p>
+      )}
+      {keyPoints.length > 0 && (
+        <ul className="int-room-practice__points">
+          {keyPoints.map((point, idx) => <li key={idx}>{point}</li>)}
+        </ul>
+      )}
+      {guidance.example_model_answer && (
+        <blockquote className="int-room-practice__example">{guidance.example_model_answer}</blockquote>
+      )}
+      <p className="int-room-practice__note">
+        An example of a strong answer. Adapt it to what you actually did and fill in the [brackets] with your real details.
+      </p>
+    </details>
+  )
+}
 // After this much silence we start transcribing the recording in the background,
 // so the accurate (Whisper) transcript is usually ready when the answer is sent
 const SPECULATIVE_STT_DELAY_MS = 1000
@@ -727,6 +756,7 @@ export default function InterviewRoom() {
   const partialSttTimerRef = useRef(null)
   const partialSttInFlightRef = useRef(false)
   const incrementalSttDisabledRef = useRef(false)
+  const practiceGuidanceTimersRef = useRef(new Set())
   const speculativeTimerRef = useRef(null)
   // Interviewer messages waiting to be spoken after the current one (e.g. feedback, then question)
   const speechQueueRef = useRef([])
@@ -1591,6 +1621,9 @@ export default function InterviewRoom() {
           }
 
           speakInterviewerMessage(data.spokenFeedback, feedbackMsgId, data.feedbackAudioUrl)
+          if (data.feedbackPending && data.candidateMessageId) {
+            loadPracticeGuidance(data.candidateMessageId, feedbackMsgId)
+          }
           return
         }
 
@@ -1677,6 +1710,40 @@ export default function InterviewRoom() {
       setAiTyping(false)
     }
   }
+
+  // Voice Feedback Mode: the detailed evaluation (example answer, key points) is generated in
+  // the background after the turn, so fetch it when ready and attach it to the spoken feedback.
+  const loadPracticeGuidance = (candidateMessageId, feedbackMsgId, attempt = 0) => {
+    if (isTerminatedRef.current || attempt >= PRACTICE_GUIDANCE_MAX_ATTEMPTS) return
+    const timerId = setTimeout(async () => {
+      practiceGuidanceTimersRef.current.delete(timerId)
+      if (isTerminatedRef.current) return
+      try {
+        const activeToken = localStorage.getItem('hiremind_token') || localStorage.getItem('token')
+        const res = await fetch(getApiUrl(`/api/interview/${interviewId}/answer-feedback/${candidateMessageId}`), {
+          headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+        })
+        const data = res.ok ? await res.json() : null
+        if (data?.ready) {
+          const guidance = data.feedback?.improved_answer_guidance
+          if (guidance && (guidance.example_model_answer || guidance.key_points?.length)) {
+            setTranscriptMessages((prev) => prev.map((m) => (m.id === feedbackMsgId ? { ...m, practiceGuidance: guidance } : m)))
+          }
+          return
+        }
+      } catch { /* retried below */ }
+      loadPracticeGuidance(candidateMessageId, feedbackMsgId, attempt + 1)
+    }, PRACTICE_GUIDANCE_POLL_MS)
+    practiceGuidanceTimersRef.current.add(timerId)
+  }
+
+  useEffect(() => {
+    const timers = practiceGuidanceTimersRef.current
+    return () => {
+      timers.forEach((timerId) => clearTimeout(timerId))
+      timers.clear()
+    }
+  }, [])
 
   // Continue to the next question from Feedback Coaching Panel
   const handleContinueFromFeedback = () => {
@@ -1830,8 +1897,17 @@ export default function InterviewRoom() {
         body: formData,
         signal: controller.signal,
       })
-      if (!res.ok) return ''
-      const data = await res.json()
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data || data.success === false) {
+        // Surface why Whisper failed; the caller then falls back to the browser's live text
+        console.warn(
+          `[VoiceMode] Whisper transcription failed (HTTP ${res.status}${final ? '' : ', partial upload'}):`,
+          data?.error || 'no response body',
+          '-',
+          data?.detail || data?.message || '',
+        )
+        return ''
+      }
       if (data.partial && data.incremental === false) {
         // Hosted STT cannot reuse partial uploads; stop sending them for this interview
         incrementalSttDisabledRef.current = true
@@ -1840,9 +1916,13 @@ export default function InterviewRoom() {
           partialSttTimerRef.current = null
         }
       }
-      return data.success === false ? '' : (data.text || '').trim()
+      return (data.text || '').trim()
     } catch (err) {
-      if (err.name !== 'AbortError') console.warn('[VoiceMode] Whisper transcription notice:', err)
+      if (err.name === 'AbortError') {
+        console.warn(`[VoiceMode] Whisper transcription timed out after ${timeoutMs / 1000}s${final ? '' : ' (partial upload)'}`)
+      } else {
+        console.warn('[VoiceMode] Whisper transcription request failed:', err)
+      }
       return ''
     } finally {
       clearTimeout(timeoutId)
@@ -1976,6 +2056,15 @@ export default function InterviewRoom() {
         if (voiceStateRef.current !== VOICE_STATES.TRANSCRIBING) return
         const cleanWhisper = (whisperText || '').trim()
         const bestText = chooseBestTranscript(liveText, cleanWhisper)
+        if (!cleanWhisper) {
+          console.warn('[VoiceMode] No Whisper text (see the warning above); using the browser live transcript.')
+        } else if (bestText !== cleanWhisper) {
+          console.warn(
+            `[VoiceMode] Whisper text rejected (${countWords(cleanWhisper)} words vs ${countWords(liveText)} live, or looked like a hallucination); using the browser live transcript.`,
+          )
+        } else {
+          console.info('[VoiceMode] Using the Whisper transcript.')
+        }
         const finalAccurate = correctTechTerms(bestText)
         if (finalAccurate) {
           updateLiveTranscript(finalAccurate)
@@ -3150,6 +3239,7 @@ export default function InterviewRoom() {
                           <span className="int-room-feedback-inline-label">Coaching feedback</span>
                         )}
                         <p className="int-room-chat-msg__text">{msg.text}</p>
+                        {msg.practiceGuidance && <PracticeGuidance guidance={msg.practiceGuidance} />}
                         {/* Inline Audio Replay Button for AI Questions */}
                         {msg.sender === 'ai' && (
                           <button
@@ -4603,10 +4693,24 @@ export default function InterviewRoom() {
                       </div>
                     )}
 
+                    {(activeFeedback.improved_answer_guidance.key_points || []).length > 0 && (
+                      <div className="int-room-feedback-model-structure">
+                        <strong>Key points a strong answer covers:</strong>
+                        <ul className="int-room-feedback-key-points">
+                          {activeFeedback.improved_answer_guidance.key_points.map((point, idx) => (
+                            <li key={idx}>{point}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
                     {activeFeedback.improved_answer_guidance.example_model_answer && (
                       <div className="int-room-feedback-model-quote">
-                        <div className="int-room-feedback-model-quote-lbl">ILLUSTRATIVE MODEL ANSWER:</div>
+                        <div className="int-room-feedback-model-quote-lbl">EXAMPLE ANSWER TO PRACTISE:</div>
                         <p>{activeFeedback.improved_answer_guidance.example_model_answer}</p>
+                        <p className="int-room-feedback-model-quote-note">
+                          Adapt it to what you actually did and fill in the [brackets] with your real details.
+                        </p>
                       </div>
                     )}
                   </div>
